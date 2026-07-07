@@ -114,7 +114,12 @@ internal sealed class W365Session
             : builder.WithAuthority(AzureCloudInstance.AzurePublic, tenantId);
 
         var application = builder.Build();
-        var storageProperties = new StorageCreationPropertiesBuilder("w365cli-native.msalcache", "W365CliNative")
+        var cacheDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "W365CliNative");
+        Directory.CreateDirectory(cacheDirectory);
+
+        var storageProperties = new StorageCreationPropertiesBuilder("w365cli-native.msalcache", cacheDirectory)
             .Build();
         var cacheHelper = await MsalCacheHelper.CreateAsync(storageProperties);
         cacheHelper.RegisterCache(application.UserTokenCache);

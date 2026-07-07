@@ -110,9 +110,7 @@ internal sealed class W365CliApp
             return;
         }
 
-        var cloudPcs = await AnsiConsole.Status()
-            .Spinner(Spinner.Known.Dots)
-            .StartAsync("Loading Cloud PCs...", async _ => await _session.Graph.GetCloudPcsAsync());
+        var cloudPcs = await LoadCloudPcsAsync();
 
         if (cloudPcs.Count == 0)
         {
@@ -121,27 +119,69 @@ internal sealed class W365CliApp
             return;
         }
 
+        var selectedIndex = 0;
+        var filter = string.Empty;
+
         while (true)
         {
-            RenderHeader();
-            var cloudPcWidths = GetCloudPcWidths();
-            var cloudPc = SelectFromTable(
-                title: "Windows 365 Cloud PCs",
-                header: Row("Name", cloudPcWidths.Name, "Status", cloudPcWidths.Status, "Type", cloudPcWidths.Type, "User", cloudPcWidths.User, "Service plan", cloudPcWidths.ServicePlan),
-                items: cloudPcs,
-                rowFactory: pc => Row(
-                    pc.Name, cloudPcWidths.Name,
-                    pc.Status ?? "-", cloudPcWidths.Status,
-                    pc.ProvisioningType ?? "-", cloudPcWidths.Type,
-                    pc.UserPrincipalName ?? "-", cloudPcWidths.User,
-                    pc.ServicePlanName ?? "-", cloudPcWidths.ServicePlan));
-
-            if (cloudPc is null)
+            var visibleCloudPcs = FilterCloudPcs(cloudPcs, filter);
+            if (selectedIndex >= visibleCloudPcs.Count)
             {
-                return;
+                selectedIndex = Math.Max(0, visibleCloudPcs.Count - 1);
             }
 
-            ShowCloudPcDetails(cloudPc);
+            RenderCloudPcBrowser(cloudPcs, visibleCloudPcs, selectedIndex, filter);
+            var key = Console.ReadKey(intercept: true);
+
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(Math.Max(0, visibleCloudPcs.Count - 1), selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(Math.Max(0, visibleCloudPcs.Count - 1), selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = Math.Max(0, visibleCloudPcs.Count - 1);
+                    break;
+                case ConsoleKey.Enter:
+                    if (visibleCloudPcs.Count > 0)
+                    {
+                        ShowCloudPcDetails(visibleCloudPcs[selectedIndex]);
+                    }
+                    break;
+                case ConsoleKey.R:
+                    cloudPcs = await LoadCloudPcsAsync();
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.C:
+                    filter = string.Empty;
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
+                    {
+                        filter = PromptFilter();
+                        selectedIndex = 0;
+                    }
+                    else if (key.KeyChar == 'q' || key.KeyChar == 'Q' || key.KeyChar == 'b' || key.KeyChar == 'B')
+                    {
+                        return;
+                    }
+                    break;
+            }
         }
     }
 
@@ -217,6 +257,179 @@ internal sealed class W365CliApp
                 .AddChoices(rows));
 
         return selected.IsBack ? default : selected.Item;
+    }
+
+    private async Task<IReadOnlyList<CloudPcSummary>> LoadCloudPcsAsync()
+    {
+        return await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading Cloud PCs...", async _ => await _session.Graph.GetCloudPcsAsync());
+    }
+
+    private void RenderCloudPcBrowser(
+        IReadOnlyList<CloudPcSummary> allCloudPcs,
+        IReadOnlyList<CloudPcSummary> visibleCloudPcs,
+        int selectedIndex,
+        string filter)
+    {
+        AnsiConsole.Clear();
+
+        var selectedCloudPc = visibleCloudPcs.Count > 0 ? visibleCloudPcs[selectedIndex] : null;
+        var grid = new Grid();
+        grid.AddColumn();
+        grid.AddColumn();
+        grid.AddRow(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter), CreateCloudPcSidePanel(selectedCloudPc));
+
+        RenderCompactHeader();
+        AnsiConsole.Write(CreateCloudPcSummaryPanel(allCloudPcs, visibleCloudPcs, filter));
+        AnsiConsole.Write(grid);
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | / filter | C clear | R refresh | Esc back[/]");
+    }
+
+    private void RenderCompactHeader()
+    {
+        if (_session.IsConnected)
+        {
+            var tenantText = _session.TenantName is not null
+                ? $"{_session.TenantName} ({_session.TenantId})"
+                : _session.TenantId ?? "unknown";
+            AnsiConsole.MarkupLine($"[cyan]W365 CLI Native[/] [grey]v0.1.0 | Bradley Wyatt[/]   [green]Connected[/] [grey]{Markup.Escape(tenantText)}[/]");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine("[cyan]W365 CLI Native[/] [grey]v0.1.0 | Bradley Wyatt[/]   [yellow]Not connected[/]");
+        }
+        AnsiConsole.WriteLine();
+    }
+
+    private static Panel CreateCloudPcSummaryPanel(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, string filter)
+    {
+        var statusSummary = string.Join("  ", allCloudPcs
+            .GroupBy(pc => pc.Status ?? "unknown", StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key)
+            .Select(group => $"{group.Key}: {group.Count()}"));
+
+        var typeSummary = string.Join("  ", allCloudPcs
+            .GroupBy(pc => pc.ProvisioningType ?? "unknown", StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key)
+            .Select(group => $"{group.Key}: {group.Count()}"));
+
+        var content = new Rows(
+            new Markup($"[bold]Total[/] {allCloudPcs.Count}   [bold]Visible[/] {visibleCloudPcs.Count}   [bold]Filter[/] {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}"),
+            new Markup($"[bold]Status[/] {Markup.Escape(statusSummary)}"),
+            new Markup($"[bold]Type[/] {Markup.Escape(typeSummary)}"));
+
+        return new Panel(content).Border(BoxBorder.Rounded).Header("Cloud PC fleet");
+    }
+
+    private static Table CreateCloudPcTable(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, int selectedIndex, string filter)
+    {
+        var widths = GetCloudPcWidths();
+        var table = new Table()
+            .Title("Cloud PCs")
+            .Border(TableBorder.Rounded)
+            .AddColumn(" ")
+            .AddColumn("Status")
+            .AddColumn("Type")
+            .AddColumn("Name")
+            .AddColumn("User")
+            .AddColumn("Service plan");
+
+        if (visibleCloudPcs.Count == 0)
+        {
+            table.AddRow("-", "-", "-", "[grey]No Cloud PCs match the current filter.[/]", "-", "-");
+            return table;
+        }
+
+        var pageSize = Math.Max(8, Math.Min(18, Console.WindowHeight - 15));
+        var start = Math.Max(0, Math.Min(selectedIndex - pageSize / 2, Math.Max(0, visibleCloudPcs.Count - pageSize)));
+        var end = Math.Min(visibleCloudPcs.Count - 1, start + pageSize - 1);
+
+        for (var index = start; index <= end; index++)
+        {
+            var pc = visibleCloudPcs[index];
+            var selected = index == selectedIndex;
+            table.AddRow(
+                selected ? "[black on aqua]>[/]" : " ",
+                selected ? Selected(Markup.Escape(Fit(pc.Status ?? "unknown", 12))) : StatusMarkup(pc.Status),
+                selected ? Selected(Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type)),
+                selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name)),
+                selected ? Selected(Markup.Escape(Fit(pc.UserPrincipalName ?? "-", widths.User))) : Markup.Escape(Fit(pc.UserPrincipalName ?? "-", widths.User)),
+                selected ? Selected(Markup.Escape(Fit(pc.ServicePlanName ?? "-", widths.ServicePlan))) : Markup.Escape(Fit(pc.ServicePlanName ?? "-", widths.ServicePlan)));
+        }
+
+        return table;
+    }
+
+    private static Panel CreateCloudPcSidePanel(CloudPcSummary? cloudPc)
+    {
+        if (cloudPc is null)
+        {
+            return new Panel("[grey]No Cloud PC selected.[/]")
+                .Header("Details")
+                .Border(BoxBorder.Rounded);
+        }
+
+        var content = new Rows(
+            new Markup($"[bold]Name[/]\n{Markup.Escape(cloudPc.Name)}"),
+            new Markup($"[bold]Status[/] {StatusMarkup(cloudPc.Status)}"),
+            new Markup($"[bold]Type[/] {Markup.Escape(cloudPc.ProvisioningType ?? "-")}"),
+            new Markup($"[bold]User[/]\n{Markup.Escape(cloudPc.UserPrincipalName ?? "-")}"),
+            new Markup($"[bold]Service plan[/]\n{Markup.Escape(cloudPc.ServicePlanName ?? "-")}"),
+            new Markup($"[bold]Cloud PC ID[/]\n[grey]{Markup.Escape(cloudPc.Id)}[/]"),
+            new Markup("[bold]Available actions[/]\n[grey]Details, resize, snapshots, restart, sync, reprovision[/]"));
+
+        return new Panel(content)
+            .Header("Selected Cloud PC")
+            .Border(BoxBorder.Rounded);
+    }
+
+    private static IReadOnlyList<CloudPcSummary> FilterCloudPcs(IReadOnlyList<CloudPcSummary> cloudPcs, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return cloudPcs;
+        }
+
+        return cloudPcs
+            .Where(pc =>
+                Contains(pc.Name, filter) ||
+                Contains(pc.Status, filter) ||
+                Contains(pc.ProvisioningType, filter) ||
+                Contains(pc.UserPrincipalName, filter) ||
+                Contains(pc.ServicePlanName, filter))
+            .ToArray();
+    }
+
+    private static bool Contains(string? value, string filter)
+    {
+        return value?.Contains(filter, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static string PromptFilter()
+    {
+        AnsiConsole.WriteLine();
+        return AnsiConsole.Ask<string>("Filter:");
+    }
+
+    private static string StatusMarkup(string? status)
+    {
+        var text = status ?? "unknown";
+        var color = text.ToLowerInvariant() switch
+        {
+            "provisioned" or "available" or "ready" => "green",
+            "provisioning" or "pending" or "inprogress" => "yellow",
+            "failed" or "error" => "red",
+            "ingraceperiod" => "magenta",
+            _ => "grey"
+        };
+
+        return $"[{color}]{Markup.Escape(Fit(text, 12))}[/]";
+    }
+
+    private static string Selected(string escapedText)
+    {
+        return $"[black on aqua]{escapedText}[/]";
     }
 
     private static string Row(params object[] valuesAndWidths)
