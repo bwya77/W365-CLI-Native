@@ -29,6 +29,9 @@ internal sealed record CloudPcSummary
     [JsonPropertyName("servicePlanName")]
     public string? ServicePlanName { get; init; }
 
+    [JsonPropertyName("managedDeviceId")]
+    public string? ManagedDeviceId { get; init; }
+
     [JsonIgnore]
     public string Name => !string.IsNullOrWhiteSpace(DisplayName)
         ? DisplayName!

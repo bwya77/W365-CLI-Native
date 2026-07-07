@@ -23,7 +23,7 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsAsync()
     {
         var items = await GetPagedAsync<CloudPcSummary>(
-            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,provisioningType,userPrincipalName,servicePlanName");
+            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,provisioningType,userPrincipalName,servicePlanName,managedDeviceId");
 
         return items
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -47,6 +47,42 @@ internal sealed class W365GraphClient
             "organization?$select=id,displayName");
 
         return items.FirstOrDefault();
+    }
+
+    public async Task PublishCloudAppAsync(string cloudAppId)
+    {
+        await PostJsonAsync("deviceManagement/virtualEndpoint/cloudApps/publish", new
+        {
+            cloudAppIds = new[] { cloudAppId }
+        });
+    }
+
+    public async Task UnpublishCloudAppAsync(string cloudAppId)
+    {
+        await PostJsonAsync("deviceManagement/virtualEndpoint/cloudApps/unpublish", new
+        {
+            cloudAppIds = new[] { cloudAppId }
+        });
+    }
+
+    public async Task RestartCloudPcAsync(string cloudPcId)
+    {
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/reboot", new { });
+    }
+
+    public async Task StartCloudPcAsync(string cloudPcId)
+    {
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/powerOn", new { });
+    }
+
+    public async Task ReprovisionCloudPcAsync(string cloudPcId)
+    {
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/reprovision", new { });
+    }
+
+    public async Task SyncManagedDeviceAsync(string managedDeviceId)
+    {
+        await PostJsonAsync($"deviceManagement/managedDevices/{Uri.EscapeDataString(managedDeviceId)}/syncDevice", new { });
     }
 
     private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
@@ -82,6 +118,22 @@ internal sealed class W365GraphClient
         }
 
         return output;
+    }
+
+    private async Task PostJsonAsync(string relativeUri, object body)
+    {
+        if (_accessTokenProvider is null)
+        {
+            throw new InvalidOperationException("Not connected to Microsoft Graph.");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), System.Text.Encoding.UTF8, "application/json")
+        };
+        await AuthorizeAsync(request);
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
     }
 
     private async Task AuthorizeAsync(HttpRequestMessage request)

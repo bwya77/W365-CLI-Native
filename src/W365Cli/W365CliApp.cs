@@ -214,13 +214,13 @@ internal sealed class W365CliApp
                 case ConsoleKey.Enter:
                     if (visibleCloudPcs.Count > 0)
                     {
-                        ShowCloudPcDetails(visibleCloudPcs[selectedIndex]);
+                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex]);
                     }
                     break;
                 case ConsoleKey.A:
                     if (visibleCloudPcs.Count > 0)
                     {
-                        ShowCloudPcDetails(visibleCloudPcs[selectedIndex]);
+                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex]);
                     }
                     break;
                 case ConsoleKey.R:
@@ -316,7 +316,7 @@ internal sealed class W365CliApp
                 case ConsoleKey.A:
                     if (visibleApps.Count > 0)
                     {
-                        ShowCloudAppDetails(visibleApps[selectedIndex]);
+                        await ShowCloudAppDetailsAsync(visibleApps[selectedIndex]);
                     }
                     break;
                 case ConsoleKey.R:
@@ -788,7 +788,7 @@ internal sealed class W365CliApp
         return (status, name, publisher, published, added);
     }
 
-    private static void ShowCloudPcDetails(CloudPcSummary cloudPc)
+    private async Task ShowCloudPcDetailsAsync(CloudPcSummary cloudPc)
     {
         var actions = new[]
         {
@@ -829,7 +829,7 @@ internal sealed class W365CliApp
                         return;
                     }
 
-                    ShowNotImplementedAction(action);
+                    await InvokeCloudPcActionAsync(cloudPc, action);
                     break;
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
@@ -886,17 +886,74 @@ internal sealed class W365CliApp
         AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
     }
 
-    private static void ShowNotImplementedAction(string action)
+    private async Task InvokeCloudPcActionAsync(CloudPcSummary cloudPc, string action)
     {
+        switch (action)
+        {
+            case "Restart":
+                await ConfirmAndRunAsync("Restart", cloudPc.Name, async () => await _session.Graph.RestartCloudPcAsync(cloudPc.Id));
+                break;
+            case "Sync":
+                if (string.IsNullOrWhiteSpace(cloudPc.ManagedDeviceId))
+                {
+                    AnsiConsole.MarkupLine("[yellow]This Cloud PC does not include a managed device ID.[/]");
+                    Pause();
+                    return;
+                }
+                await ConfirmAndRunAsync("Sync", cloudPc.Name, async () => await _session.Graph.SyncManagedDeviceAsync(cloudPc.ManagedDeviceId));
+                break;
+            case "Reprovision":
+                await ConfirmAndRunAsync("Reprovision", cloudPc.Name, async () => await _session.Graph.ReprovisionCloudPcAsync(cloudPc.Id));
+                break;
+            default:
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(action)} is not implemented in the native CLI yet.[/]");
+                AnsiConsole.MarkupLine("[grey]The action shell is in place. The next native milestone is wiring this action to Graph.[/]");
+                Pause();
+                break;
+        }
+    }
+
+    private async Task ConfirmAndRunAsync(string action, string target, Func<Task> operation)
+    {
+        AnsiConsole.Clear();
+        AnsiConsole.MarkupLine($"[cyan]{Markup.Escape(action)}[/]");
+        AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(target)}[/]");
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(action)} is not implemented in the native CLI yet.[/]");
-        AnsiConsole.MarkupLine("[grey]The action shell is in place. The next native milestone is wiring each action to Graph.[/]");
+
+        var confirm = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title($"Submit {Markup.Escape(action)} now?")
+                .AddChoices("Confirm", "Cancel"));
+
+        if (confirm != "Confirm")
+        {
+            AnsiConsole.MarkupLine("[yellow]Cancelled.[/]");
+            Pause();
+            return;
+        }
+
+        try
+        {
+            await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync($"Submitting {action}...", async _ => await operation());
+            AnsiConsole.MarkupLine("[green]Submitted.[/]");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine("[red]Action failed.[/]");
+            AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
+        }
+
         Pause();
     }
 
-    private static void ShowCloudAppDetails(CloudAppSummary app)
+    private async Task ShowCloudAppDetailsAsync(CloudAppSummary app)
     {
-        var actions = new[] { "Publish", "Unpublish", "Back" };
+        var actions = app.AppStatus?.Equals("published", StringComparison.OrdinalIgnoreCase) == true
+            ? new[] { "Unpublish", "Back" }
+            : new[] { "Publish", "Back" };
         var selectedActionIndex = 0;
 
         while (true)
@@ -925,7 +982,7 @@ internal sealed class W365CliApp
                     {
                         return;
                     }
-                    ShowNotImplementedAction(action);
+                    await InvokeCloudAppActionAsync(app, action);
                     break;
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
@@ -937,6 +994,21 @@ internal sealed class W365CliApp
                     }
                     break;
             }
+        }
+    }
+
+    private async Task InvokeCloudAppActionAsync(CloudAppSummary app, string action)
+    {
+        switch (action)
+        {
+            case "Publish":
+                await ConfirmAndRunAsync("Publish", app.DisplayName, async () => await _session.Graph.PublishCloudAppAsync(app.Id));
+                return;
+            case "Unpublish":
+                await ConfirmAndRunAsync("Unpublish", app.DisplayName, async () => await _session.Graph.UnpublishCloudAppAsync(app.Id));
+                return;
+            default:
+                return;
         }
     }
 
