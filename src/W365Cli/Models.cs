@@ -184,6 +184,57 @@ internal sealed record CloudPcServicePlan
     public string Name => string.IsNullOrWhiteSpace(DisplayName) ? Id : DisplayName;
 }
 
+internal sealed record CloudPcRemoteActionResultRaw
+{
+    [JsonPropertyName("actionName")]
+    public string? ActionName { get; init; }
+
+    [JsonPropertyName("actionState")]
+    public string? ActionState { get; init; }
+
+    [JsonPropertyName("startDateTime")]
+    public DateTimeOffset? StartDateTime { get; init; }
+
+    [JsonPropertyName("lastUpdatedDateTime")]
+    public DateTimeOffset? LastUpdatedDateTime { get; init; }
+
+    [JsonPropertyName("managedDeviceId")]
+    public string? ManagedDeviceId { get; init; }
+
+    [JsonPropertyName("statusDetail")]
+    public CloudPcRemoteActionStatusDetail? StatusDetail { get; init; }
+}
+
+internal sealed record CloudPcRemoteActionStatusDetail
+{
+    [JsonPropertyName("code")]
+    public string? Code { get; init; }
+
+    [JsonPropertyName("message")]
+    public string? Message { get; init; }
+}
+
+internal sealed record CloudPcRemoteActionResult
+{
+    public string CloudPcId { get; init; } = string.Empty;
+
+    public string CloudPcName { get; init; } = string.Empty;
+
+    public string? ActionName { get; init; }
+
+    public string? ActionState { get; init; }
+
+    public DateTimeOffset? StartDateTime { get; init; }
+
+    public DateTimeOffset? LastUpdatedDateTime { get; init; }
+
+    public string? ManagedDeviceId { get; init; }
+
+    public string? StatusCode { get; init; }
+
+    public string? StatusMessage { get; init; }
+}
+
 internal sealed record OrganizationSummary
 {
     [JsonPropertyName("id")]

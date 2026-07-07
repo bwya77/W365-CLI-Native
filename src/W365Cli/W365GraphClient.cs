@@ -200,6 +200,29 @@ internal sealed class W365GraphClient
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task<IReadOnlyList<CloudPcRemoteActionResult>> GetCloudPcRemoteActionResultsAsync(CloudPcSummary cloudPc)
+    {
+        var escapedCloudPcId = Uri.EscapeDataString(cloudPc.Id);
+        var uri = $"deviceManagement/virtualEndpoint/cloudPCs/{escapedCloudPcId}/retrieveCloudPCRemoteActionResults";
+        var page = await GetAsync<GraphPage<CloudPcRemoteActionResultRaw>>(uri);
+
+        return (page?.Value ?? [])
+            .Select(result => new CloudPcRemoteActionResult
+            {
+                CloudPcId = cloudPc.Id,
+                CloudPcName = cloudPc.Name,
+                ActionName = result.ActionName,
+                ActionState = result.ActionState,
+                StartDateTime = result.StartDateTime?.ToLocalTime(),
+                LastUpdatedDateTime = result.LastUpdatedDateTime?.ToLocalTime(),
+                ManagedDeviceId = result.ManagedDeviceId,
+                StatusCode = result.StatusDetail?.Code,
+                StatusMessage = result.StatusDetail?.Message
+            })
+            .OrderByDescending(result => result.StartDateTime)
+            .ToArray();
+    }
+
     private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
     {
         if (_accessTokenProvider is null)

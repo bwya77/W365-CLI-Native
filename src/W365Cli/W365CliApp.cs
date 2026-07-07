@@ -883,13 +883,15 @@ internal sealed class W365CliApp
         var selectedActionIndex = 0;
         CloudPcDiskSpace? diskSpace = null;
         IReadOnlyList<CloudPcSnapshot>? snapshots = null;
+        IReadOnlyList<CloudPcRemoteActionResult>? remoteActions = null;
         var selectedSnapshotIndex = 0;
+        var selectedRemoteActionIndex = 0;
         var activeSubPanel = "Actions";
 
         while (true)
         {
             AnsiConsole.Clear();
-            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace, snapshots, selectedSnapshotIndex);
+            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace, snapshots, selectedSnapshotIndex, remoteActions, selectedRemoteActionIndex);
             var key = Console.ReadKey(intercept: true);
 
             if (activeSubPanel == "Snapshots")
@@ -917,6 +919,35 @@ internal sealed class W365CliApp
                             await ShowSnapshotActionMenuAsync(cloudPc, snapshots[selectedSnapshotIndex]);
                             snapshots = await LoadSnapshotsForCloudPcAsync(cloudPc);
                         }
+                        break;
+                    case ConsoleKey.Escape:
+                    case ConsoleKey.LeftArrow:
+                        activeSubPanel = "Actions";
+                        break;
+                    default:
+                        if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                        {
+                            activeSubPanel = "Actions";
+                        }
+                        break;
+                }
+
+                continue;
+            }
+
+            if (activeSubPanel == "Remote action history")
+            {
+                switch (key.Key)
+                {
+                    case ConsoleKey.UpArrow:
+                        selectedRemoteActionIndex = Math.Max(0, selectedRemoteActionIndex - 1);
+                        break;
+                    case ConsoleKey.DownArrow:
+                        selectedRemoteActionIndex = Math.Min(Math.Max(0, (remoteActions?.Count ?? 0) - 1), selectedRemoteActionIndex + 1);
+                        break;
+                    case ConsoleKey.R:
+                        remoteActions = await LoadRemoteActionsForCloudPcAsync(cloudPc);
+                        selectedRemoteActionIndex = 0;
                         break;
                     case ConsoleKey.Escape:
                     case ConsoleKey.LeftArrow:
@@ -964,6 +995,12 @@ internal sealed class W365CliApp
                         activeSubPanel = "Snapshots";
                         snapshots = await LoadSnapshotsForCloudPcAsync(cloudPc);
                         selectedSnapshotIndex = 0;
+                    }
+                    else if (action == "Remote action history")
+                    {
+                        activeSubPanel = "Remote action history";
+                        remoteActions = await LoadRemoteActionsForCloudPcAsync(cloudPc);
+                        selectedRemoteActionIndex = 0;
                     }
                     else
                     {
@@ -1013,7 +1050,14 @@ internal sealed class W365CliApp
             .StartAsync("Loading snapshots...", async _ => await _session.Graph.GetCloudPcSnapshotsAsync(cloudPc));
     }
 
-    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace, IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex)
+    private async Task<IReadOnlyList<CloudPcRemoteActionResult>> LoadRemoteActionsForCloudPcAsync(CloudPcSummary cloudPc)
+    {
+        return await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading remote action history...", async _ => await _session.Graph.GetCloudPcRemoteActionResultsAsync(cloudPc));
+    }
+
+    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace, IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex, IReadOnlyList<CloudPcRemoteActionResult>? remoteActions, int selectedRemoteActionIndex)
     {
         AnsiConsole.MarkupLine($"[cyan]W365 CLI Native > Cloud PCs > {Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
@@ -1038,6 +1082,7 @@ internal sealed class W365CliApp
         {
             "Disk space" => CreateDiskSpaceSubPanel(diskSpace),
             "Snapshots" => CreateSnapshotsSubPanel(snapshots, selectedSnapshotIndex),
+            "Remote action history" => CreateRemoteActionsSubPanel(remoteActions, selectedRemoteActionIndex),
             _ => new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
                 .Header("Actions")
                 .Border(BoxBorder.Rounded)
@@ -1060,6 +1105,7 @@ internal sealed class W365CliApp
         var hint = activeSubPanel switch
         {
             "Snapshots" => "Up/Down select snapshot | Enter actions | C/N create | R refresh | Esc/B/Q back to actions",
+            "Remote action history" => "Up/Down select action | R refresh | Esc/B/Q back to actions",
             "Disk space" => "Esc/B/Q back to actions",
             _ => "Up/Down choose action | Enter run | Esc/B/Q back"
         };
@@ -1130,6 +1176,53 @@ internal sealed class W365CliApp
 
         return new Panel(rows)
             .Header("Snapshots")
+            .Border(BoxBorder.Rounded);
+    }
+
+    private static Panel CreateRemoteActionsSubPanel(IReadOnlyList<CloudPcRemoteActionResult>? remoteActions, int selectedRemoteActionIndex)
+    {
+        if (remoteActions is null)
+        {
+            return new Panel("[grey]Remote action history has not been loaded yet.[/]")
+                .Header("Remote actions")
+                .Border(BoxBorder.Rounded);
+        }
+
+        if (remoteActions.Count == 0)
+        {
+            return new Panel("[yellow]No remote action history was returned for this Cloud PC.[/]")
+                .Header("Remote actions")
+                .Border(BoxBorder.Rounded);
+        }
+
+        var table = new Table()
+            .Border(TableBorder.Simple)
+            .AddColumn("Action")
+            .AddColumn("State")
+            .AddColumn("Started")
+            .AddColumn("Updated");
+
+        var visible = remoteActions.Take(Math.Max(3, Console.WindowHeight - 18)).ToArray();
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var action = visible[index];
+            var selected = index == selectedRemoteActionIndex;
+            table.AddRow(
+                selected ? Selected(Markup.Escape(action.ActionName ?? "-")) : Markup.Escape(action.ActionName ?? "-"),
+                selected ? Selected(Markup.Escape(action.ActionState ?? "-")) : Markup.Escape(action.ActionState ?? "-"),
+                selected ? Selected(Markup.Escape(action.StartDateTime?.ToLocalTime().ToString("g") ?? "-")) : Markup.Escape(action.StartDateTime?.ToLocalTime().ToString("g") ?? "-"),
+                selected ? Selected(Markup.Escape(action.LastUpdatedDateTime?.ToLocalTime().ToString("g") ?? "-")) : Markup.Escape(action.LastUpdatedDateTime?.ToLocalTime().ToString("g") ?? "-"));
+        }
+
+        var selectedAction = remoteActions[Math.Min(selectedRemoteActionIndex, remoteActions.Count - 1)];
+        var rows = new Rows(
+            new Markup($"[bold]Total[/] {remoteActions.Count}"),
+            table,
+            new Markup($"[bold]Code[/] {Markup.Escape(selectedAction.StatusCode ?? "-")}"),
+            new Markup($"[bold]Message[/]\n{Markup.Escape(selectedAction.StatusMessage ?? "-")}"));
+
+        return new Panel(rows)
+            .Header("Remote actions")
             .Border(BoxBorder.Rounded);
     }
 
