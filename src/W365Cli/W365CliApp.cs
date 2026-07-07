@@ -53,6 +53,7 @@ internal sealed class W365CliApp
                     ShowAbout();
                     break;
                 case "Exit":
+                    AnsiConsole.Clear();
                     return 0;
             }
     }
