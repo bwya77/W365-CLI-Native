@@ -604,13 +604,13 @@ internal sealed class W365CliApp
         }
 
         var content = new Rows(
-            new Markup($"[bold]Name[/]\n{Markup.Escape(cloudPc.Name)}"),
-            new Markup($"[bold]Status[/] {StatusMarkup(cloudPc.Status)}"),
-            new Markup($"[bold]Type[/] {Markup.Escape(cloudPc.ProvisioningType ?? "-")}"),
-            new Markup($"[bold]User[/]\n{Markup.Escape(cloudPc.UserPrincipalName ?? "-")}"),
-            new Markup($"[bold]Service plan[/]\n{Markup.Escape(cloudPc.ServicePlanName ?? "-")}"),
-            new Markup($"[bold]Cloud PC ID[/]\n[grey]{Markup.Escape(cloudPc.Id)}[/]"),
-            new Markup("[bold]Actions[/]\n[grey]Enter details, A actions[/]"));
+            new Markup(PropertyBlock("Name", cloudPc.Name)),
+            new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
+            new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-")),
+            new Markup(PropertyBlock("User", cloudPc.UserPrincipalName ?? "-")),
+            new Markup(PropertyBlock("Service plan", cloudPc.ServicePlanName ?? "-")),
+            new Markup(PropertyBlock("Cloud PC ID", cloudPc.Id, "grey")),
+            new Markup(PropertyBlock("Actions", "Enter details, A actions", "grey")));
 
         return new Panel(content)
             .Header("Selected Cloud PC")
@@ -808,6 +808,17 @@ internal sealed class W365CliApp
         };
 
         return $"[{color}]{Markup.Escape(Fit(text, width))}[/]";
+    }
+
+    private static string PropertyInline(string name, string value, string valueColor = "white", bool valueIsMarkup = false)
+    {
+        var renderedValue = valueIsMarkup ? value : $"[{valueColor}]{Markup.Escape(value)}[/]";
+        return $"[deepskyblue1]{Markup.Escape(name)}:[/] {renderedValue}";
+    }
+
+    private static string PropertyBlock(string name, string value, string valueColor = "white")
+    {
+        return $"[deepskyblue1]{Markup.Escape(name)}[/]\n[{valueColor}]{Markup.Escape(value)}[/]";
     }
 
     private static string Selected(string escapedText)
@@ -1065,12 +1076,12 @@ internal sealed class W365CliApp
 
         var details = new Panel(
             new Rows(
-                new Markup($"[bold]Name:[/] {Markup.Escape(cloudPc.Name)}"),
-                new Markup($"[bold]Status:[/] {StatusMarkup(cloudPc.Status)}"),
-                new Markup($"[bold]Type:[/] {Markup.Escape(cloudPc.ProvisioningType ?? "-")}"),
-                new Markup($"[bold]User:[/] {Markup.Escape(cloudPc.UserPrincipalName ?? "-")}"),
-                new Markup($"[bold]Service plan:[/] {Markup.Escape(cloudPc.ServicePlanName ?? "-")}"),
-                new Markup($"[bold]Cloud PC ID:[/] [grey]{Markup.Escape(cloudPc.Id)}[/]")))
+                new Markup(PropertyInline("Name", cloudPc.Name)),
+                new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
+                new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-")),
+                new Markup(PropertyInline("User", cloudPc.UserPrincipalName ?? "-")),
+                new Markup(PropertyInline("Service plan", cloudPc.ServicePlanName ?? "-")),
+                new Markup(PropertyInline("Cloud PC ID", cloudPc.Id, "grey"))))
             .Header("Details")
             .Border(BoxBorder.Rounded);
 
