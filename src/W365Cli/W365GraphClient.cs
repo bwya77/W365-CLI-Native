@@ -153,6 +153,29 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    public async Task CreateSnapshotAsync(string cloudPcId)
+    {
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/createSnapshot", new { });
+    }
+
+    public async Task RestoreSnapshotAsync(string cloudPcId, string snapshotId)
+    {
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/restore", new
+        {
+            cloudPcSnapshotId = snapshotId
+        });
+    }
+
+    public async Task DeleteSnapshotAsync(string snapshotId)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"deviceManagement/virtualEndpoint/snapshots/{Uri.EscapeDataString(snapshotId)}");
+        await AuthorizeAsync(request);
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+    }
+
     private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
     {
         if (_accessTokenProvider is null)

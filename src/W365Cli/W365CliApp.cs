@@ -883,13 +883,55 @@ internal sealed class W365CliApp
         var selectedActionIndex = 0;
         CloudPcDiskSpace? diskSpace = null;
         IReadOnlyList<CloudPcSnapshot>? snapshots = null;
+        var selectedSnapshotIndex = 0;
         var activeSubPanel = "Actions";
 
         while (true)
         {
             AnsiConsole.Clear();
-            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace, snapshots);
+            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace, snapshots, selectedSnapshotIndex);
             var key = Console.ReadKey(intercept: true);
+
+            if (activeSubPanel == "Snapshots")
+            {
+                switch (key.Key)
+                {
+                    case ConsoleKey.UpArrow:
+                        selectedSnapshotIndex = Math.Max(0, selectedSnapshotIndex - 1);
+                        break;
+                    case ConsoleKey.DownArrow:
+                        selectedSnapshotIndex = Math.Min(Math.Max(0, (snapshots?.Count ?? 0) - 1), selectedSnapshotIndex + 1);
+                        break;
+                    case ConsoleKey.C:
+                    case ConsoleKey.N:
+                        snapshots = await CreateSnapshotAndReloadAsync(cloudPc);
+                        selectedSnapshotIndex = 0;
+                        break;
+                    case ConsoleKey.R:
+                        snapshots = await LoadSnapshotsForCloudPcAsync(cloudPc);
+                        selectedSnapshotIndex = 0;
+                        break;
+                    case ConsoleKey.Enter:
+                        if (snapshots is { Count: > 0 })
+                        {
+                            await ShowSnapshotActionMenuAsync(cloudPc, snapshots[selectedSnapshotIndex]);
+                            snapshots = await LoadSnapshotsForCloudPcAsync(cloudPc);
+                        }
+                        break;
+                    case ConsoleKey.Escape:
+                    case ConsoleKey.LeftArrow:
+                        activeSubPanel = "Actions";
+                        break;
+                    default:
+                        if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                        {
+                            activeSubPanel = "Actions";
+                        }
+                        break;
+                }
+
+                continue;
+            }
 
             switch (key.Key)
             {
@@ -921,6 +963,7 @@ internal sealed class W365CliApp
                     {
                         activeSubPanel = "Snapshots";
                         snapshots = await LoadSnapshotsForCloudPcAsync(cloudPc);
+                        selectedSnapshotIndex = 0;
                     }
                     else
                     {
@@ -970,7 +1013,7 @@ internal sealed class W365CliApp
             .StartAsync("Loading snapshots...", async _ => await _session.Graph.GetCloudPcSnapshotsAsync(cloudPc));
     }
 
-    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace, IReadOnlyList<CloudPcSnapshot>? snapshots)
+    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace, IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex)
     {
         AnsiConsole.MarkupLine($"[cyan]W365 CLI Native > Cloud PCs > {Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
@@ -994,7 +1037,7 @@ internal sealed class W365CliApp
         var rightPanel = activeSubPanel switch
         {
             "Disk space" => CreateDiskSpaceSubPanel(diskSpace),
-            "Snapshots" => CreateSnapshotsSubPanel(snapshots),
+            "Snapshots" => CreateSnapshotsSubPanel(snapshots, selectedSnapshotIndex),
             _ => new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
                 .Header("Actions")
                 .Border(BoxBorder.Rounded)
@@ -1014,9 +1057,12 @@ internal sealed class W365CliApp
             AnsiConsole.Write(rightPanel);
         }
 
-        var hint = activeSubPanel == "Actions"
-            ? "Up/Down choose action | Enter run | Esc/B/Q back"
-            : "Esc/B/Q back to actions";
+        var hint = activeSubPanel switch
+        {
+            "Snapshots" => "Up/Down select snapshot | Enter actions | C/N create | R refresh | Esc/B/Q back to actions",
+            "Disk space" => "Esc/B/Q back to actions",
+            _ => "Up/Down choose action | Enter run | Esc/B/Q back"
+        };
         AnsiConsole.MarkupLine($"[grey]{hint}[/]");
     }
 
@@ -1042,7 +1088,7 @@ internal sealed class W365CliApp
             .Border(BoxBorder.Rounded);
     }
 
-    private static Panel CreateSnapshotsSubPanel(IReadOnlyList<CloudPcSnapshot>? snapshots)
+    private static Panel CreateSnapshotsSubPanel(IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex)
     {
         if (snapshots is null)
         {
@@ -1053,7 +1099,7 @@ internal sealed class W365CliApp
 
         if (snapshots.Count == 0)
         {
-            return new Panel("[yellow]No snapshots found for this Cloud PC.[/]")
+            return new Panel("[yellow]No snapshots found for this Cloud PC.[/]\n\n[grey]Press C or N to create the first snapshot.[/]")
                 .Header("Snapshots")
                 .Border(BoxBorder.Rounded);
         }
@@ -1065,22 +1111,50 @@ internal sealed class W365CliApp
             .AddColumn("Created")
             .AddColumn("Expires");
 
-        foreach (var snapshot in snapshots.Take(Math.Max(3, Console.WindowHeight - 18)))
+        var visible = snapshots.Take(Math.Max(3, Console.WindowHeight - 18)).ToArray();
+        for (var index = 0; index < visible.Length; index++)
         {
+            var snapshot = visible[index];
+            var selected = index == selectedSnapshotIndex;
             table.AddRow(
-                Markup.Escape(snapshot.Status ?? "-"),
-                Markup.Escape(snapshot.SnapshotType ?? "-"),
-                Markup.Escape(snapshot.CreatedDateTime?.ToLocalTime().ToString("g") ?? "-"),
-                Markup.Escape(snapshot.ExpirationDateTime?.ToLocalTime().ToString("g") ?? "-"));
+                selected ? Selected(Markup.Escape(snapshot.Status ?? "-")) : Markup.Escape(snapshot.Status ?? "-"),
+                selected ? Selected(Markup.Escape(snapshot.SnapshotType ?? "-")) : Markup.Escape(snapshot.SnapshotType ?? "-"),
+                selected ? Selected(Markup.Escape(snapshot.CreatedDateTime?.ToLocalTime().ToString("g") ?? "-")) : Markup.Escape(snapshot.CreatedDateTime?.ToLocalTime().ToString("g") ?? "-"),
+                selected ? Selected(Markup.Escape(snapshot.ExpirationDateTime?.ToLocalTime().ToString("g") ?? "-")) : Markup.Escape(snapshot.ExpirationDateTime?.ToLocalTime().ToString("g") ?? "-"));
         }
 
         var rows = new Rows(
             new Markup($"[bold]Total[/] {snapshots.Count}"),
+            new Markup("[grey]Enter actions | C/N create[/]"),
             table);
 
         return new Panel(rows)
             .Header("Snapshots")
             .Border(BoxBorder.Rounded);
+    }
+
+    private async Task<IReadOnlyList<CloudPcSnapshot>> CreateSnapshotAndReloadAsync(CloudPcSummary cloudPc)
+    {
+        await ConfirmAndRunAsync("Create snapshot", cloudPc.Name, async () => await _session.Graph.CreateSnapshotAsync(cloudPc.Id));
+        return await LoadSnapshotsForCloudPcAsync(cloudPc);
+    }
+
+    private async Task ShowSnapshotActionMenuAsync(CloudPcSummary cloudPc, CloudPcSnapshot snapshot)
+    {
+        var action = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[cyan]Snapshot action[/]")
+                .AddChoices("Restore from this snapshot", "Delete this snapshot", "Back"));
+
+        switch (action)
+        {
+            case "Restore from this snapshot":
+                await ConfirmAndRunAsync("Restore", cloudPc.Name, async () => await _session.Graph.RestoreSnapshotAsync(cloudPc.Id, snapshot.SnapshotId));
+                break;
+            case "Delete this snapshot":
+                await ConfirmAndRunAsync("Delete snapshot", snapshot.SnapshotId, async () => await _session.Graph.DeleteSnapshotAsync(snapshot.SnapshotId));
+                break;
+        }
     }
 
     private async Task InvokeCloudPcActionAsync(CloudPcSummary cloudPc, string action)
