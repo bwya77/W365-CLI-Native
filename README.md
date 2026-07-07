@@ -34,7 +34,14 @@ Download the latest release:
 https://github.com/bwya77/W365-CLI-Native/releases/latest
 ```
 
-Download `w365-win-x64.zip`, extract it, and run `W365Cli.exe`.
+Download the package for your platform, extract it, and run the binary:
+
+| Platform | Asset | Binary |
+| --- | --- | --- |
+| Windows x64 | `w365-win-x64.zip` | `W365Cli.exe` |
+| Windows ARM64 | `w365-win-arm64.zip` | `W365Cli.exe` |
+| macOS Intel | `w365-osx-x64.zip` | `W365Cli` |
+| macOS Apple Silicon | `w365-osx-arm64.zip` | `W365Cli` |
 
 Recommended install folder:
 
@@ -174,10 +181,15 @@ Release builds are published as GitHub Release assets:
 
 ```text
 w365-win-x64.zip
-w365-win-x64.zip.sha256
+w365-win-arm64.zip
+w365-osx-x64.zip
+w365-osx-arm64.zip
+SHA256SUMS-windows.txt
+SHA256SUMS-macos.txt
 ```
 
-Release binaries are signed before packaging.
+Windows release binaries are signed with Azure Trusted Signing before packaging. macOS release
+binaries are signed and notarized when the Apple Developer signing secrets are available.
 
 ## Development
 
@@ -203,6 +215,14 @@ Publish a local self-contained Windows x64 binary:
 
 ```powershell
 dotnet publish .\src\W365Cli\W365Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -o .\artifacts\publish\win-x64
+```
+
+Other release runtime identifiers:
+
+```text
+win-arm64
+osx-x64
+osx-arm64
 ```
 
 Create a release:

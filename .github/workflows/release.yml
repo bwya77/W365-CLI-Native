@@ -10,7 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  windows:
+    name: Windows
     runs-on: windows-latest
     env:
       HAS_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
@@ -32,19 +33,21 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "assemblyVersion=$assemblyVersion" >> $env:GITHUB_OUTPUT
 
-      - name: Publish win-x64
+      - name: Publish Windows
         shell: pwsh
         run: |
-          dotnet publish .\src\W365Cli\W365Cli.csproj `
-            --configuration Release `
-            --runtime win-x64 `
-            --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:PublishTrimmed=false `
-            -p:Version=${{ steps.version.outputs.version }} `
-            -p:AssemblyVersion=${{ steps.version.outputs.assemblyVersion }} `
-            -p:FileVersion=${{ steps.version.outputs.assemblyVersion }} `
-            --output .\artifacts\w365-win-x64
+          foreach ($rid in 'win-x64','win-arm64') {
+            dotnet publish .\src\W365Cli\W365Cli.csproj `
+              --configuration Release `
+              --runtime $rid `
+              --self-contained true `
+              -p:PublishSingleFile=true `
+              -p:PublishTrimmed=false `
+              -p:Version=${{ steps.version.outputs.version }} `
+              -p:AssemblyVersion=${{ steps.version.outputs.assemblyVersion }} `
+              -p:FileVersion=${{ steps.version.outputs.assemblyVersion }} `
+              --output ".\artifacts\w365-$rid"
+          }
 
       - name: Sign executable
         if: env.HAS_SIGNING == 'true'
@@ -56,9 +59,9 @@ jobs:
           endpoint: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
           signing-account-name: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.TRUSTED_SIGNING_PROFILE }}
-          files-folder: ${{ github.workspace }}\artifacts\w365-win-x64
+          files-folder: ${{ github.workspace }}\artifacts
           files-folder-filter: exe
-          files-folder-recurse: false
+          files-folder-recurse: true
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
@@ -67,25 +70,158 @@ jobs:
         if: env.HAS_SIGNING == 'true'
         shell: pwsh
         run: |
-          $signature = Get-AuthenticodeSignature .\artifacts\w365-win-x64\W365Cli.exe
-          $signature | Format-List
-          if ($signature.Status -ne 'Valid') {
-            throw "W365Cli.exe signature status was $($signature.Status)"
+          foreach ($path in Get-ChildItem .\artifacts -Recurse -Filter W365Cli.exe) {
+            $signature = Get-AuthenticodeSignature $path.FullName
+            $signature | Format-List
+            if ($signature.Status -ne 'Valid') {
+              throw "$($path.FullName) signature status was $($signature.Status)"
+            }
           }
 
       - name: Package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path .\artifacts\release | Out-Null
-          Compress-Archive -Path .\artifacts\w365-win-x64\* -DestinationPath .\artifacts\release\w365-win-x64.zip -Force
-          Get-FileHash .\artifacts\release\w365-win-x64.zip -Algorithm SHA256 |
-            ForEach-Object { "$($_.Hash)  w365-win-x64.zip" } |
-            Set-Content .\artifacts\release\w365-win-x64.zip.sha256
+          foreach ($rid in 'win-x64','win-arm64') {
+            Compress-Archive -Path ".\artifacts\w365-$rid\*" -DestinationPath ".\artifacts\release\w365-$rid.zip" -Force
+          }
+          Get-FileHash .\artifacts\release\*.zip -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash)  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content .\artifacts\release\SHA256SUMS-windows.txt
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/release/w365-win-x64.zip
-            artifacts/release/w365-win-x64.zip.sha256
+            artifacts/release/w365-win-arm64.zip
+            artifacts/release/SHA256SUMS-windows.txt
+          generate_release_notes: true
+
+  macos:
+    name: macOS
+    needs: windows
+    runs-on: macos-15
+    env:
+      KEYCHAIN_PASSWORD: ${{ github.run_id }}
+      HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev"
+          fi
+          assembly_version="${version%%-*}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "assemblyVersion=$assembly_version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Apple certificate
+        if: env.HAS_APPLE_SIGNING == 'true'
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          certificate_path="$RUNNER_TEMP/certificate.p12"
+          keychain_path="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+
+      - name: Publish macOS
+        shell: bash
+        run: |
+          for rid in osx-x64 osx-arm64; do
+            dotnet publish ./src/W365Cli/W365Cli.csproj \
+              --configuration Release \
+              --runtime "$rid" \
+              --self-contained true \
+              -p:PublishSingleFile=true \
+              -p:PublishTrimmed=false \
+              -p:Version=${{ steps.version.outputs.version }} \
+              -p:AssemblyVersion=${{ steps.version.outputs.assemblyVersion }} \
+              -p:FileVersion=${{ steps.version.outputs.assemblyVersion }} \
+              --output "./artifacts/w365-$rid"
+            chmod +x "./artifacts/w365-$rid/W365Cli"
+          done
+
+      - name: Sign macOS binaries
+        if: env.HAS_APPLE_SIGNING == 'true'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          for rid in osx-x64 osx-arm64; do
+            codesign --force --timestamp --options runtime \
+              --sign "Developer ID Application" \
+              --keychain "$RUNNER_TEMP/app-signing.keychain-db" \
+              "./artifacts/w365-$rid/W365Cli"
+            codesign --verify --strict --verbose=2 "./artifacts/w365-$rid/W365Cli"
+          done
+
+      - name: Package macOS
+        shell: bash
+        run: |
+          mkdir -p ./artifacts/release
+          for rid in osx-x64 osx-arm64; do
+            ditto -c -k --sequesterRsrc --keepParent "./artifacts/w365-$rid" "./artifacts/release/w365-$rid.zip"
+          done
+          shasum -a 256 ./artifacts/release/*.zip |
+            sed 's#./artifacts/release/##' > ./artifacts/release/SHA256SUMS-macos.txt
+
+      - name: Notarize macOS zips
+        if: env.HAS_APPLE_SIGNING == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          for zip in ./artifacts/release/w365-osx-*.zip; do
+            output=$(xcrun notarytool submit "$zip" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_ID_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait 2>&1) || true
+            echo "$output"
+            submission_id=$(echo "$output" | grep "id:" | head -1 | awk '{print $2}')
+            if echo "$output" | grep -q "status: Invalid"; then
+              echo "Notarization failed. Fetching log..."
+              xcrun notarytool log "$submission_id" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_ID_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID"
+              exit 1
+            fi
+          done
+
+      - name: Clean up keychain
+        if: always() && env.HAS_APPLE_SIGNING == 'true'
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/release/w365-osx-x64.zip
+            artifacts/release/w365-osx-arm64.zip
+            artifacts/release/SHA256SUMS-macos.txt
           generate_release_notes: true
