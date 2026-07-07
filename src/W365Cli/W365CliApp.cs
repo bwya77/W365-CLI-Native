@@ -1161,6 +1161,9 @@ internal sealed class W365CliApp
     {
         switch (action)
         {
+            case "Resize":
+                await ShowResizeAsync(cloudPc);
+                break;
             case "Restart":
                 await ConfirmAndRunAsync("Restart", cloudPc.Name, async () => await _session.Graph.RestartCloudPcAsync(cloudPc.Id));
                 break;
@@ -1182,6 +1185,52 @@ internal sealed class W365CliApp
                 AnsiConsole.MarkupLine("[grey]The action shell is in place. The next native milestone is wiring this action to Graph.[/]");
                 Pause();
                 break;
+        }
+    }
+
+    private async Task ShowResizeAsync(CloudPcSummary cloudPc)
+    {
+        var plans = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading service plans...", async _ => await _session.Graph.GetCloudPcServicePlansAsync());
+
+        if (plans.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No service plans returned.[/]");
+            Pause();
+            return;
+        }
+
+        while (true)
+        {
+            RenderCompactHeader();
+            AnsiConsole.MarkupLine($"[cyan]Resize[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
+            AnsiConsole.MarkupLine($"Current service plan: [grey]{Markup.Escape(cloudPc.ServicePlanName ?? "-")}[/]");
+            AnsiConsole.WriteLine();
+
+            var plan = SelectFromTable(
+                "Select target service plan",
+                Row("Name", 46, "Type", 12, "vCPU", 6, "RAM", 8, "Storage", 10, "Profile", 10),
+                plans,
+                item => Row(
+                    item.Name, 46,
+                    item.Type ?? "-", 12,
+                    item.VCpuCount?.ToString() ?? "-", 6,
+                    item.RamGb is null ? "-" : $"{item.RamGb} GB", 8,
+                    item.StorageGb is null ? "-" : $"{item.StorageGb} GB", 10,
+                    item.UserProfileGb is null ? "-" : $"{item.UserProfileGb} GB", 10));
+
+            if (plan is null)
+            {
+                return;
+            }
+
+            await ConfirmAndRunAsync(
+                "Resize",
+                $"{cloudPc.Name} to {plan.Name}",
+                async () => await _session.Graph.ResizeCloudPcAsync(cloudPc.Id, plan.Id));
+
+            return;
         }
     }
 

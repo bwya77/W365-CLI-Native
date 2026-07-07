@@ -157,6 +157,33 @@ internal sealed record CloudPcSnapshot
     public string? HealthCheckStatus { get; init; }
 }
 
+internal sealed record CloudPcServicePlan
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; init; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("vCpuCount")]
+    public int? VCpuCount { get; init; }
+
+    [JsonPropertyName("ramInGB")]
+    public int? RamGb { get; init; }
+
+    [JsonPropertyName("storageInGB")]
+    public int? StorageGb { get; init; }
+
+    [JsonPropertyName("userProfileInGB")]
+    public int? UserProfileGb { get; init; }
+
+    [JsonIgnore]
+    public string Name => string.IsNullOrWhiteSpace(DisplayName) ? Id : DisplayName;
+}
+
 internal sealed record OrganizationSummary
 {
     [JsonPropertyName("id")]

@@ -153,6 +153,30 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<CloudPcServicePlan>> GetCloudPcServicePlansAsync()
+    {
+        var plans = await GetPagedAsync<CloudPcServicePlan>(
+            "deviceManagement/virtualEndpoint/servicePlans");
+
+        return plans
+            .OrderBy(plan => plan.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(plan => plan.VCpuCount)
+            .ThenBy(plan => plan.RamGb)
+            .ThenBy(plan => plan.StorageGb)
+            .ThenBy(plan => plan.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public async Task ResizeCloudPcAsync(string cloudPcId, string targetServicePlanId)
+    {
+        await PostJsonAsync(
+            $"https://graph.microsoft.com/v1.0/deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/resize",
+            new
+            {
+                targetServicePlanId
+            });
+    }
+
     public async Task CreateSnapshotAsync(string cloudPcId)
     {
         await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/createSnapshot", new { });
