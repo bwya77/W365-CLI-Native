@@ -774,6 +774,62 @@ internal sealed class W365CliApp
         return value?.Contains(filter, StringComparison.OrdinalIgnoreCase) == true;
     }
 
+    private static string[] GetCloudPcActions(CloudPcSummary cloudPc)
+    {
+        var actions = new List<string>
+        {
+            "Remote action history",
+            "Disk space",
+            "Snapshots",
+            "Resize"
+        };
+
+        if (IsCloudPcClearlyOff(cloudPc))
+        {
+            actions.Add("Power on");
+        }
+
+        actions.AddRange([
+            "Rename",
+            "Sync",
+            "Restart",
+            "Reset local admin password"
+        ]);
+
+        if (IsCloudPcInGracePeriod(cloudPc))
+        {
+            actions.Add("End grace period");
+        }
+
+        actions.AddRange([
+            "Reprovision",
+            "Back"
+        ]);
+
+        return actions.ToArray();
+    }
+
+    private static bool IsCloudPcClearlyOff(CloudPcSummary cloudPc)
+    {
+        return MatchesAny(cloudPc.PowerState, "off", "stopped", "deallocated", "poweredoff") ||
+            MatchesAny(cloudPc.Status, "off", "stopped", "deallocated", "poweredoff");
+    }
+
+    private static bool IsCloudPcInGracePeriod(CloudPcSummary cloudPc)
+    {
+        return string.Equals(cloudPc.Status, "inGracePeriod", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesAny(string? value, params string[] terms)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static string PromptFilter()
     {
         AnsiConsole.WriteLine();
@@ -879,18 +935,7 @@ internal sealed class W365CliApp
 
     private async Task ShowCloudPcDetailsAsync(CloudPcSummary cloudPc)
     {
-        var actions = new[]
-        {
-            "Disk space",
-            "Snapshots",
-            "Resize",
-            "Rename",
-            "Restart",
-            "Sync",
-            "Reprovision",
-            "Remote action history",
-            "Back"
-        };
+        var actions = GetCloudPcActions(cloudPc);
         var selectedActionIndex = 0;
         CloudPcDiskSpace? diskSpace = null;
         IReadOnlyList<CloudPcSnapshot>? snapshots = null;
@@ -1077,6 +1122,7 @@ internal sealed class W365CliApp
             new Rows(
                 new Markup(PropertyInline("Name", cloudPc.Name, "grey")),
                 new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
+                new Markup(PropertyInline("Power state", cloudPc.PowerState ?? "-", "grey")),
                 new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-", "grey")),
                 new Markup(PropertyInline("User", cloudPc.UserPrincipalName ?? "-", "grey")),
                 new Markup(PropertyInline("Service plan", cloudPc.ServicePlanName ?? "-", "grey")),
@@ -1273,6 +1319,14 @@ internal sealed class W365CliApp
     {
         switch (action)
         {
+            case "Power on":
+                if (!IsCloudPcClearlyOff(cloudPc))
+                {
+                    TimedMessage("[yellow]Power on is only available when the Cloud PC is powered off.[/]");
+                    return;
+                }
+                await ConfirmAndRunAsync("Power on", cloudPc.Name, async () => await _session.Graph.StartCloudPcAsync(cloudPc.Id));
+                break;
             case "Resize":
                 await ShowResizeAsync(cloudPc);
                 break;
@@ -1289,6 +1343,22 @@ internal sealed class W365CliApp
                     return;
                 }
                 await ConfirmAndRunAsync("Sync", cloudPc.Name, async () => await _session.Graph.SyncManagedDeviceAsync(cloudPc.ManagedDeviceId));
+                break;
+            case "Reset local admin password":
+                if (string.IsNullOrWhiteSpace(cloudPc.ManagedDeviceId))
+                {
+                    TimedMessage("[yellow]This Cloud PC does not include a managed device ID.[/]");
+                    return;
+                }
+                await ConfirmAndRunAsync("Reset local admin password", cloudPc.Name, async () => await _session.Graph.ResetLocalAdminPasswordAsync(cloudPc.ManagedDeviceId));
+                break;
+            case "End grace period":
+                if (!IsCloudPcInGracePeriod(cloudPc))
+                {
+                    TimedMessage("[yellow]End grace period is only available while the Cloud PC is in grace period.[/]");
+                    return;
+                }
+                await ConfirmAndRunAsync("End grace period", cloudPc.Name, async () => await _session.Graph.EndCloudPcGracePeriodAsync(cloudPc.Id));
                 break;
             case "Reprovision":
                 await ConfirmAndRunAsync("Reprovision", cloudPc.Name, async () => await _session.Graph.ReprovisionCloudPcAsync(cloudPc.Id));

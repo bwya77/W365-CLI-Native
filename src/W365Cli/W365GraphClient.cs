@@ -23,7 +23,7 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsAsync()
     {
         var items = await GetPagedAsync<CloudPcSummary>(
-            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,provisioningType,userPrincipalName,servicePlanName,managedDeviceId");
+            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId");
 
         return items
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -83,6 +83,16 @@ internal sealed class W365GraphClient
     public async Task StartCloudPcAsync(string cloudPcId)
     {
         await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/powerOn", new { });
+    }
+
+    public async Task EndCloudPcGracePeriodAsync(string cloudPcId)
+    {
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/endGracePeriod", new { });
+    }
+
+    public async Task ResetLocalAdminPasswordAsync(string managedDeviceId)
+    {
+        await PostJsonAsync($"deviceManagement/managedDevices('{Uri.EscapeDataString(managedDeviceId)}')/rotateLocalAdminPassword", new { });
     }
 
     public async Task ReprovisionCloudPcAsync(string cloudPcId)

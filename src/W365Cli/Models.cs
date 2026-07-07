@@ -20,6 +20,9 @@ internal sealed record CloudPcSummary
     [JsonPropertyName("status")]
     public string? Status { get; init; }
 
+    [JsonPropertyName("powerState")]
+    public string? PowerState { get; init; }
+
     [JsonPropertyName("provisioningType")]
     public string? ProvisioningType { get; init; }
 
