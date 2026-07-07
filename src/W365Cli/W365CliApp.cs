@@ -120,9 +120,6 @@ internal sealed class W365CliApp
             case "Reports":
                 await ShowReportsAsync();
                 break;
-            case "ActionHistory":
-                ShowActionHistory();
-                break;
             case "Catalog":
                 await ShowCatalogAsync();
                 break;
@@ -655,7 +652,6 @@ internal sealed class W365CliApp
             new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs"),
             new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows"),
             new("Reports", "Reports", "Usage, connectivity, launch details, report streams"),
-            new("ActionHistory", "Action history", "Recent submitted native actions"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
             new("Catalog", "Catalog", "Service plans, images, regions"),
             new("Tenant", "Tenant settings", "Organization settings, profiles, user settings"),
@@ -819,7 +815,6 @@ internal sealed class W365CliApp
         return
         [
             ..GetMainMenuChoices().Where(choice => choice.Key != "Exit"),
-            new("ActionHistory", "Recent actions", "Open in-session action history"),
             new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
             new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
             new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots"),
@@ -905,7 +900,6 @@ internal sealed class W365CliApp
         {
             AnsiConsole.Clear();
             RenderActionHistory(selectedIndex);
-            RenderStatusBar();
             var key = Console.ReadKey(intercept: true);
             switch (key.Key)
             {
@@ -923,7 +917,6 @@ internal sealed class W365CliApp
                     break;
                 case ConsoleKey.C:
                     ActionHistory.Clear();
-                    SetStatus("[green]Action history cleared.[/]");
                     selectedIndex = 0;
                     break;
                 case ConsoleKey.Escape:
@@ -956,27 +949,31 @@ internal sealed class W365CliApp
             return;
         }
 
-        var header = Row("Time", 9, "Result", 10, "Action", 24, "Cloud PC", 34, "Target", 42);
-        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
-        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
-
+        var table = new Table()
+            .Border(TableBorder.Rounded)
+            .AddColumn(" ")
+            .AddColumn("Time")
+            .AddColumn("Result")
+            .AddColumn("Action")
+            .AddColumn("Cloud PC")
+            .AddColumn("Target");
         var pageSize = Math.Max(8, Console.WindowHeight - 10);
         var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, ActionHistory.Count - pageSize));
         var visible = ActionHistory.Skip(start).Take(pageSize).ToArray();
         foreach (var item in visible.Select((value, index) => new { value, index }))
         {
             var absoluteIndex = start + item.index;
-            var row = Row(
-                item.value.RequestedAt.ToLocalTime().ToString("t"), 8,
-                item.value.Status, 10,
-                item.value.Action, 24,
-                item.value.CloudPcName ?? "-", 34,
-                item.value.Target, 42);
-            var escaped = Markup.Escape(row);
-            AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                ? $"[black on #4091f2]> {escaped}[/]"
-                : $"  {escaped}");
+            var selectedMarker = absoluteIndex == selectedIndex ? "[black on #4091f2]>[/]" : " ";
+            table.AddRow(
+                selectedMarker,
+                Markup.Escape(item.value.RequestedAt.ToLocalTime().ToString("t")),
+                ActionStatusCell(item.value.Status),
+                Markup.Escape(item.value.Action),
+                Markup.Escape(item.value.CloudPcName ?? "-"),
+                Markup.Escape(item.value.Target));
         }
+
+        AnsiConsole.Write(table);
 
         var selected = ActionHistory[Math.Min(selectedIndex, ActionHistory.Count - 1)];
         if (!string.IsNullOrWhiteSpace(selected.Detail))
@@ -987,6 +984,15 @@ internal sealed class W365CliApp
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | C clear | Esc/B/Q back[/]");
+    }
+
+    private static string ActionStatusCell(string status)
+    {
+        return status.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+            ? $"[red]{Markup.Escape(status)}[/]"
+            : status.Equals("Submitted", StringComparison.OrdinalIgnoreCase)
+                ? $"[green]{Markup.Escape(status)}[/]"
+                : Markup.Escape(status);
     }
 
     private async Task ShowReportsAsync()
@@ -2752,14 +2758,7 @@ internal sealed class W365CliApp
 
     private static void RenderStatusBar()
     {
-        if (string.IsNullOrWhiteSpace(statusMessage))
-        {
-            return;
-        }
-
-        var age = statusMessageAt is null ? string.Empty : $" [grey]({Math.Max(0, (int)(DateTimeOffset.Now - statusMessageAt.Value).TotalSeconds)}s ago)[/]";
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($"[grey]Status:[/] {statusMessage}{age}");
+        return;
     }
 
     private static bool IsActionHistoryHotkey(ConsoleKeyInfo key)
