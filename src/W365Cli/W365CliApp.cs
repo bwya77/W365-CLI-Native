@@ -53,7 +53,7 @@ internal sealed class W365CliApp
                 default:
                     if (IsActionHistoryHotkey(key))
                     {
-                        ShowActionHistory();
+                        await ShowActionHistoryAsync();
                     }
                     else if (key.KeyChar is 'p' or 'P')
                     {
@@ -203,7 +203,7 @@ internal sealed class W365CliApp
                 default:
                     if (IsActionHistoryHotkey(key))
                     {
-                        ShowActionHistory();
+                        await ShowActionHistoryAsync();
                     }
                     else if (key.KeyChar is 'p' or 'P')
                     {
@@ -309,7 +309,7 @@ internal sealed class W365CliApp
                 default:
                     if (IsActionHistoryHotkey(key))
                     {
-                        ShowActionHistory();
+                        await ShowActionHistoryAsync();
                     }
                     else if (key.KeyChar is '/' or 'f' or 'F')
                     {
@@ -502,7 +502,7 @@ internal sealed class W365CliApp
                 default:
                     if (IsActionHistoryHotkey(key))
                     {
-                        ShowActionHistory();
+                        await ShowActionHistoryAsync();
                     }
                     else if (key.KeyChar is '/' or 'f' or 'F')
                     {
@@ -893,7 +893,7 @@ internal sealed class W365CliApp
         Pause();
     }
 
-    private static void ShowActionHistory()
+    private async Task ShowActionHistoryAsync()
     {
         var selectedIndex = 0;
         while (true)
@@ -918,6 +918,12 @@ internal sealed class W365CliApp
                 case ConsoleKey.C:
                     ActionHistory.Clear();
                     selectedIndex = 0;
+                    break;
+                case ConsoleKey.Enter:
+                    if (ActionHistory.Count > 0)
+                    {
+                        await OpenRemoteActionsFromHistoryAsync(ActionHistory[selectedIndex]);
+                    }
                     break;
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
@@ -983,7 +989,7 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | C clear | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter remote actions | C clear | Esc/B/Q back[/]");
     }
 
     private static string ActionStatusCell(string status)
@@ -993,6 +999,24 @@ internal sealed class W365CliApp
             : status.Equals("Submitted", StringComparison.OrdinalIgnoreCase)
                 ? $"[green]{Markup.Escape(status)}[/]"
                 : Markup.Escape(status);
+    }
+
+    private async Task OpenRemoteActionsFromHistoryAsync(ActionHistoryItem item)
+    {
+        var cloudPcs = await LoadCloudPcsAsync();
+        var cloudPc = cloudPcs.FirstOrDefault(pc =>
+            string.Equals(pc.Name, item.CloudPcName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(pc.ManagedDeviceName, item.CloudPcName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(pc.DisplayName, item.CloudPcName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(pc.Id, item.Target, StringComparison.OrdinalIgnoreCase));
+
+        if (cloudPc is null)
+        {
+            TimedMessage("[yellow]Could not resolve this action to a Cloud PC.[/]");
+            return;
+        }
+
+        await ShowCloudPcDetailsAsync(cloudPc, "Remote action history");
     }
 
     private async Task ShowReportsAsync()
@@ -1455,7 +1479,7 @@ internal sealed class W365CliApp
                 default:
                     if (IsActionHistoryHotkey(key))
                     {
-                        ShowActionHistory();
+                        await ShowActionHistoryAsync();
                     }
                     else if (key.KeyChar is '/' or 'f' or 'F')
                     {
@@ -2122,7 +2146,7 @@ internal sealed class W365CliApp
                 default:
                     if (IsActionHistoryHotkey(key))
                     {
-                        ShowActionHistory();
+                        await ShowActionHistoryAsync();
                     }
                     else if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
                     {
@@ -2845,7 +2869,7 @@ internal sealed class W365CliApp
         return (status, name, publisher, published, added);
     }
 
-    private async Task ShowCloudPcDetailsAsync(CloudPcSummary cloudPc)
+    private async Task ShowCloudPcDetailsAsync(CloudPcSummary cloudPc, string initialSubPanel = "Actions")
     {
         var actions = GetCloudPcActions(cloudPc);
         var selectedActionIndex = 0;
@@ -2854,7 +2878,19 @@ internal sealed class W365CliApp
         IReadOnlyList<CloudPcRemoteActionResult>? remoteActions = null;
         var selectedSnapshotIndex = 0;
         var selectedRemoteActionIndex = 0;
-        var activeSubPanel = "Actions";
+        var activeSubPanel = initialSubPanel;
+        if (activeSubPanel == "Remote action history")
+        {
+            remoteActions = await LoadRemoteActionsForCloudPcAsync(cloudPc);
+        }
+        else if (activeSubPanel == "Snapshots")
+        {
+            snapshots = await LoadSnapshotsForCloudPcAsync(cloudPc);
+        }
+        else if (activeSubPanel == "Disk space")
+        {
+            diskSpace = await LoadDiskSpaceForCloudPcAsync(cloudPc);
+        }
 
         while (true)
         {
