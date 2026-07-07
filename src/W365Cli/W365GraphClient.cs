@@ -187,6 +187,68 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<GraphTableRow>> GetServicePlanRowsAsync()
+    {
+        var plans = await GetCloudPcServicePlansAsync();
+        return plans
+            .Select(plan => new GraphTableRow(
+                plan.Name,
+                JoinSummary(plan.Type, $"{plan.VCpuCount} vCPU", $"{plan.RamGb} GB RAM", $"{plan.StorageGb} GB storage"),
+                new Dictionary<string, string>
+                {
+                    ["Name"] = plan.Name,
+                    ["Type"] = plan.Type ?? "-",
+                    ["vCPU"] = plan.VCpuCount?.ToString() ?? "-",
+                    ["RAM"] = plan.RamGb is null ? "-" : $"{plan.RamGb} GB",
+                    ["Storage"] = plan.StorageGb is null ? "-" : $"{plan.StorageGb} GB",
+                    ["Profile"] = plan.UserProfileGb is null ? "-" : $"{plan.UserProfileGb} GB",
+                    ["Service plan ID"] = plan.Id
+                }))
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetGalleryImageRowsAsync()
+    {
+        var select = Uri.EscapeDataString("id,displayName,offerDisplayName,skuDisplayName,publisherName,recommendedSku,status,sizeInGB,startDate,endDate,expirationDate,osVersionNumber");
+        var rows = await GetJsonRowsAsync($"deviceManagement/virtualEndpoint/galleryImages?$select={select}", "status", "recommendedSku", "osVersionNumber");
+        return rows.OrderBy(row => GetFirst(row.Fields, "status")).ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetCustomImageRowsAsync()
+    {
+        var select = Uri.EscapeDataString("id,displayName,operatingSystem,osBuildNumber,version,status,expirationDate,osStatus,sourceImageResourceId,lastModifiedDateTime,statusDetails,errorCode,osVersionNumber,sizeInGB");
+        var rows = await GetJsonRowsAsync($"deviceManagement/virtualEndpoint/deviceImages?$select={select}", "status", "operatingSystem", "osBuildNumber");
+        return rows.OrderBy(row => GetFirst(row.Fields, "status")).ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetSupportedRegionRowsAsync()
+    {
+        var select = Uri.EscapeDataString("id,displayName,regionStatus,supportedSolution,regionGroup,geographicLocationType");
+        var rows = await GetJsonRowsAsync($"deviceManagement/virtualEndpoint/supportedRegions?$select={select}", "regionStatus", "supportedSolution", "regionGroup");
+        return rows.OrderBy(row => GetFirst(row.Fields, "regionGroup")).ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetLicensingAllotmentRowsAsync()
+    {
+        var rows = await GetJsonRowsAsync("https://graph.microsoft.com/beta/admin/cloudLicensing/allotments", "skuPartNumber", "allottedUnits", "consumedUnits");
+        return rows
+            .Select(row =>
+            {
+                var fields = new Dictionary<string, string>(row.Fields, StringComparer.OrdinalIgnoreCase);
+                if (int.TryParse(GetFirst(fields, "allottedUnits"), out var allotted) &&
+                    int.TryParse(GetFirst(fields, "consumedUnits"), out var consumed))
+                {
+                    fields["availableUnits"] = (allotted - consumed).ToString();
+                }
+
+                var title = GetFirst(fields, "skuPartNumber", "skuId", "id") ?? "-";
+                var summary = JoinSummary($"Allotted: {GetFirst(fields, "allottedUnits") ?? "-"}", $"Consumed: {GetFirst(fields, "consumedUnits") ?? "-"}", $"Available: {GetFirst(fields, "availableUnits") ?? "-"}");
+                return new GraphTableRow(title, summary, fields);
+            })
+            .OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     public async Task ResizeCloudPcAsync(string cloudPcId, string targetServicePlanId)
     {
         await PostJsonAsync(

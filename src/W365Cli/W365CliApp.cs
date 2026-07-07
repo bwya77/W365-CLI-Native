@@ -44,7 +44,7 @@ internal sealed class W365CliApp
                     await ShowReportsAsync();
                     break;
                 case "Catalog":
-                    ShowPlaceholderArea("Catalog", "Service plans, images, supported regions, and licensing will be wired next.");
+                    await ShowCatalogAsync();
                     break;
                 case "Tenant":
                     await ShowTenantSettingsAsync();
@@ -623,6 +623,82 @@ internal sealed class W365CliApp
         }
     }
 
+    private async Task ShowCatalogAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        var choices = new[] { "Service plans", "Gallery images", "Custom images", "Supported regions", "Licensing allotments", "Back" };
+        var selectedIndex = 0;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine("[cyan]Catalog[/]");
+            AnsiConsole.MarkupLine("[grey]Plans, images, regions, and licensing used by Windows 365.[/]");
+            AnsiConsole.WriteLine();
+
+            for (var index = 0; index < choices.Length; index++)
+            {
+                var escaped = Markup.Escape(choices[index]);
+                AnsiConsole.MarkupLine(index == selectedIndex
+                    ? $"[white on blue]> {escaped}[/]"
+                    : $"  {escaped}");
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | Esc/B/Q back[/]");
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(choices.Length - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = choices.Length - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    switch (choices[selectedIndex])
+                    {
+                        case "Service plans":
+                            await ShowGraphRowsAsync("Windows 365 service plans", _session.Graph.GetServicePlanRowsAsync, GetServicePlansHeader, FormatServicePlanRow);
+                            break;
+                        case "Gallery images":
+                            await ShowGraphRowsAsync("Windows 365 gallery images", _session.Graph.GetGalleryImageRowsAsync, GetGalleryImagesHeader, FormatGalleryImageRow);
+                            break;
+                        case "Custom images":
+                            await ShowGraphRowsAsync("Windows 365 custom images", _session.Graph.GetCustomImageRowsAsync, GetCustomImagesHeader, FormatCustomImageRow);
+                            break;
+                        case "Supported regions":
+                            await ShowGraphRowsAsync("Windows 365 supported regions", _session.Graph.GetSupportedRegionRowsAsync, GetSupportedRegionsHeader, FormatSupportedRegionRow);
+                            break;
+                        case "Licensing allotments":
+                            await ShowGraphRowsAsync("Windows 365 licensing allotments", _session.Graph.GetLicensingAllotmentRowsAsync, GetLicensingAllotmentsHeader, FormatLicensingAllotmentRow);
+                            break;
+                        case "Back":
+                            return;
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
     private async Task ShowConnectivityHistoryAsync()
     {
         var cloudPcs = await LoadCloudPcsAsync();
@@ -804,9 +880,21 @@ internal sealed class W365CliApp
         Func<GraphTableRow, string>? rowFactory = null,
         Func<GraphTableRow, Task>? enterAction = null)
     {
-        var rows = await AnsiConsole.Status()
-            .Spinner(Spinner.Known.Dots)
-            .StartAsync($"Loading {title}...", async _ => await loader());
+        IReadOnlyList<GraphTableRow> rows;
+        try
+        {
+            rows = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync($"Loading {title}...", async _ => await loader());
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine($"[red]Failed to load {Markup.Escape(title)}.[/]");
+            AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
+            TimedMessage("[grey]Returning...[/]");
+            return;
+        }
 
         if (rows.Count == 0)
         {
@@ -1135,6 +1223,103 @@ internal sealed class W365CliApp
         var cloudPc = Math.Max(28, (int)(remaining * 0.48));
         var user = Math.Max(18, remaining - cloudPc);
         return (cloudPc, user, status, switchWidth);
+    }
+
+    private static string GetServicePlansHeader()
+    {
+        return Row("Name", 44, "Type", 12, "vCPU", 6, "RAM", 8, "Storage", 10, "Profile", 10);
+    }
+
+    private static string FormatServicePlanRow(GraphTableRow row)
+    {
+        return Row(
+            GetField(row, "Name"), 44,
+            GetField(row, "Type"), 12,
+            GetField(row, "vCPU"), 6,
+            GetField(row, "RAM"), 8,
+            GetField(row, "Storage"), 10,
+            GetField(row, "Profile"), 10);
+    }
+
+    private static string GetGalleryImagesHeader()
+    {
+        var widths = GetCatalogImageWidths();
+        return Row("Name", widths.Name, "Status", widths.Status, "Recommended SKU", widths.Sku, "Size", widths.Size, "OS version", widths.Os);
+    }
+
+    private static string FormatGalleryImageRow(GraphTableRow row)
+    {
+        var widths = GetCatalogImageWidths();
+        return Row(
+            GetField(row, "displayName"), widths.Name,
+            GetField(row, "status"), widths.Status,
+            GetField(row, "recommendedSku"), widths.Sku,
+            FormatCatalogGb(GetField(row, "sizeInGB")), widths.Size,
+            GetField(row, "osVersionNumber"), widths.Os);
+    }
+
+    private static string GetCustomImagesHeader()
+    {
+        var widths = GetCatalogImageWidths();
+        return Row("Name", widths.Name, "Status", widths.Status, "OS", widths.Sku, "Size", widths.Size, "Modified", widths.Os);
+    }
+
+    private static string FormatCustomImageRow(GraphTableRow row)
+    {
+        var widths = GetCatalogImageWidths();
+        return Row(
+            GetField(row, "displayName"), widths.Name,
+            GetField(row, "status"), widths.Status,
+            GetField(row, "operatingSystem"), widths.Sku,
+            FormatCatalogGb(GetField(row, "sizeInGB")), widths.Size,
+            GetField(row, "lastModifiedDateTime"), widths.Os);
+    }
+
+    private static (int Name, int Status, int Sku, int Size, int Os) GetCatalogImageWidths()
+    {
+        var available = Math.Max(92, Console.WindowWidth - 4);
+        const int status = 14;
+        const int size = 8;
+        var remaining = Math.Max(50, available - status - size - 4);
+        var name = Math.Clamp((int)(remaining * 0.42), 30, 44);
+        var sku = Math.Clamp((int)(remaining * 0.34), 18, 30);
+        var os = Math.Max(16, remaining - name - sku);
+        return (name, status, sku, size, os);
+    }
+
+    private static string GetSupportedRegionsHeader()
+    {
+        return Row("Name", 34, "Status", 12, "Solution", 16, "Group", 20, "Geo", 20);
+    }
+
+    private static string FormatSupportedRegionRow(GraphTableRow row)
+    {
+        return Row(
+            GetField(row, "displayName"), 34,
+            GetField(row, "regionStatus"), 12,
+            GetField(row, "supportedSolution"), 16,
+            GetField(row, "regionGroup"), 20,
+            GetField(row, "geographicLocationType"), 20);
+    }
+
+    private static string GetLicensingAllotmentsHeader()
+    {
+        return Row("SKU", 34, "Allotted", 10, "Consumed", 10, "Available", 10, "Assignable", 18);
+    }
+
+    private static string FormatLicensingAllotmentRow(GraphTableRow row)
+    {
+        return Row(
+            GetField(row, "skuPartNumber"), 34,
+            GetField(row, "allottedUnits"), 10,
+            GetField(row, "consumedUnits"), 10,
+            GetField(row, "availableUnits"), 10,
+            GetField(row, "assignableTo"), 18);
+    }
+
+    private static string FormatCatalogGb(string value)
+    {
+        return value == "-" ? "-" : $"{value} GB";
     }
 
     private static string GetSwitchValue(GraphTableRow row)
