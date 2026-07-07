@@ -170,7 +170,7 @@ internal sealed class W365CliApp
         dashboard.AddColumn();
         dashboard.AddColumn();
         dashboard.AddRow(
-            new Panel(new Markup($"{connectionLight} [bold {connectionColor}]{connectionText}[/]\n[grey]Graph session[/]")).Border(BoxBorder.Rounded),
+            new Panel(new Markup($"{connectionLight} [bold {connectionColor}]{connectionText}[/]\n[grey]Status[/]")).Border(BoxBorder.Rounded),
             new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantId, 36))}[/]\n[grey]Tenant ID[/]")).Border(BoxBorder.Rounded),
             new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantName, 30))}[/]\n[grey]Tenant name[/]")).Border(BoxBorder.Rounded));
 
