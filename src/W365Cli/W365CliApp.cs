@@ -881,11 +881,13 @@ internal sealed class W365CliApp
             "Back"
         };
         var selectedActionIndex = 0;
+        CloudPcDiskSpace? diskSpace = null;
+        var activeSubPanel = "Actions";
 
         while (true)
         {
             AnsiConsole.Clear();
-            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex);
+            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace);
             var key = Console.ReadKey(intercept: true);
 
             switch (key.Key)
@@ -909,14 +911,32 @@ internal sealed class W365CliApp
                         return;
                     }
 
-                    await InvokeCloudPcActionAsync(cloudPc, action);
+                    if (action == "Disk space")
+                    {
+                        activeSubPanel = "Disk space";
+                        diskSpace = await LoadDiskSpaceForCloudPcAsync(cloudPc);
+                    }
+                    else
+                    {
+                        await InvokeCloudPcActionAsync(cloudPc, action);
+                    }
                     break;
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
+                    if (activeSubPanel != "Actions")
+                    {
+                        activeSubPanel = "Actions";
+                        break;
+                    }
                     return;
                 default:
                     if (key.KeyChar == 'b' || key.KeyChar == 'B' || key.KeyChar == 'q' || key.KeyChar == 'Q')
                     {
+                        if (activeSubPanel != "Actions")
+                        {
+                            activeSubPanel = "Actions";
+                            break;
+                        }
                         return;
                     }
                     break;
@@ -924,7 +944,20 @@ internal sealed class W365CliApp
         }
     }
 
-    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex)
+    private async Task<CloudPcDiskSpace?> LoadDiskSpaceForCloudPcAsync(CloudPcSummary cloudPc)
+    {
+        var results = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading disk space...", async _ =>
+            {
+                IReadOnlyList<CloudPcSummary> targets = new[] { cloudPc };
+                return await _session.Graph.GetCloudPcDiskSpacesAsync(targets);
+            });
+
+        return results.FirstOrDefault();
+    }
+
+    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace)
     {
         AnsiConsole.MarkupLine($"[cyan]W365 CLI Native > Cloud PCs > {Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
@@ -945,34 +978,58 @@ internal sealed class W365CliApp
                 ? $"[white on blue]> {Markup.Escape(action)}[/]"
                 : $"  {Markup.Escape(action)}");
 
-        var actionsPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
-            .Header("Actions")
-            .Border(BoxBorder.Rounded);
+        var rightPanel = activeSubPanel == "Disk space"
+            ? CreateDiskSpaceSubPanel(diskSpace)
+            : new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
+                .Header("Actions")
+                .Border(BoxBorder.Rounded);
 
         if (Console.WindowWidth >= 120)
         {
             var grid = new Grid();
             grid.AddColumn();
             grid.AddColumn();
-            grid.AddRow(details, actionsPanel);
+            grid.AddRow(details, rightPanel);
             AnsiConsole.Write(grid);
         }
         else
         {
             AnsiConsole.Write(details);
-            AnsiConsole.Write(actionsPanel);
+            AnsiConsole.Write(rightPanel);
         }
 
-        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
+        var hint = activeSubPanel == "Disk space"
+            ? "Esc/B/Q back to actions"
+            : "Up/Down choose action | Enter run | Esc/B/Q back";
+        AnsiConsole.MarkupLine($"[grey]{hint}[/]");
+    }
+
+    private static Panel CreateDiskSpaceSubPanel(CloudPcDiskSpace? disk)
+    {
+        if (disk is null)
+        {
+            return new Panel("[yellow]Disk space is unavailable for this Cloud PC.[/]")
+                .Header("Disk space")
+                .Border(BoxBorder.Rounded);
+        }
+
+        var rows = new Rows(
+            new Markup($"[bold]Free[/] {Markup.Escape(FormatGb(disk.FreeStorageGb))}"),
+            new Markup($"[bold]Used[/] {Markup.Escape(FormatGb(disk.UsedStorageGb))}"),
+            new Markup($"[bold]Total[/] {Markup.Escape(FormatGb(disk.TotalStorageGb))}"),
+            new Markup($"[bold]Percent free[/] {Markup.Escape(disk.PercentFree is null ? "-" : $"{disk.PercentFree}%")}"),
+            new Markup($"[bold]Last sync[/] {Markup.Escape(disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
+            new Markup($"[bold]Managed device[/]\n{Markup.Escape(disk.ManagedDeviceName ?? "-")}"));
+
+        return new Panel(rows)
+            .Header("Disk space")
+            .Border(BoxBorder.Rounded);
     }
 
     private async Task InvokeCloudPcActionAsync(CloudPcSummary cloudPc, string action)
     {
         switch (action)
         {
-            case "Disk space":
-                await ShowDiskSpaceAsync(cloudPc);
-                break;
             case "Restart":
                 await ConfirmAndRunAsync("Restart", cloudPc.Name, async () => await _session.Graph.RestartCloudPcAsync(cloudPc.Id));
                 break;
