@@ -364,16 +364,17 @@ internal sealed class W365GraphClient
             }
             catch (HttpRequestException ex)
             {
+                var reason = FormatLaunchDetailError(ex);
                 rows.Add(new GraphTableRow(
                     cloudPc.Name,
-                    "Launch details unavailable",
+                    $"Status: Unavailable | Reason: {reason}",
                     new Dictionary<string, string>
                     {
                         ["Cloud PC"] = cloudPc.Name,
                         ["Cloud PC ID"] = cloudPc.Id,
                         ["User"] = cloudPc.UserPrincipalName,
                         ["Status"] = "Unavailable",
-                        ["Error"] = ex.Message
+                        ["Reason"] = reason
                     }));
             }
         }
@@ -614,6 +615,30 @@ internal sealed class W365GraphClient
             null or "" or "-" => "Unknown",
             _ => value
         };
+    }
+
+    private static string FormatLaunchDetailError(HttpRequestException ex)
+    {
+        var message = ex.Message;
+        if (message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Not Found", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Launch details not found for this user";
+        }
+
+        if (message.Contains("403", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Access denied";
+        }
+
+        if (message.Contains("401", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Authentication required";
+        }
+
+        return "Launch details unavailable";
     }
 
     private static (string Action, bool IncludeReportName) ResolveReportDefinition(string reportName)
