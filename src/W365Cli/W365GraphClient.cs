@@ -70,6 +70,16 @@ internal sealed class W365GraphClient
         await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/reboot", new { });
     }
 
+    public async Task RenameCloudPcAsync(string cloudPcId, string newDisplayName)
+    {
+        await PostJsonAsync(
+            $"https://graph.microsoft.com/v1.0/deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/rename",
+            new
+            {
+                displayName = newDisplayName
+            });
+    }
+
     public async Task StartCloudPcAsync(string cloudPcId)
     {
         await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/powerOn", new { });

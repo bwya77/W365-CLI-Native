@@ -874,6 +874,7 @@ internal sealed class W365CliApp
             "Disk space",
             "Snapshots",
             "Resize",
+            "Rename",
             "Restart",
             "Sync",
             "Reprovision",
@@ -1257,6 +1258,9 @@ internal sealed class W365CliApp
             case "Resize":
                 await ShowResizeAsync(cloudPc);
                 break;
+            case "Rename":
+                await ShowRenameAsync(cloudPc);
+                break;
             case "Restart":
                 await ConfirmAndRunAsync("Restart", cloudPc.Name, async () => await _session.Graph.RestartCloudPcAsync(cloudPc.Id));
                 break;
@@ -1325,6 +1329,26 @@ internal sealed class W365CliApp
 
             return;
         }
+    }
+
+    private async Task ShowRenameAsync(CloudPcSummary cloudPc)
+    {
+        AnsiConsole.Clear();
+        AnsiConsole.MarkupLine($"[cyan]Rename[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
+        AnsiConsole.WriteLine();
+
+        var newDisplayName = AnsiConsole.Ask<string>("New Cloud PC display name:");
+        if (string.IsNullOrWhiteSpace(newDisplayName))
+        {
+            AnsiConsole.MarkupLine("[yellow]Rename cancelled. Display name is required.[/]");
+            Pause();
+            return;
+        }
+
+        await ConfirmAndRunAsync(
+            "Rename",
+            $"{cloudPc.Name} to {newDisplayName}",
+            async () => await _session.Graph.RenameCloudPcAsync(cloudPc.Id, newDisplayName));
     }
 
     private async Task ConfirmAndRunAsync(string action, string target, Func<Task> operation)
