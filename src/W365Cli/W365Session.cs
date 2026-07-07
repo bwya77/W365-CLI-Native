@@ -6,6 +6,8 @@ namespace W365Cli;
 
 internal sealed class W365Session
 {
+    private const string DefaultClientId = "9d497858-c200-402c-a363-279a5800d730";
+
     private readonly string[] _scopes =
     [
         "https://graph.microsoft.com/.default"
@@ -24,11 +26,7 @@ internal sealed class W365Session
         var clientId = Environment.GetEnvironmentVariable("W365CLI_CLIENT_ID");
         if (string.IsNullOrWhiteSpace(clientId))
         {
-            AnsiConsole.MarkupLine("[red]W365CLI_CLIENT_ID is not set.[/]");
-            AnsiConsole.MarkupLine("Create an Entra public client app registration for the native CLI, then set:");
-            AnsiConsole.MarkupLine("[grey]$env:W365CLI_CLIENT_ID = '<client-id>'[/]");
-            IsConnected = false;
-            return;
+            clientId = DefaultClientId;
         }
 
         TenantId = Environment.GetEnvironmentVariable("W365CLI_TENANT_ID");
@@ -37,7 +35,11 @@ internal sealed class W365Session
         {
             ClientId = clientId,
             TenantId = string.IsNullOrWhiteSpace(TenantId) ? null : TenantId,
-            RedirectUri = new Uri("http://localhost")
+            RedirectUri = new Uri("http://localhost"),
+            TokenCachePersistenceOptions = new TokenCachePersistenceOptions
+            {
+                Name = "W365CliNative"
+            }
         };
 
         _credential = new InteractiveBrowserCredential(options);

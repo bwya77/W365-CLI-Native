@@ -16,10 +16,15 @@ This is an early scaffold. It currently includes:
 ## Prerequisites
 
 - .NET 8 SDK.
-- An Entra public client app registration for this native CLI.
-- Microsoft Graph delegated permissions needed for Windows 365 scenarios.
+- Microsoft Graph delegated permissions consented for the W365 CLI Native app.
 
-Set the app registration client ID before running:
+The default app registration client ID is built in:
+
+```text
+9d497858-c200-402c-a363-279a5800d730
+```
+
+You can override it during development:
 
 ```powershell
 $env:W365CLI_CLIENT_ID = '<client-id>'
@@ -30,6 +35,23 @@ Optionally set a tenant ID:
 ```powershell
 $env:W365CLI_TENANT_ID = '<tenant-id>'
 ```
+
+Recommended delegated Microsoft Graph permissions:
+
+```text
+CloudPC.Read.All
+CloudPC.ReadWrite.All
+DeviceManagementManagedDevices.Read.All
+DeviceManagementManagedDevices.PrivilegedOperations.All
+User.Read.All
+Group.Read.All
+offline_access
+openid
+profile
+email
+```
+
+The app uses a persistent token cache so users do not need to sign in every run when refresh tokens are available.
 
 ## Build
 
