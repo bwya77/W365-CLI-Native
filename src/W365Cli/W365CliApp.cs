@@ -882,12 +882,13 @@ internal sealed class W365CliApp
         };
         var selectedActionIndex = 0;
         CloudPcDiskSpace? diskSpace = null;
+        IReadOnlyList<CloudPcSnapshot>? snapshots = null;
         var activeSubPanel = "Actions";
 
         while (true)
         {
             AnsiConsole.Clear();
-            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace);
+            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace, snapshots);
             var key = Console.ReadKey(intercept: true);
 
             switch (key.Key)
@@ -915,6 +916,11 @@ internal sealed class W365CliApp
                     {
                         activeSubPanel = "Disk space";
                         diskSpace = await LoadDiskSpaceForCloudPcAsync(cloudPc);
+                    }
+                    else if (action == "Snapshots")
+                    {
+                        activeSubPanel = "Snapshots";
+                        snapshots = await LoadSnapshotsForCloudPcAsync(cloudPc);
                     }
                     else
                     {
@@ -957,7 +963,14 @@ internal sealed class W365CliApp
         return results.FirstOrDefault();
     }
 
-    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace)
+    private async Task<IReadOnlyList<CloudPcSnapshot>> LoadSnapshotsForCloudPcAsync(CloudPcSummary cloudPc)
+    {
+        return await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading snapshots...", async _ => await _session.Graph.GetCloudPcSnapshotsAsync(cloudPc));
+    }
+
+    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace, IReadOnlyList<CloudPcSnapshot>? snapshots)
     {
         AnsiConsole.MarkupLine($"[cyan]W365 CLI Native > Cloud PCs > {Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
@@ -978,11 +991,14 @@ internal sealed class W365CliApp
                 ? $"[white on blue]> {Markup.Escape(action)}[/]"
                 : $"  {Markup.Escape(action)}");
 
-        var rightPanel = activeSubPanel == "Disk space"
-            ? CreateDiskSpaceSubPanel(diskSpace)
-            : new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
+        var rightPanel = activeSubPanel switch
+        {
+            "Disk space" => CreateDiskSpaceSubPanel(diskSpace),
+            "Snapshots" => CreateSnapshotsSubPanel(snapshots),
+            _ => new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
                 .Header("Actions")
-                .Border(BoxBorder.Rounded);
+                .Border(BoxBorder.Rounded)
+        };
 
         if (Console.WindowWidth >= 120)
         {
@@ -998,9 +1014,9 @@ internal sealed class W365CliApp
             AnsiConsole.Write(rightPanel);
         }
 
-        var hint = activeSubPanel == "Disk space"
-            ? "Esc/B/Q back to actions"
-            : "Up/Down choose action | Enter run | Esc/B/Q back";
+        var hint = activeSubPanel == "Actions"
+            ? "Up/Down choose action | Enter run | Esc/B/Q back"
+            : "Esc/B/Q back to actions";
         AnsiConsole.MarkupLine($"[grey]{hint}[/]");
     }
 
@@ -1023,6 +1039,47 @@ internal sealed class W365CliApp
 
         return new Panel(rows)
             .Header("Disk space")
+            .Border(BoxBorder.Rounded);
+    }
+
+    private static Panel CreateSnapshotsSubPanel(IReadOnlyList<CloudPcSnapshot>? snapshots)
+    {
+        if (snapshots is null)
+        {
+            return new Panel("[grey]Snapshots have not been loaded yet.[/]")
+                .Header("Snapshots")
+                .Border(BoxBorder.Rounded);
+        }
+
+        if (snapshots.Count == 0)
+        {
+            return new Panel("[yellow]No snapshots found for this Cloud PC.[/]")
+                .Header("Snapshots")
+                .Border(BoxBorder.Rounded);
+        }
+
+        var table = new Table()
+            .Border(TableBorder.Simple)
+            .AddColumn("Status")
+            .AddColumn("Type")
+            .AddColumn("Created")
+            .AddColumn("Expires");
+
+        foreach (var snapshot in snapshots.Take(Math.Max(3, Console.WindowHeight - 18)))
+        {
+            table.AddRow(
+                Markup.Escape(snapshot.Status ?? "-"),
+                Markup.Escape(snapshot.SnapshotType ?? "-"),
+                Markup.Escape(snapshot.CreatedDateTime?.ToLocalTime().ToString("g") ?? "-"),
+                Markup.Escape(snapshot.ExpirationDateTime?.ToLocalTime().ToString("g") ?? "-"));
+        }
+
+        var rows = new Rows(
+            new Markup($"[bold]Total[/] {snapshots.Count}"),
+            table);
+
+        return new Panel(rows)
+            .Header("Snapshots")
             .Border(BoxBorder.Rounded);
     }
 

@@ -130,6 +130,29 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<CloudPcSnapshot>> GetCloudPcSnapshotsAsync(CloudPcSummary cloudPc)
+    {
+        var escapedCloudPcId = Uri.EscapeDataString(cloudPc.Id);
+        var select = Uri.EscapeDataString("id,cloudPcId,status,createdDateTime,lastRestoredDateTime,snapshotType,expirationDateTime,healthCheckStatus");
+        var uri = $"deviceManagement/virtualEndpoint/cloudPCs/{escapedCloudPcId}/retrieveSnapshots?$select={select}";
+        var page = await GetAsync<GraphPage<CloudPcSnapshotRaw>>(uri);
+
+        return (page?.Value ?? [])
+            .Select(snapshot => new CloudPcSnapshot
+            {
+                SnapshotId = snapshot.Id,
+                CloudPcId = snapshot.CloudPcId ?? cloudPc.Id,
+                Status = snapshot.Status,
+                SnapshotType = snapshot.SnapshotType,
+                CreatedDateTime = snapshot.CreatedDateTime,
+                ExpirationDateTime = snapshot.ExpirationDateTime,
+                LastRestoredDateTime = snapshot.LastRestoredDateTime,
+                HealthCheckStatus = snapshot.HealthCheckStatus
+            })
+            .OrderByDescending(snapshot => snapshot.CreatedDateTime)
+            .ToArray();
+    }
+
     private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
     {
         if (_accessTokenProvider is null)

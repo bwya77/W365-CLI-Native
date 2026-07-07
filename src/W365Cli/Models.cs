@@ -111,6 +111,52 @@ internal sealed record CloudPcDiskSpace
     public DateTimeOffset? LastSyncDateTime { get; init; }
 }
 
+internal sealed record CloudPcSnapshotRaw
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("cloudPcId")]
+    public string? CloudPcId { get; init; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("snapshotType")]
+    public string? SnapshotType { get; init; }
+
+    [JsonPropertyName("createdDateTime")]
+    public DateTimeOffset? CreatedDateTime { get; init; }
+
+    [JsonPropertyName("expirationDateTime")]
+    public DateTimeOffset? ExpirationDateTime { get; init; }
+
+    [JsonPropertyName("lastRestoredDateTime")]
+    public DateTimeOffset? LastRestoredDateTime { get; init; }
+
+    [JsonPropertyName("healthCheckStatus")]
+    public string? HealthCheckStatus { get; init; }
+}
+
+internal sealed record CloudPcSnapshot
+{
+    public string SnapshotId { get; init; } = string.Empty;
+
+    public string CloudPcId { get; init; } = string.Empty;
+
+    public string? Status { get; init; }
+
+    public string? SnapshotType { get; init; }
+
+    public DateTimeOffset? CreatedDateTime { get; init; }
+
+    public DateTimeOffset? ExpirationDateTime { get; init; }
+
+    public DateTimeOffset? LastRestoredDateTime { get; init; }
+
+    public string? HealthCheckStatus { get; init; }
+}
+
 internal sealed record OrganizationSummary
 {
     [JsonPropertyName("id")]
