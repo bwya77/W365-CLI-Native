@@ -29,6 +29,7 @@ internal sealed record CloudPcSummary
     [JsonPropertyName("servicePlanName")]
     public string? ServicePlanName { get; init; }
 
+    [JsonIgnore]
     public string Name => !string.IsNullOrWhiteSpace(DisplayName)
         ? DisplayName!
         : ManagedDeviceName ?? Id;
@@ -60,7 +61,17 @@ internal sealed record CloudAppSummary
     [JsonPropertyName("lastPublishedDateTime")]
     public DateTimeOffset? LastPublishedDateTime { get; init; }
 
+    [JsonIgnore]
     public string DisplayName => !string.IsNullOrWhiteSpace(DisplayNameValue)
         ? DisplayNameValue!
         : AppName ?? DiscoveredAppName ?? Id;
+}
+
+internal sealed record OrganizationSummary
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; init; }
 }

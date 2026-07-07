@@ -19,6 +19,8 @@ internal sealed class W365Session
 
     public string? TenantId { get; private set; }
 
+    public string? TenantName { get; private set; }
+
     public W365GraphClient Graph { get; private set; } = W365GraphClient.NotConnected;
 
     public async Task ConnectAsync()
@@ -49,6 +51,23 @@ internal sealed class W365Session
 
             Graph = new W365GraphClient(_credential, _scopes);
             IsConnected = !string.IsNullOrWhiteSpace(token.Token);
+            if (IsConnected)
+            {
+                try
+                {
+                    var organization = await Graph.GetOrganizationAsync();
+                    if (organization is not null)
+                    {
+                        TenantId = organization.Id;
+                        TenantName = organization.DisplayName;
+                    }
+                }
+                catch
+                {
+                    // Tenant display is helpful but not required for command execution.
+                }
+            }
+
             AnsiConsole.MarkupLine(IsConnected ? "[green]Connected.[/]" : "[red]Connection failed.[/]");
         }
         catch (AuthenticationFailedException ex)
@@ -74,5 +93,7 @@ internal sealed class W365Session
         _credential = null;
         Graph = W365GraphClient.NotConnected;
         IsConnected = false;
+        TenantId = null;
+        TenantName = null;
     }
 }

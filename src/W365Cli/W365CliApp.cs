@@ -59,7 +59,10 @@ internal sealed class W365CliApp
 
         if (_session.IsConnected)
         {
-            AnsiConsole.MarkupLine($"[green]Connected[/] Tenant: [grey]{_session.TenantId ?? "unknown"}[/]");
+            var tenantText = _session.TenantName is not null
+                ? $"{_session.TenantName} ({_session.TenantId})"
+                : _session.TenantId ?? "unknown";
+            AnsiConsole.MarkupLine($"[green]Connected[/] Tenant: [grey]{Markup.Escape(tenantText)}[/]");
         }
         else
         {
@@ -115,26 +118,26 @@ internal sealed class W365CliApp
             return;
         }
 
-        var table = new Table()
-            .Title("Windows 365 Cloud PCs")
-            .AddColumn("Name")
-            .AddColumn("Status")
-            .AddColumn("Type")
-            .AddColumn("User")
-            .AddColumn("Service plan");
-
-        foreach (var pc in cloudPcs)
+        while (true)
         {
-            table.AddRow(
-                Markup.Escape(pc.Name),
-                Markup.Escape(pc.Status ?? "-"),
-                Markup.Escape(pc.ProvisioningType ?? "-"),
-                Markup.Escape(pc.UserPrincipalName ?? "-"),
-                Markup.Escape(pc.ServicePlanName ?? "-"));
-        }
+            RenderHeader();
+            AnsiConsole.Write(CreateCloudPcTable(cloudPcs));
 
-        AnsiConsole.Write(table);
-        Pause();
+            var choices = cloudPcs.Select(pc => pc.Name).Concat(["Back"]).ToArray();
+            var selected = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[cyan]Select a Cloud PC for details[/]")
+                    .PageSize(12)
+                    .AddChoices(choices));
+
+            if (selected == "Back")
+            {
+                return;
+            }
+
+            var cloudPc = cloudPcs.First(pc => pc.Name == selected);
+            ShowCloudPcDetails(cloudPc);
+        }
     }
 
     private async Task ShowCloudAppsAsync()
@@ -144,9 +147,20 @@ internal sealed class W365CliApp
             return;
         }
 
-        var apps = await AnsiConsole.Status()
-            .Spinner(Spinner.Known.Dots)
-            .StartAsync("Loading Cloud Apps...", async _ => await _session.Graph.GetCloudAppsAsync());
+        IReadOnlyList<CloudAppSummary> apps;
+        try
+        {
+            apps = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Loading Cloud Apps...", async _ => await _session.Graph.GetCloudAppsAsync());
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine("[red]Failed to load Cloud Apps.[/]");
+            AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
+            Pause();
+            return;
+        }
 
         if (apps.Count == 0)
         {
@@ -174,6 +188,47 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.Write(table);
+        Pause();
+    }
+
+    private static Table CreateCloudPcTable(IReadOnlyList<CloudPcSummary> cloudPcs)
+    {
+        var table = new Table()
+            .Title("Windows 365 Cloud PCs")
+            .AddColumn("Name")
+            .AddColumn("Status")
+            .AddColumn("Type")
+            .AddColumn("User")
+            .AddColumn("Service plan");
+
+        foreach (var pc in cloudPcs)
+        {
+            table.AddRow(
+                Markup.Escape(pc.Name),
+                Markup.Escape(pc.Status ?? "-"),
+                Markup.Escape(pc.ProvisioningType ?? "-"),
+                Markup.Escape(pc.UserPrincipalName ?? "-"),
+                Markup.Escape(pc.ServicePlanName ?? "-"));
+        }
+
+        return table;
+    }
+
+    private static void ShowCloudPcDetails(CloudPcSummary cloudPc)
+    {
+        AnsiConsole.Clear();
+        var panel = new Panel(
+            new Rows(
+                new Markup($"[bold]Name:[/] {Markup.Escape(cloudPc.Name)}"),
+                new Markup($"[bold]Status:[/] {Markup.Escape(cloudPc.Status ?? "-")}"),
+                new Markup($"[bold]Type:[/] {Markup.Escape(cloudPc.ProvisioningType ?? "-")}"),
+                new Markup($"[bold]User:[/] {Markup.Escape(cloudPc.UserPrincipalName ?? "-")}"),
+                new Markup($"[bold]Service plan:[/] {Markup.Escape(cloudPc.ServicePlanName ?? "-")}"),
+                new Markup($"[bold]Cloud PC ID:[/] {Markup.Escape(cloudPc.Id)}")))
+            .Header("Cloud PC details")
+            .Border(BoxBorder.Rounded);
+
+        AnsiConsole.Write(panel);
         Pause();
     }
 

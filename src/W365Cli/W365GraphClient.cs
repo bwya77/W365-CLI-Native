@@ -44,6 +44,14 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    public async Task<OrganizationSummary?> GetOrganizationAsync()
+    {
+        var items = await GetPagedAsync<OrganizationSummary>(
+            "organization?$select=id,displayName");
+
+        return items.FirstOrDefault();
+    }
+
     private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
     {
         if (_credential is null)
