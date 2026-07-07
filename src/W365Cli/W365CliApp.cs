@@ -157,6 +157,7 @@ internal sealed class W365CliApp
 
         while (true)
         {
+            AnsiConsole.Clear();
             RenderCompactHeader();
             var item = SelectFromTable(
                 cloudPc is null ? "Windows 365 Cloud PC disk space" : $"Disk space for {cloudPc.Name}",
