@@ -143,13 +143,13 @@ internal sealed class W365CliApp
         {
             AnsiConsole.Clear();
             RenderBreadcrumb("Cloud PCs");
-            AnsiConsole.MarkupLine("[cyan]Cloud PCs[/]");
+            AnsiConsole.MarkupLine("[#4091f2]Cloud PCs[/]");
             AnsiConsole.WriteLine();
             for (var index = 0; index < choices.Length; index++)
             {
                 var escaped = Markup.Escape(choices[index]);
                 AnsiConsole.MarkupLine(index == selectedIndex
-                    ? $"[black on cyan]> {escaped}[/]"
+                    ? $"[black on #4091f2]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
@@ -315,7 +315,7 @@ internal sealed class W365CliApp
 
     private static void RenderDiskSpaceTable(IReadOnlyList<CloudPcDiskSpace> allItems, IReadOnlyList<CloudPcDiskSpace> visibleItems, int selectedIndex, string filter)
     {
-        AnsiConsole.MarkupLine("[cyan]Windows 365 Cloud PC disk space[/]");
+        AnsiConsole.MarkupLine("[#4091f2]Windows 365 Cloud PC disk space[/]");
         AnsiConsole.MarkupLine($"[grey]Rows: {allItems.Count} | Visible: {visibleItems.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
         var header = Row("Cloud PC", 34, "Free", 10, "Used", 10, "Total", 10, "Free %", 8, "Last sync", 20);
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
@@ -348,7 +348,7 @@ internal sealed class W365CliApp
 
             var escaped = Markup.Escape(label);
             AnsiConsole.MarkupLine(index == selectedIndex
-                ? $"[black on cyan]> {escaped}[/]"
+                ? $"[black on #4091f2]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -524,7 +524,7 @@ internal sealed class W365CliApp
 
     private static void RenderAllSnapshotsTable(IReadOnlyList<SnapshotListItem> allItems, IReadOnlyList<SnapshotListItem> visibleItems, int selectedIndex, string filter)
     {
-        AnsiConsole.MarkupLine("[cyan]Windows 365 Cloud PC snapshots[/]");
+        AnsiConsole.MarkupLine("[#4091f2]Windows 365 Cloud PC snapshots[/]");
         AnsiConsole.MarkupLine($"[grey]Rows: {allItems.Count} | Visible: {visibleItems.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
         AnsiConsole.WriteLine();
 
@@ -556,7 +556,7 @@ internal sealed class W365CliApp
                 item.Snapshot.ExpirationDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Expires);
             var escaped = Markup.Escape(row);
             AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                ? $"[black on cyan]> {escaped}[/]"
+                ? $"[black on #4091f2]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -668,12 +668,12 @@ internal sealed class W365CliApp
         RenderMainMenuDashboard(choices);
         RenderBreadcrumb("Main menu");
 
-        AnsiConsole.MarkupLine("[cyan]Select an area[/]");
+        AnsiConsole.MarkupLine("[#4091f2]Select an area[/]");
         for (var index = 0; index < choices.Count; index++)
         {
             var label = FormatMainMenuChoice(choices[index]);
             AnsiConsole.MarkupLine(index == selectedIndex
-                ? $"[black on cyan]> {label}[/]"
+                ? $"[black on #4091f2]> {label}[/]"
                 : $"  {label}");
         }
 
@@ -700,7 +700,7 @@ internal sealed class W365CliApp
 
             AnsiConsole.Clear();
             RenderBreadcrumb("Command palette");
-            AnsiConsole.MarkupLine("[cyan]Command palette[/]");
+            AnsiConsole.MarkupLine("[#4091f2]Command palette[/]");
             AnsiConsole.MarkupLine($"[grey]Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
             AnsiConsole.WriteLine();
 
@@ -718,7 +718,7 @@ internal sealed class W365CliApp
                     var absoluteIndex = start + index;
                     var label = FormatMainMenuChoice(visiblePage[index]);
                     AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                        ? $"[black on cyan]> {label}[/]"
+                        ? $"[black on #4091f2]> {label}[/]"
                         : $"  {label}");
                 }
             }
@@ -818,12 +818,12 @@ internal sealed class W365CliApp
     private void RenderHeader()
     {
         AnsiConsole.Clear();
-        AnsiConsole.MarkupLine("[cyan]██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗[/]");
-        AnsiConsole.MarkupLine("[cyan]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]");
-        AnsiConsole.MarkupLine("[cyan]██║ █╗ ██║ █████╔╝███████╗ ███████╗    ██║     ██║     ██║[/]");
-        AnsiConsole.MarkupLine("[cyan]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]");
-        AnsiConsole.MarkupLine("[cyan]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]");
-        AnsiConsole.MarkupLine("[cyan] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]");
+        AnsiConsole.MarkupLine("[#4091f2]██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗[/]");
+        AnsiConsole.MarkupLine("[#4091f2]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]");
+        AnsiConsole.MarkupLine("[#4091f2]██║ █╗ ██║ █████╔╝███████╗ ███████╗    ██║     ██║     ██║[/]");
+        AnsiConsole.MarkupLine("[#4091f2]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]");
+        AnsiConsole.MarkupLine("[#4091f2]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]");
+        AnsiConsole.MarkupLine("[#4091f2] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]");
         AnsiConsole.MarkupLine("[grey]W365 CLI Native v0.1.0 | Bradley Wyatt[/]");
         AnsiConsole.WriteLine();
     }
@@ -838,7 +838,7 @@ internal sealed class W365CliApp
 
         var choice = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
-                .Title("[cyan]Connection[/]")
+                .Title("[#4091f2]Connection[/]")
                 .HighlightStyle(SelectionHighlightStyle())
                 .AddChoices(choices));
 
@@ -882,7 +882,7 @@ internal sealed class W365CliApp
             AnsiConsole.Clear();
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
-                    .Title("[cyan]Reports[/]")
+                    .Title("[#4091f2]Reports[/]")
                     .HighlightStyle(SelectionHighlightStyle())
                     .AddChoices(
                         "Usage",
@@ -932,7 +932,7 @@ internal sealed class W365CliApp
             AnsiConsole.Clear();
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
-                    .Title("[cyan]Tenant settings[/]")
+                    .Title("[#4091f2]Tenant settings[/]")
                     .HighlightStyle(SelectionHighlightStyle())
                     .AddChoices(
                         "Organization settings",
@@ -982,7 +982,7 @@ internal sealed class W365CliApp
         {
             AnsiConsole.Clear();
             RenderBreadcrumb("Catalog");
-            AnsiConsole.MarkupLine("[cyan]Catalog[/]");
+            AnsiConsole.MarkupLine("[#4091f2]Catalog[/]");
             AnsiConsole.MarkupLine("[grey]Plans, images, and regions used by Windows 365.[/]");
             AnsiConsole.WriteLine();
 
@@ -990,7 +990,7 @@ internal sealed class W365CliApp
             {
                 var escaped = Markup.Escape(choices[index]);
                 AnsiConsole.MarkupLine(index == selectedIndex
-                    ? $"[black on cyan]> {escaped}[/]"
+                    ? $"[black on #4091f2]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
@@ -1121,7 +1121,7 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            AnsiConsole.MarkupLine("[cyan]Cloud PC report[/]");
+            AnsiConsole.MarkupLine("[#4091f2]Cloud PC report[/]");
             AnsiConsole.WriteLine();
 
             var pageSize = Math.Max(8, Console.WindowHeight - 7);
@@ -1132,7 +1132,7 @@ internal sealed class W365CliApp
                 var absoluteIndex = start + index;
                 var escaped = Markup.Escape(visible[index]);
                 AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                    ? $"[black on cyan]> {escaped}[/]"
+                    ? $"[black on #4091f2]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
@@ -1182,7 +1182,7 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            AnsiConsole.MarkupLine("[cyan]Top rows[/]");
+            AnsiConsole.MarkupLine("[#4091f2]Top rows[/]");
             AnsiConsole.MarkupLine("[grey]Enter a positive number, press Enter for 50, or Esc/B/Q to go back.[/]");
             AnsiConsole.WriteLine();
             AnsiConsole.Markup($"Top rows [50]: {Markup.Escape(input)}");
@@ -1381,7 +1381,7 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            AnsiConsole.MarkupLine("[cyan]Select Cloud PC for connectivity history[/]");
+            AnsiConsole.MarkupLine("[#4091f2]Select Cloud PC for connectivity history[/]");
             var widths = GetConnectivityCloudPcWidths();
             var header = widths.ServicePlan > 0
                 ? Row("Name", widths.Name, "Status", widths.Status, "User", widths.User, "Service plan", widths.ServicePlan)
@@ -1401,7 +1401,7 @@ internal sealed class W365CliApp
                     : Row(pc.Name, widths.Name, pc.Status ?? "-", widths.Status, pc.UserPrincipalName ?? "-", widths.User);
                 var escaped = Markup.Escape(row);
                 AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                    ? $"[black on cyan]> {escaped}[/]"
+                    ? $"[black on #4091f2]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
@@ -1468,7 +1468,7 @@ internal sealed class W365CliApp
     {
         var header = headerFactory();
         RenderBreadcrumb(title);
-        AnsiConsole.MarkupLine($"[cyan]{Markup.Escape(title)}[/]");
+        AnsiConsole.MarkupLine($"[#4091f2]{Markup.Escape(title)}[/]");
         AnsiConsole.MarkupLine($"[grey]Rows: {allRows.Count} | Visible: {visibleRows.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)} | Sort: {FormatSortMode(sortMode)}[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
@@ -1491,7 +1491,7 @@ internal sealed class W365CliApp
             var absoluteIndex = start + index;
             var escaped = Markup.Escape(rowFactory(visible[index]));
             AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                ? $"[black on cyan]> {escaped}[/]"
+                ? $"[black on #4091f2]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -2131,7 +2131,7 @@ internal sealed class W365CliApp
 
         var selected = AnsiConsole.Prompt(
             new SelectionPrompt<TableChoice<T>>()
-                .Title($"[cyan]{Markup.Escape(title)}[/]\n[grey]{Markup.Escape(header)}[/]\n[grey]{Markup.Escape(new string('-', header.Length))}[/]")
+                .Title($"[#4091f2]{Markup.Escape(title)}[/]\n[grey]{Markup.Escape(header)}[/]\n[grey]{Markup.Escape(new string('-', header.Length))}[/]")
                 .HighlightStyle(SelectionHighlightStyle())
                 .PageSize(18)
                 .UseConverter(choice => Markup.Escape(choice.Label))
@@ -2191,11 +2191,11 @@ internal sealed class W365CliApp
             var tenantText = _session.TenantName is not null
                 ? $"{_session.TenantName} ({_session.TenantId})"
                 : _session.TenantId ?? "unknown";
-            AnsiConsole.MarkupLine($"[cyan]W365 CLI Native[/] [grey]v0.1.0 | Bradley Wyatt[/]   [green]Connected[/] [grey]{Markup.Escape(tenantText)}[/]");
+            AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native[/] [grey]v0.1.0 | Bradley Wyatt[/]   [green]Connected[/] [grey]{Markup.Escape(tenantText)}[/]");
         }
         else
         {
-            AnsiConsole.MarkupLine("[cyan]W365 CLI Native[/] [grey]v0.1.0 | Bradley Wyatt[/]   [yellow]Not connected[/]");
+            AnsiConsole.MarkupLine("[#4091f2]W365 CLI Native[/] [grey]v0.1.0 | Bradley Wyatt[/]   [yellow]Not connected[/]");
         }
         AnsiConsole.WriteLine();
     }
@@ -2269,7 +2269,7 @@ internal sealed class W365CliApp
             var selected = index == selectedIndex;
             var row = new List<string>
             {
-                selected ? "[black on cyan]>[/]" : " ",
+                selected ? "[black on #4091f2]>[/]" : " ",
                 selected ? Selected(Markup.Escape(Fit(pc.Status ?? "unknown", 12))) : StatusMarkup(pc.Status),
                 selected ? Selected(Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type)),
                 selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name))
@@ -2396,7 +2396,7 @@ internal sealed class W365CliApp
             var selected = index == selectedIndex;
             var row = new List<string>
             {
-                selected ? "[black on cyan]>[/]" : " ",
+                selected ? "[black on #4091f2]>[/]" : " ",
                 selected ? Selected(Markup.Escape(Fit(app.AppStatus ?? "unknown", widths.Status))) : AppStatusMarkup(app.AppStatus, widths.Status),
                 selected ? Selected(Markup.Escape(Fit(app.DisplayName, widths.Name))) : Markup.Escape(Fit(app.DisplayName, widths.Name))
             };
@@ -2609,12 +2609,12 @@ internal sealed class W365CliApp
 
     private static string Selected(string escapedText)
     {
-        return $"[black on cyan]{escapedText}[/]";
+        return $"[black on #4091f2]{escapedText}[/]";
     }
 
     private static Style SelectionHighlightStyle()
     {
-        return new Style(Color.Black, Color.Cyan);
+        return new Style(Color.Black, Color.FromHex("#4091f2"));
     }
 
     private static string Row(params object[] valuesAndWidths)
@@ -2853,7 +2853,7 @@ internal sealed class W365CliApp
 
     private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace, IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex, IReadOnlyList<CloudPcRemoteActionResult>? remoteActions, int selectedRemoteActionIndex)
     {
-        AnsiConsole.MarkupLine($"[cyan]W365 CLI Native > Cloud PCs > {Markup.Escape(cloudPc.Name)}[/]");
+        AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native > Cloud PCs > {Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
 
         var details = new Panel(
@@ -2870,7 +2870,7 @@ internal sealed class W365CliApp
 
         var actionLines = actions
             .Select((action, index) => index == selectedActionIndex
-                ? $"[black on cyan]> {Markup.Escape(action)}[/]"
+                ? $"[black on #4091f2]> {Markup.Escape(action)}[/]"
                 : $"  {Markup.Escape(action)}");
 
         var rightPanel = activeSubPanel switch
@@ -3039,7 +3039,7 @@ internal sealed class W365CliApp
     {
         var action = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
-                .Title("[cyan]Snapshot action[/]")
+                .Title("[#4091f2]Snapshot action[/]")
                 .HighlightStyle(SelectionHighlightStyle())
                 .AddChoices("Restore from this snapshot", "Delete this snapshot", "Back"));
 
@@ -3128,7 +3128,7 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            AnsiConsole.MarkupLine($"[cyan]Resize[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
+            AnsiConsole.MarkupLine($"[#4091f2]Resize[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
             AnsiConsole.MarkupLine($"Current service plan: [grey]{Markup.Escape(cloudPc.ServicePlanName ?? "-")}[/]");
             AnsiConsole.WriteLine();
 
@@ -3178,7 +3178,7 @@ internal sealed class W365CliApp
 
     private static void RenderServicePlanTable(IReadOnlyList<CloudPcServicePlan> plans, int selectedPlanIndex)
     {
-        AnsiConsole.MarkupLine("[cyan]Select target service plan[/]");
+        AnsiConsole.MarkupLine("[#4091f2]Select target service plan[/]");
         var header = Row("Name", 46, "Type", 12, "vCPU", 6, "RAM", 8, "Storage", 10, "Profile", 10);
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
@@ -3201,7 +3201,7 @@ internal sealed class W365CliApp
 
             var escaped = Markup.Escape(row);
             AnsiConsole.MarkupLine(absoluteIndex == selectedPlanIndex
-                ? $"[black on cyan]> {escaped}[/]"
+                ? $"[black on #4091f2]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -3212,7 +3212,7 @@ internal sealed class W365CliApp
     private async Task ShowRenameAsync(CloudPcSummary cloudPc)
     {
         AnsiConsole.Clear();
-        AnsiConsole.MarkupLine($"[cyan]Rename[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
+        AnsiConsole.MarkupLine($"[#4091f2]Rename[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
 
         var newDisplayName = AnsiConsole.Ask<string>("New Cloud PC display name:");
@@ -3231,7 +3231,7 @@ internal sealed class W365CliApp
     private async Task ConfirmAndRunAsync(string action, string target, Func<Task> operation)
     {
         AnsiConsole.Clear();
-        AnsiConsole.MarkupLine($"[cyan]{Markup.Escape(action)}[/]");
+        AnsiConsole.MarkupLine($"[#4091f2]{Markup.Escape(action)}[/]");
         AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(target)}[/]");
         AnsiConsole.WriteLine();
 
@@ -3327,7 +3327,7 @@ internal sealed class W365CliApp
 
     private static void RenderCloudAppDetailLayout(CloudAppSummary app, string[] actions, int selectedActionIndex)
     {
-        AnsiConsole.MarkupLine($"[cyan]W365 CLI Native > Cloud Apps > {Markup.Escape(app.DisplayName)}[/]");
+        AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native > Cloud Apps > {Markup.Escape(app.DisplayName)}[/]");
         AnsiConsole.WriteLine();
 
         var details = new Panel(
@@ -3343,7 +3343,7 @@ internal sealed class W365CliApp
             .Border(BoxBorder.Rounded);
 
         var actionLines = actions.Select((action, index) => index == selectedActionIndex
-            ? $"[black on cyan]> {Markup.Escape(action)}[/]"
+            ? $"[black on #4091f2]> {Markup.Escape(action)}[/]"
             : $"  {Markup.Escape(action)}");
 
         var actionsPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
@@ -3410,7 +3410,7 @@ internal sealed class W365CliApp
 
     private static void ShowAbout()
     {
-        AnsiConsole.MarkupLine("[cyan]W365 CLI Native[/]");
+        AnsiConsole.MarkupLine("[#4091f2]W365 CLI Native[/]");
         AnsiConsole.MarkupLine("A native .NET rewrite experiment for Windows 365 Cloud PC workflows.");
         AnsiConsole.MarkupLine("This project does not depend on the PowerShell W365CLI module.");
         AnsiConsole.MarkupLine("[grey]GitHub:[/] https://github.com/bwya77/W365-CLI-Native");
@@ -3444,3 +3444,4 @@ internal sealed class W365CliApp
         }
     }
 }
+
