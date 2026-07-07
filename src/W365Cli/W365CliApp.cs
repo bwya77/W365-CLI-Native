@@ -1217,7 +1217,7 @@ internal sealed class W365CliApp
                 await ReprovisionProvisioningPolicyCloudPcsAsync(policy);
                 break;
             case "Delete":
-                await ConfirmAndRunAsync("Delete", policy.DisplayName, async () => await _session.Graph.DeleteProvisioningPolicyAsync(policy.Id));
+                await ConfirmAndRunAsync("Delete", policy.DisplayName, async () => await _session.Graph.DeleteProvisioningPolicyAsync(policy.Id), "Policy", policy.DisplayName);
                 break;
         }
     }
@@ -1360,7 +1360,9 @@ internal sealed class W365CliApp
         await ConfirmAndRunAsync(
             "Create copy",
             $"{policy.DisplayName} to {displayName}",
-            async () => await _session.Graph.CreateProvisioningPolicyCopyAsync(policy, displayName, assign));
+            async () => await _session.Graph.CreateProvisioningPolicyCopyAsync(policy, displayName, assign),
+            "Policy",
+            policy.DisplayName);
     }
 
     private async Task ReprovisionProvisioningPolicyCloudPcsAsync(ProvisioningPolicySummary policy)
@@ -1408,7 +1410,9 @@ internal sealed class W365CliApp
         await ConfirmAndRunAsync(
             "Reprovision",
             $"{policy.DisplayName} policy Cloud PCs",
-            async () => await _session.Graph.ReprovisionCloudPcsByPolicyAsync(policy.Id, osVersion, accountType, exclusions));
+            async () => await _session.Graph.ReprovisionCloudPcsByPolicyAsync(policy.Id, osVersion, accountType, exclusions),
+            "Policy",
+            policy.DisplayName);
     }
 
     private static string SanitizeFileName(string value)
@@ -1490,7 +1494,8 @@ internal sealed class W365CliApp
             .AddColumn("Time")
             .AddColumn("Result")
             .AddColumn("Action")
-            .AddColumn("Cloud PC")
+            .AddColumn("Type")
+            .AddColumn("Resource")
             .AddColumn("Target");
         var pageSize = Math.Max(8, Console.WindowHeight - 10);
         var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, ActionHistory.Count - pageSize));
@@ -1504,7 +1509,8 @@ internal sealed class W365CliApp
                 Markup.Escape(item.value.RequestedAt.ToLocalTime().ToString("t")),
                 ActionStatusCell(item.value.Status),
                 Markup.Escape(item.value.Action),
-                Markup.Escape(item.value.CloudPcName ?? "-"),
+                Markup.Escape(item.value.ResourceType),
+                Markup.Escape(item.value.ResourceName ?? "-"),
                 Markup.Escape(item.value.Target));
         }
 
@@ -1518,7 +1524,7 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter remote actions | C clear | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter remote actions for Cloud PC rows | C clear | Esc/B/Q back[/]");
     }
 
     private static string ActionStatusCell(string status)
@@ -1532,11 +1538,17 @@ internal sealed class W365CliApp
 
     private async Task OpenRemoteActionsFromHistoryAsync(ActionHistoryItem item)
     {
+        if (!item.ResourceType.Equals("Cloud PC", StringComparison.OrdinalIgnoreCase))
+        {
+            TimedMessage("[yellow]Remote action history is only available for Cloud PC rows.[/]");
+            return;
+        }
+
         var cloudPcs = await LoadCloudPcsAsync();
         var cloudPc = cloudPcs.FirstOrDefault(pc =>
-            string.Equals(pc.Name, item.CloudPcName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(pc.ManagedDeviceName, item.CloudPcName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(pc.DisplayName, item.CloudPcName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(pc.Name, item.ResourceName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(pc.ManagedDeviceName, item.ResourceName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(pc.DisplayName, item.ResourceName, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(pc.Id, item.Target, StringComparison.OrdinalIgnoreCase));
 
         if (cloudPc is null)
@@ -3373,16 +3385,16 @@ internal sealed class W365CliApp
         return key.KeyChar is 'h' or 'H';
     }
 
-    private static void AddActionHistory(string action, string target, string status, string? detail = null)
+    private static void AddActionHistory(string action, string target, string status, string? detail = null, string resourceType = "Cloud PC", string? resourceName = null)
     {
-        ActionHistory.Insert(0, new ActionHistoryItem(action, target, InferCloudPcName(target), status, DateTimeOffset.Now, detail));
+        ActionHistory.Insert(0, new ActionHistoryItem(action, target, resourceType, resourceName ?? InferResourceName(target), status, DateTimeOffset.Now, detail));
         if (ActionHistory.Count > 100)
         {
             ActionHistory.RemoveRange(100, ActionHistory.Count - 100);
         }
     }
 
-    private static string? InferCloudPcName(string target)
+    private static string? InferResourceName(string target)
     {
         if (string.IsNullOrWhiteSpace(target))
         {
@@ -3825,7 +3837,7 @@ internal sealed class W365CliApp
 
     private async Task<IReadOnlyList<CloudPcSnapshot>> CreateSnapshotAndReloadAsync(CloudPcSummary cloudPc)
     {
-        await ConfirmAndRunAsync("Create snapshot", cloudPc.Name, async () => await _session.Graph.CreateSnapshotAsync(cloudPc.Id));
+        await ConfirmAndRunAsync("Create snapshot", cloudPc.Name, async () => await _session.Graph.CreateSnapshotAsync(cloudPc.Id), "Cloud PC", cloudPc.Name);
         return await LoadSnapshotsForCloudPcAsync(cloudPc);
     }
 
@@ -3840,10 +3852,10 @@ internal sealed class W365CliApp
         switch (action)
         {
             case "Restore from this snapshot":
-                await ConfirmAndRunAsync("Restore", cloudPc.Name, async () => await _session.Graph.RestoreSnapshotAsync(cloudPc.Id, snapshot.SnapshotId));
+                await ConfirmAndRunAsync("Restore", cloudPc.Name, async () => await _session.Graph.RestoreSnapshotAsync(cloudPc.Id, snapshot.SnapshotId), "Cloud PC", cloudPc.Name);
                 break;
             case "Delete this snapshot":
-                await ConfirmAndRunAsync("Delete snapshot", snapshot.SnapshotId, async () => await _session.Graph.DeleteSnapshotAsync(cloudPc.Id, snapshot.SnapshotId));
+                await ConfirmAndRunAsync("Delete snapshot", snapshot.SnapshotId, async () => await _session.Graph.DeleteSnapshotAsync(cloudPc.Id, snapshot.SnapshotId), "Cloud PC", cloudPc.Name);
                 break;
         }
     }
@@ -4022,7 +4034,7 @@ internal sealed class W365CliApp
             async () => await _session.Graph.RenameCloudPcAsync(cloudPc.Id, newDisplayName));
     }
 
-    private async Task ConfirmAndRunAsync(string action, string target, Func<Task> operation)
+    private async Task ConfirmAndRunAsync(string action, string target, Func<Task> operation, string resourceType = "Cloud PC", string? resourceName = null)
     {
         AnsiConsole.Clear();
         AnsiConsole.MarkupLine($"[#4091f2]{Markup.Escape(action)}[/]");
@@ -4046,12 +4058,12 @@ internal sealed class W365CliApp
             await AnsiConsole.Status()
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync($"Submitting {action}...", async _ => await operation());
-            AddActionHistory(action, target, "Submitted");
+            AddActionHistory(action, target, "Submitted", resourceType: resourceType, resourceName: resourceName);
             ShowActionResult("Submitted", action, target, "[green]Submitted.[/]");
         }
         catch (Exception ex)
         {
-            AddActionHistory(action, target, "Failed", ex.Message);
+            AddActionHistory(action, target, "Failed", ex.Message, resourceType, resourceName);
             ShowActionResult("Failed", action, target, "[red]Action failed.[/]", ex.Message);
         }
     }
@@ -4126,10 +4138,10 @@ internal sealed class W365CliApp
         switch (action)
         {
             case "Publish":
-                await ConfirmAndRunAsync("Publish", app.DisplayName, async () => await _session.Graph.PublishCloudAppAsync(app.Id));
+                await ConfirmAndRunAsync("Publish", app.DisplayName, async () => await _session.Graph.PublishCloudAppAsync(app.Id), "Cloud App", app.DisplayName);
                 return;
             case "Unpublish":
-                await ConfirmAndRunAsync("Unpublish", app.DisplayName, async () => await _session.Graph.UnpublishCloudAppAsync(app.Id));
+                await ConfirmAndRunAsync("Unpublish", app.DisplayName, async () => await _session.Graph.UnpublishCloudAppAsync(app.Id), "Cloud App", app.DisplayName);
                 return;
             default:
                 return;
@@ -4185,7 +4197,7 @@ internal sealed class W365CliApp
 
     private sealed record MenuChoice(string Key, string Title, string Description);
 
-    private sealed record ActionHistoryItem(string Action, string Target, string? CloudPcName, string Status, DateTimeOffset RequestedAt, string? Detail);
+    private sealed record ActionHistoryItem(string Action, string Target, string ResourceType, string? ResourceName, string Status, DateTimeOffset RequestedAt, string? Detail);
 
     private enum GraphRowSortMode
     {
