@@ -34,9 +34,6 @@ internal sealed class W365CliApp
                 case "CloudPcs":
                     await ShowCloudPcsAsync();
                     break;
-                case "DiskSpace":
-                    await ShowDiskSpaceAsync();
-                    break;
                 case "CloudApps":
                     await ShowCloudAppsAsync();
                     break;
@@ -84,6 +81,12 @@ internal sealed class W365CliApp
             return;
         }
 
+        if (cloudPc is not null)
+        {
+            ShowDiskSpaceDetails(items[0]);
+            return;
+        }
+
         while (true)
         {
             RenderCompactHeader();
@@ -126,7 +129,7 @@ internal sealed class W365CliApp
             .Header("Disk space details")
             .Border(BoxBorder.Rounded);
         AnsiConsole.Write(panel);
-        Pause();
+        WaitForBack();
     }
 
     private static string FormatGb(double? value)
@@ -143,7 +146,6 @@ internal sealed class W365CliApp
         return
         [
             new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs"),
-            new("DiskSpace", "Disk space", "View Cloud PC disk capacity and free space"),
             new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows"),
             new("Reports", "Reports", "Usage, connectivity, launch details, report streams"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
@@ -1170,5 +1172,20 @@ internal sealed class W365CliApp
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]Press any key to continue...[/]");
         Console.ReadKey(intercept: true);
+    }
+
+    private static void WaitForBack()
+    {
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Press Esc, B, or Q to go back...[/]");
+        while (true)
+        {
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key is ConsoleKey.Escape or ConsoleKey.LeftArrow ||
+                key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+            {
+                return;
+            }
+        }
     }
 }
