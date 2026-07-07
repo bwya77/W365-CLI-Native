@@ -215,12 +215,11 @@ internal sealed class W365CliApp
         {
             case "Connect":
                 await _session.ConnectAsync();
-                Pause();
+                TimedMessage("[grey]Returning...[/]");
                 break;
             case "Disconnect":
                 await _session.DisconnectAsync();
-                AnsiConsole.MarkupLine("[green]Disconnected.[/]");
-                Pause();
+                TimedMessage("[green]Disconnected.[/]");
                 break;
         }
     }
@@ -1286,8 +1285,7 @@ internal sealed class W365CliApp
             case "Sync":
                 if (string.IsNullOrWhiteSpace(cloudPc.ManagedDeviceId))
                 {
-                    AnsiConsole.MarkupLine("[yellow]This Cloud PC does not include a managed device ID.[/]");
-                    Pause();
+                    TimedMessage("[yellow]This Cloud PC does not include a managed device ID.[/]");
                     return;
                 }
                 await ConfirmAndRunAsync("Sync", cloudPc.Name, async () => await _session.Graph.SyncManagedDeviceAsync(cloudPc.ManagedDeviceId));
@@ -1296,10 +1294,7 @@ internal sealed class W365CliApp
                 await ConfirmAndRunAsync("Reprovision", cloudPc.Name, async () => await _session.Graph.ReprovisionCloudPcAsync(cloudPc.Id));
                 break;
             default:
-                AnsiConsole.WriteLine();
-                AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(action)} is not implemented in the native CLI yet.[/]");
-                AnsiConsole.MarkupLine("[grey]The action shell is in place. The next native milestone is wiring this action to Graph.[/]");
-                Pause();
+                TimedMessage($"[yellow]{Markup.Escape(action)} is not implemented in the native CLI yet.[/]");
                 break;
         }
     }
@@ -1312,8 +1307,7 @@ internal sealed class W365CliApp
 
         if (plans.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]No service plans returned.[/]");
-            Pause();
+            TimedMessage("[yellow]No service plans returned.[/]");
             return;
         }
 
@@ -1359,8 +1353,7 @@ internal sealed class W365CliApp
         var newDisplayName = AnsiConsole.Ask<string>("New Cloud PC display name:");
         if (string.IsNullOrWhiteSpace(newDisplayName))
         {
-            AnsiConsole.MarkupLine("[yellow]Rename cancelled. Display name is required.[/]");
-            Pause();
+            TimedMessage("[yellow]Rename cancelled. Display name is required.[/]");
             return;
         }
 
@@ -1384,8 +1377,7 @@ internal sealed class W365CliApp
 
         if (confirm != "Confirm")
         {
-            AnsiConsole.MarkupLine("[yellow]Cancelled.[/]");
-            Pause();
+            TimedMessage("[yellow]Cancelled.[/]");
             return;
         }
 
@@ -1394,15 +1386,14 @@ internal sealed class W365CliApp
             await AnsiConsole.Status()
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync($"Submitting {action}...", async _ => await operation());
-            AnsiConsole.MarkupLine("[green]Submitted.[/]");
+            TimedMessage("[green]Submitted.[/]");
         }
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine("[red]Action failed.[/]");
             AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
+            TimedMessage("[grey]Returning...[/]");
         }
-
-        Pause();
     }
 
     private async Task ShowCloudAppDetailsAsync(CloudAppSummary app)
@@ -1542,9 +1533,14 @@ internal sealed class W365CliApp
 
     private static void Pause()
     {
+        TimedMessage("[grey]Returning...[/]");
+    }
+
+    private static void TimedMessage(string markup, int milliseconds = 2000)
+    {
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Press any key to continue...[/]");
-        Console.ReadKey(intercept: true);
+        AnsiConsole.MarkupLine(markup);
+        Thread.Sleep(milliseconds);
     }
 
     private static void WaitForBack()
