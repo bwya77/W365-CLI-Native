@@ -18,11 +18,12 @@ internal sealed class W365CliApp
             RenderHeader();
 
             var menuChoices = GetMainMenuChoices();
+            RenderMainMenuDashboard(menuChoices);
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<MenuChoice>()
-                    .Title("[cyan]Choose an area[/]")
+                    .Title("[cyan]Select workspace[/]")
                     .PageSize(12)
-                    .UseConverter(item => item.Label)
+                    .UseConverter(FormatMainMenuChoice)
                     .AddChoices(menuChoices));
 
             switch (choice.Key)
@@ -62,19 +63,58 @@ internal sealed class W365CliApp
         var connectionDescription = _session.IsConnected
             ? "Disconnect Microsoft Graph session"
             : "Connect to Microsoft Graph";
+        var connectionState = _session.IsConnected ? "connected" : "required";
 
         return
         [
-            new("CloudPcs", Row("Cloud PCs", 22, "Browse, inspect, and act on Cloud PCs", 58)),
-            new("Provisioning", Row("Provisioning", 22, "Policies, policy Cloud PCs, maintenance windows", 58)),
-            new("Reports", Row("Reports", 22, "Usage, connectivity, launch details, report streams", 58)),
-            new("CloudApps", Row("Cloud Apps", 22, "Browse, publish, and unpublish Cloud Apps", 58)),
-            new("Catalog", Row("Catalog", 22, "Service plans, images, regions, licensing", 58)),
-            new("Tenant", Row("Tenant settings", 22, "Organization settings, profiles, user settings", 58)),
-            new("Connection", Row("Connection", 22, connectionDescription, 58)),
-            new("About", Row("About", 22, "Version and project information", 58)),
-            new("Exit", Row("Exit", 22, "Close W365 CLI Native", 58))
+            new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs", "live", "cyan"),
+            new("Provisioning", "Provisioning", "Policies, policy Cloud PCs, maintenance windows", "queued", "purple"),
+            new("Reports", "Reports", "Usage, connectivity, launch details, report streams", "queued", "purple"),
+            new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps", "live", "cyan"),
+            new("Catalog", "Catalog", "Service plans, images, regions, licensing", "queued", "purple"),
+            new("Tenant", "Tenant settings", "Organization settings, profiles, user settings", "queued", "purple"),
+            new("Connection", "Connection", connectionDescription, connectionState, _session.IsConnected ? "green" : "yellow"),
+            new("About", "About", "Version and project information", "info", "grey"),
+            new("Exit", "Exit", "Close W365 CLI Native", "done", "grey")
         ];
+    }
+
+    private void RenderMainMenuDashboard(IReadOnlyList<MenuChoice> choices)
+    {
+        var liveCount = choices.Count(choice => choice.State == "live");
+        var queuedCount = choices.Count(choice => choice.State == "queued");
+        var connectionText = _session.IsConnected ? "Connected" : "Not connected";
+        var connectionColor = _session.IsConnected ? "green" : "yellow";
+
+        var dashboard = new Grid();
+        dashboard.AddColumn();
+        dashboard.AddColumn();
+        dashboard.AddColumn();
+        dashboard.AddRow(
+            new Panel(new Markup($"[bold {connectionColor}]{connectionText}[/]\n[grey]Graph session[/]")).Border(BoxBorder.Rounded),
+            new Panel(new Markup($"[bold cyan]{liveCount}[/]\n[grey]Native workspaces[/]")).Border(BoxBorder.Rounded),
+            new Panel(new Markup($"[bold purple]{queuedCount}[/]\n[grey]Queued workspaces[/]")).Border(BoxBorder.Rounded));
+
+        AnsiConsole.Write(dashboard);
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Use the workspaces below to move through Windows 365 operations. Esc, B, or Q backs out in deeper screens.[/]");
+        AnsiConsole.WriteLine();
+    }
+
+    private static string FormatMainMenuChoice(MenuChoice choice)
+    {
+        var state = choice.State switch
+        {
+            "live" => "[green]LIVE[/]",
+            "queued" => "[grey]QUEUED[/]",
+            "connected" => "[green]CONNECTED[/]",
+            "required" => "[yellow]SIGN IN[/]",
+            "info" => "[grey]INFO[/]",
+            "done" => "[grey]EXIT[/]",
+            _ => Markup.Escape(choice.State)
+        };
+
+        return $"{state} [{choice.Accent}]{Markup.Escape(Fit(choice.Title, 20))}[/] [grey]{Markup.Escape(choice.Description)}[/]";
     }
 
     private void RenderHeader()
@@ -700,7 +740,7 @@ internal sealed class W365CliApp
 
     private sealed record TableChoice<T>(string Label, T? Item, bool IsBack);
 
-    private sealed record MenuChoice(string Key, string Label);
+    private sealed record MenuChoice(string Key, string Title, string Description, string State, string Accent);
 
     private async Task<bool> EnsureConnectedAsync()
     {
