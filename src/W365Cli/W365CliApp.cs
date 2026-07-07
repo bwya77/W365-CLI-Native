@@ -264,7 +264,14 @@ internal sealed class W365CliApp
                 case "Usage":
                     await ShowGraphRowsAsync(
                         "Windows 365 Cloud PC usage",
-                        async () => await _session.Graph.GetUsageRowsAsync());
+                        async () => await _session.Graph.GetUsageRowsAsync(),
+                        Row("Cloud PC", 34, "Status", 14, "Power", 12, "User", 34, "Service plan", 34),
+                        row => Row(
+                            GetField(row, "Cloud PC"), 34,
+                            GetField(row, "Status"), 14,
+                            GetField(row, "Power state"), 12,
+                            GetField(row, "User"), 34,
+                            GetField(row, "Service plan"), 34));
                     break;
                 case "Connectivity history":
                     await ShowConnectivityHistoryAsync();
@@ -337,12 +344,7 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            var cloudPc = SelectFromTable(
-                "Select Cloud PC for connectivity history",
-                Row("Name", 34, "Status", 14, "User", 34, "Service plan", 28),
-                cloudPcs,
-                pc => Row(pc.Name, 34, pc.Status ?? "-", 14, pc.UserPrincipalName ?? "-", 34, pc.ServicePlanName ?? "-", 28));
-
+            var cloudPc = SelectCloudPcForConnectivityHistory(cloudPcs);
             if (cloudPc is null)
             {
                 return;
@@ -350,7 +352,14 @@ internal sealed class W365CliApp
 
             await ShowGraphRowsAsync(
                 $"Connectivity history for {cloudPc.Name}",
-                async () => await _session.Graph.GetConnectivityHistoryAsync(cloudPc));
+                async () => await _session.Graph.GetConnectivityHistoryAsync(cloudPc),
+                Row("Time", 22, "Type", 18, "Event", 28, "Result", 12, "Message", 54),
+                row => Row(
+                    GetField(row, "eventDateTime"), 22,
+                    GetField(row, "eventType"), 18,
+                    GetField(row, "eventName"), 28,
+                    GetField(row, "eventResult"), 12,
+                    GetField(row, "message"), 54));
         }
     }
 
@@ -397,7 +406,11 @@ internal sealed class W365CliApp
         }
     }
 
-    private async Task ShowGraphRowsAsync(string title, Func<Task<IReadOnlyList<GraphTableRow>>> loader)
+    private async Task ShowGraphRowsAsync(
+        string title,
+        Func<Task<IReadOnlyList<GraphTableRow>>> loader,
+        string? header = null,
+        Func<GraphTableRow, string>? rowFactory = null)
     {
         var rows = await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
@@ -409,22 +422,150 @@ internal sealed class W365CliApp
             return;
         }
 
+        header ??= Row("Name", 42, "Summary", 90);
+        rowFactory ??= item => Row(item.Title, 42, item.Summary, 90);
+        var selectedIndex = 0;
+
         while (true)
         {
             AnsiConsole.Clear();
-            var row = SelectFromTable(
-                title,
-                Row("Name", 42, "Summary", 90),
-                rows,
-                item => Row(item.Title, 42, item.Summary, 90));
+            RenderGraphRows(title, rows, selectedIndex, header, rowFactory);
+            var key = Console.ReadKey(intercept: true);
 
-            if (row is null)
+            switch (key.Key)
             {
-                return;
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(rows.Count - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(rows.Count - 1, selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = rows.Count - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    ShowGraphRowDetails(title, rows[selectedIndex]);
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static CloudPcSummary? SelectCloudPcForConnectivityHistory(IReadOnlyList<CloudPcSummary> cloudPcs)
+    {
+        var selectedIndex = 0;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine("[cyan]Select Cloud PC for connectivity history[/]");
+            var header = Row("Name", 34, "Status", 14, "User", 34, "Service plan", 28);
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
+
+            var pageSize = Math.Max(8, Console.WindowHeight - 8);
+            var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, cloudPcs.Count - pageSize));
+            var visible = cloudPcs.Skip(start).Take(pageSize).ToArray();
+            for (var index = 0; index < visible.Length; index++)
+            {
+                var pc = visible[index];
+                var absoluteIndex = start + index;
+                var row = Row(pc.Name, 34, pc.Status ?? "-", 14, pc.UserPrincipalName ?? "-", 34, pc.ServicePlanName ?? "-", 28);
+                var escaped = Markup.Escape(row);
+                AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
+                    ? $"[white on blue]> {escaped}[/]"
+                    : $"  {escaped}");
             }
 
-            ShowGraphRowDetails(title, row);
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter open | Esc/B/Q back[/]");
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(cloudPcs.Count - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(cloudPcs.Count - 1, selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = cloudPcs.Count - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    return cloudPcs[selectedIndex];
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return null;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return null;
+                    }
+                    break;
+            }
         }
+    }
+
+    private static void RenderGraphRows(
+        string title,
+        IReadOnlyList<GraphTableRow> rows,
+        int selectedIndex,
+        string header,
+        Func<GraphTableRow, string> rowFactory)
+    {
+        AnsiConsole.MarkupLine($"[cyan]{Markup.Escape(title)}[/]");
+        AnsiConsole.MarkupLine($"[grey]Rows: {rows.Count}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
+
+        var pageSize = Math.Max(8, Console.WindowHeight - 10);
+        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, rows.Count - pageSize));
+        var visible = rows.Skip(start).Take(pageSize).ToArray();
+
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var absoluteIndex = start + index;
+            var escaped = Markup.Escape(rowFactory(visible[index]));
+            AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
+                ? $"[white on blue]> {escaped}[/]"
+                : $"  {escaped}");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | Esc/B/Q back[/]");
+    }
+
+    private static string GetField(GraphTableRow row, string name)
+    {
+        return row.Fields.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : "-";
     }
 
     private static void ShowGraphRowDetails(string title, GraphTableRow row)
