@@ -3454,6 +3454,7 @@ internal sealed class W365CliApp
 
         if (confirm != "Confirm")
         {
+            ShowActionResult("Cancelled", action, target, "[yellow]Cancelled.[/]");
             return;
         }
 
@@ -3463,11 +3464,30 @@ internal sealed class W365CliApp
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync($"Submitting {action}...", async _ => await operation());
             AddActionHistory(action, target, "Submitted");
+            ShowActionResult("Submitted", action, target, "[green]Submitted.[/]");
         }
         catch (Exception ex)
         {
             AddActionHistory(action, target, "Failed", ex.Message);
+            ShowActionResult("Failed", action, target, "[red]Action failed.[/]", ex.Message);
         }
+    }
+
+    private static void ShowActionResult(string result, string action, string target, string resultMarkup, string? detail = null)
+    {
+        AnsiConsole.Clear();
+        AnsiConsole.MarkupLine($"[#4091f2]{Markup.Escape(action)}[/]");
+        AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(target)}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine(resultMarkup);
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Fit(detail, Math.Max(40, Console.WindowWidth - 4)))}[/]");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Returning...[/]");
+        Thread.Sleep(1500);
     }
 
     private async Task ShowCloudAppDetailsAsync(CloudAppSummary app)
