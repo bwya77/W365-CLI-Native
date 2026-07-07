@@ -24,6 +24,19 @@ The default app registration client ID is built in:
 9d497858-c200-402c-a363-279a5800d730
 ```
 
+The app registration must be configured as a native public client:
+
+1. Open the app registration in Microsoft Entra.
+2. Go to **Authentication**.
+3. Add a **Mobile and desktop applications** platform.
+4. Add this redirect URI:
+
+```text
+http://localhost
+```
+
+5. In **Advanced settings**, set **Allow public client flows** to **Yes**.
+
 You can override it during development:
 
 ```powershell

@@ -42,12 +42,31 @@ internal sealed class W365Session
             }
         };
 
-        _credential = new InteractiveBrowserCredential(options);
-        var token = await _credential.GetTokenAsync(new TokenRequestContext(_scopes), CancellationToken.None);
+        try
+        {
+            _credential = new InteractiveBrowserCredential(options);
+            var token = await _credential.GetTokenAsync(new TokenRequestContext(_scopes), CancellationToken.None);
 
-        Graph = new W365GraphClient(_credential, _scopes);
-        IsConnected = !string.IsNullOrWhiteSpace(token.Token);
-        AnsiConsole.MarkupLine(IsConnected ? "[green]Connected.[/]" : "[red]Connection failed.[/]");
+            Graph = new W365GraphClient(_credential, _scopes);
+            IsConnected = !string.IsNullOrWhiteSpace(token.Token);
+            AnsiConsole.MarkupLine(IsConnected ? "[green]Connected.[/]" : "[red]Connection failed.[/]");
+        }
+        catch (AuthenticationFailedException ex)
+        {
+            IsConnected = false;
+            Graph = W365GraphClient.NotConnected;
+            _credential = null;
+
+            AnsiConsole.MarkupLine("[red]Authentication failed.[/]");
+            AnsiConsole.MarkupLine(Markup.Escape(ex.Message));
+            if (ex.Message.Contains("AADSTS7000218", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("client_secret", StringComparison.OrdinalIgnoreCase))
+            {
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine("[yellow]This usually means the app registration is not configured as a public client/native app.[/]");
+                AnsiConsole.MarkupLine("In Entra, enable public client flows and add a Mobile and desktop redirect URI of [grey]http://localhost[/].");
+            }
+        }
     }
 
     public void Disconnect()
