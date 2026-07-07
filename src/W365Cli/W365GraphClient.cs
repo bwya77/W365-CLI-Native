@@ -23,7 +23,19 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsAsync()
     {
         var items = await GetPagedAsync<CloudPcSummary>(
-            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId");
+            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName");
+
+        return items
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsByProvisioningPolicyAsync(string provisioningPolicyId)
+    {
+        var filter = Uri.EscapeDataString($"servicePlanType eq 'enterprise' and provisioningPolicyId eq '{provisioningPolicyId}'");
+        var select = Uri.EscapeDataString("id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName");
+        var items = await GetPagedAsync<CloudPcSummary>(
+            $"deviceManagement/virtualEndpoint/cloudPCs?$filter={filter}&$select={select}");
 
         return items
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -95,9 +107,19 @@ internal sealed class W365GraphClient
         await PostJsonAsync($"deviceManagement/managedDevices('{Uri.EscapeDataString(managedDeviceId)}')/rotateLocalAdminPassword", new { });
     }
 
-    public async Task ReprovisionCloudPcAsync(string cloudPcId)
+    public async Task ReprovisionCloudPcAsync(string cloudPcId, string? osVersion = null, string? userAccountType = null)
     {
-        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/reprovision", new { });
+        var body = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(osVersion))
+        {
+            body["osVersion"] = osVersion;
+        }
+        if (!string.IsNullOrWhiteSpace(userAccountType))
+        {
+            body["userAccountType"] = userAccountType;
+        }
+
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/reprovision", body);
     }
 
     public async Task SyncManagedDeviceAsync(string managedDeviceId)
@@ -226,6 +248,97 @@ internal sealed class W365GraphClient
         var select = Uri.EscapeDataString("id,displayName,regionStatus,supportedSolution,regionGroup,geographicLocationType");
         var rows = await GetJsonRowsAsync($"deviceManagement/virtualEndpoint/supportedRegions?$select={select}", "regionStatus", "supportedSolution", "regionGroup");
         return rows.OrderBy(row => GetFirst(row.Fields, "regionGroup")).ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task<IReadOnlyList<ProvisioningPolicySummary>> GetProvisioningPoliciesAsync()
+    {
+        var policies = await GetPagedAsync<JsonElement>("deviceManagement/virtualEndpoint/provisioningPolicies?$expand=assignments");
+        var groupIds = policies
+            .SelectMany(GetAssignmentGroupIds)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var groupNames = await ResolveGroupNamesAsync(groupIds);
+
+        return policies
+            .Select(policy => ToProvisioningPolicySummary(policy, groupNames))
+            .OrderBy(policy => policy.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public async Task DeleteProvisioningPolicyAsync(string policyId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}");
+        await AuthorizeAsync(request);
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public string ExportProvisioningPolicyJson(ProvisioningPolicySummary policy)
+    {
+        var export = new Dictionary<string, object?>
+        {
+            ["exportVersion"] = 1,
+            ["exportedAt"] = DateTimeOffset.UtcNow.ToString("o"),
+            ["sourceId"] = policy.Id,
+            ["displayName"] = policy.DisplayName,
+            ["createBody"] = BuildProvisioningPolicyCreateBody(policy, policy.DisplayName),
+            ["assignments"] = BuildProvisioningPolicyAssignmentExports(policy)
+        };
+
+        return JsonSerializer.Serialize(export, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true
+        });
+    }
+
+    public async Task CreateProvisioningPolicyCopyAsync(ProvisioningPolicySummary policy, string displayName, bool assign)
+    {
+        var body = BuildProvisioningPolicyCreateBody(policy, displayName);
+        var created = await PostJsonForElementAsync("deviceManagement/virtualEndpoint/provisioningPolicies", body);
+        if (!assign)
+        {
+            return;
+        }
+
+        var createdId = GetString(created, "id");
+        if (string.IsNullOrWhiteSpace(createdId))
+        {
+            throw new InvalidOperationException("Graph did not return the new provisioning policy id.");
+        }
+
+        var assignments = BuildProvisioningPolicyAssignmentsForCreate(policy, createdId);
+        if (assignments.Count == 0)
+        {
+            return;
+        }
+
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(createdId)}/assign", new
+        {
+            assignments
+        });
+    }
+
+    public async Task ReprovisionCloudPcsByPolicyAsync(string policyId, string? osVersion, string? userAccountType, IReadOnlyList<string> exclusions)
+    {
+        var cloudPcs = await GetCloudPcsByProvisioningPolicyAsync(policyId);
+        var excludeSet = new HashSet<string>(exclusions.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()), StringComparer.OrdinalIgnoreCase);
+        foreach (var cloudPc in cloudPcs)
+        {
+            var matchValues = new[]
+            {
+                cloudPc.Id,
+                cloudPc.Name,
+                cloudPc.ManagedDeviceId,
+                cloudPc.UserPrincipalName
+            }.Where(value => !string.IsNullOrWhiteSpace(value));
+
+            if (matchValues.Any(value => excludeSet.Contains(value!)))
+            {
+                continue;
+            }
+
+            await ReprovisionCloudPcAsync(cloudPc.Id, osVersion, userAccountType);
+        }
     }
 
     public async Task ResizeCloudPcAsync(string cloudPcId, string targetServicePlanId)
@@ -560,6 +673,13 @@ internal sealed class W365GraphClient
         return await response.Content.ReadAsStringAsync();
     }
 
+    private async Task<JsonElement> PostJsonForElementAsync(string relativeUri, object body)
+    {
+        var json = await PostJsonForStringAsync(relativeUri, body);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
     private async Task AuthorizeAsync(HttpRequestMessage request)
     {
         var token = await _accessTokenProvider!();
@@ -580,6 +700,233 @@ internal sealed class W365GraphClient
         }
 
         return fields;
+    }
+
+    private static ProvisioningPolicySummary ToProvisioningPolicySummary(JsonElement policy, IReadOnlyDictionary<string, string> groupNames)
+    {
+        var groupIds = GetAssignmentGroupIds(policy).ToArray();
+        var domainJoinTypes = policy.TryGetProperty("domainJoinConfigurations", out var joins) && joins.ValueKind == JsonValueKind.Array
+            ? string.Join(",", joins.EnumerateArray().Select(join => GetString(join, "domainJoinType")).Where(value => !string.IsNullOrWhiteSpace(value)))
+            : null;
+
+        return new ProvisioningPolicySummary
+        {
+            Id = GetString(policy, "id") ?? string.Empty,
+            DisplayName = GetString(policy, "displayName") ?? GetString(policy, "id") ?? "-",
+            Description = GetString(policy, "description"),
+            ProvisioningType = GetString(policy, "provisioningType"),
+            ImageDisplayName = GetString(policy, "imageDisplayName"),
+            ImageType = GetString(policy, "imageType"),
+            DomainJoinTypes = domainJoinTypes,
+            EnableSingleSignOn = GetBool(policy, "enableSingleSignOn"),
+            LocalAdminEnabled = GetBool(policy, "localAdminEnabled"),
+            CloudPcNamingTemplate = GetString(policy, "cloudPcNamingTemplate"),
+            CloudPcGroupDisplayName = GetString(policy, "cloudPcGroupDisplayName"),
+            ManagedBy = GetString(policy, "managedBy"),
+            GracePeriodInHours = GetInt(policy, "gracePeriodInHours"),
+            AssignedGroupIds = groupIds,
+            AssignedGroupNames = groupIds.Select(groupId => groupNames.TryGetValue(groupId, out var name) ? name : groupId).ToArray(),
+            Raw = policy.Clone()
+        };
+    }
+
+    private static IEnumerable<string> GetAssignmentGroupIds(JsonElement policy)
+    {
+        if (!policy.TryGetProperty("assignments", out var assignments) || assignments.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+
+        foreach (var assignment in assignments.EnumerateArray())
+        {
+            if (assignment.TryGetProperty("target", out var target))
+            {
+                var groupId = GetString(target, "groupId");
+                if (!string.IsNullOrWhiteSpace(groupId))
+                {
+                    yield return groupId;
+                }
+            }
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> ResolveGroupNamesAsync(IReadOnlyList<string> groupIds)
+    {
+        var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var groupId in groupIds)
+        {
+            try
+            {
+                var group = await GetAsync<JsonElement>($"groups/{Uri.EscapeDataString(groupId)}?$select=id,displayName");
+                var name = group.ValueKind == JsonValueKind.Object ? GetString(group, "displayName") : null;
+                output[groupId] = string.IsNullOrWhiteSpace(name) ? groupId : name;
+            }
+            catch (HttpRequestException)
+            {
+                output[groupId] = groupId;
+            }
+        }
+
+        return output;
+    }
+
+    private static Dictionary<string, object?> BuildProvisioningPolicyCreateBody(ProvisioningPolicySummary policy, string displayName)
+    {
+        var createKeys = new[]
+        {
+            "@odata.type",
+            "autopatch",
+            "cloudPcNamingTemplate",
+            "description",
+            "displayName",
+            "domainJoinConfigurations",
+            "enableSingleSignOn",
+            "imageDisplayName",
+            "imageId",
+            "imageType",
+            "localAdminEnabled",
+            "managedBy",
+            "microsoftManagedDesktop",
+            "provisioningType",
+            "userExperienceType",
+            "userSettingsPersistenceConfiguration",
+            "windowsSetting"
+        };
+
+        var body = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in createKeys)
+        {
+            if (policy.Raw.TryGetProperty(key, out var value) && value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+            {
+                body[key] = value.Clone();
+            }
+        }
+
+        body["@odata.type"] = "#microsoft.graph.cloudPcProvisioningPolicy";
+        body["displayName"] = displayName;
+        if (!body.ContainsKey("description"))
+        {
+            body["description"] = string.Empty;
+        }
+
+        return body;
+    }
+
+    private static IReadOnlyList<object> BuildProvisioningPolicyAssignmentExports(ProvisioningPolicySummary policy)
+    {
+        return BuildProvisioningPolicyAssignments(policy, null, includeSourceId: true);
+    }
+
+    private static IReadOnlyList<object> BuildProvisioningPolicyAssignmentsForCreate(ProvisioningPolicySummary policy, string createdPolicyId)
+    {
+        return BuildProvisioningPolicyAssignments(policy, createdPolicyId, includeSourceId: false);
+    }
+
+    private static IReadOnlyList<object> BuildProvisioningPolicyAssignments(ProvisioningPolicySummary policy, string? createdPolicyId, bool includeSourceId)
+    {
+        if (!policy.Raw.TryGetProperty("assignments", out var assignments) || assignments.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var output = new List<object>();
+        foreach (var assignment in assignments.EnumerateArray())
+        {
+            if (!assignment.TryGetProperty("target", out var target))
+            {
+                continue;
+            }
+
+            var groupId = GetString(target, "groupId");
+            if (string.IsNullOrWhiteSpace(groupId))
+            {
+                continue;
+            }
+
+            var targetBody = new Dictionary<string, object?>
+            {
+                ["@odata.type"] = GetString(target, "@odata.type") ?? "microsoft.graph.cloudPcManagementGroupAssignmentTarget",
+                ["groupId"] = groupId
+            };
+
+            AddJsonValueIfPresent(targetBody, target, "servicePlanId");
+            AddJsonValueIfPresent(targetBody, target, "allotmentLicensesCount");
+            AddJsonValueIfPresent(targetBody, target, "allotmentDisplayName");
+
+            var assignmentBody = new Dictionary<string, object?>
+            {
+                ["target"] = targetBody
+            };
+
+            if (includeSourceId)
+            {
+                assignmentBody["sourceId"] = GetString(assignment, "id");
+            }
+            else if (string.Equals(policy.ProvisioningType, "dedicated", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(createdPolicyId))
+            {
+                assignmentBody["id"] = $"{createdPolicyId}_{groupId}";
+            }
+
+            output.Add(assignmentBody);
+        }
+
+        return output;
+    }
+
+    private static void AddJsonValueIfPresent(IDictionary<string, object?> target, JsonElement source, string property)
+    {
+        if (source.TryGetProperty(property, out var value) && value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            target[property] = value.Clone();
+        }
+    }
+
+    private static string? GetString(JsonElement item, string property)
+    {
+        if (!item.TryGetProperty(property, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null
+        };
+    }
+
+    private static bool? GetBool(JsonElement item, string property)
+    {
+        if (!item.TryGetProperty(property, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static int? GetInt(JsonElement item, string property)
+    {
+        if (!item.TryGetProperty(property, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt32(out var parsed) => parsed,
+            JsonValueKind.String when int.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => null
+        };
     }
 
     private static GraphTableRow ToTableRow(IReadOnlyDictionary<string, string> fields, params string[] summaryFields)

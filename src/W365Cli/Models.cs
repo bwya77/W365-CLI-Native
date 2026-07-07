@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace W365Cli;
@@ -37,10 +38,51 @@ internal sealed record CloudPcSummary
     [JsonPropertyName("managedDeviceId")]
     public string? ManagedDeviceId { get; init; }
 
+    [JsonPropertyName("provisioningPolicyId")]
+    public string? ProvisioningPolicyId { get; init; }
+
+    [JsonPropertyName("provisioningPolicyName")]
+    public string? ProvisioningPolicyName { get; init; }
+
     [JsonIgnore]
     public string Name => !string.IsNullOrWhiteSpace(DisplayName)
         ? DisplayName!
         : ManagedDeviceName ?? Id;
+}
+
+internal sealed record ProvisioningPolicySummary
+{
+    public string Id { get; init; } = string.Empty;
+
+    public string DisplayName { get; init; } = string.Empty;
+
+    public string? Description { get; init; }
+
+    public string? ProvisioningType { get; init; }
+
+    public string? ImageDisplayName { get; init; }
+
+    public string? ImageType { get; init; }
+
+    public string? DomainJoinTypes { get; init; }
+
+    public bool? EnableSingleSignOn { get; init; }
+
+    public bool? LocalAdminEnabled { get; init; }
+
+    public string? CloudPcNamingTemplate { get; init; }
+
+    public string? CloudPcGroupDisplayName { get; init; }
+
+    public string? ManagedBy { get; init; }
+
+    public int? GracePeriodInHours { get; init; }
+
+    public IReadOnlyList<string> AssignedGroupIds { get; init; } = [];
+
+    public IReadOnlyList<string> AssignedGroupNames { get; init; } = [];
+
+    public JsonElement Raw { get; init; }
 }
 
 internal sealed record CloudAppSummary

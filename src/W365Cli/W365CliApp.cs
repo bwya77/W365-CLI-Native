@@ -77,6 +77,9 @@ internal sealed class W365CliApp
             case "Snapshots":
                 await ShowAllSnapshotsAsync();
                 return false;
+            case "Provisioning policies":
+                await ShowProvisioningAsync();
+                return false;
             case "Usage report":
                 await ShowGraphRowsAsync(
                     "Windows 365 Cloud PC usage",
@@ -115,7 +118,7 @@ internal sealed class W365CliApp
                 await ShowCloudAppsAsync();
                 break;
             case "Provisioning":
-                ShowPlaceholderArea("Provisioning", "Provisioning policies and maintenance windows will be wired next.");
+                await ShowProvisioningAsync();
                 break;
             case "Reports":
                 await ShowReportsAsync();
@@ -818,6 +821,7 @@ internal sealed class W365CliApp
             new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
             new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
             new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots"),
+            new("Provisioning", "Provisioning policies", "Open provisioning policy browser"),
             new("Reports", "Usage report", "Open Cloud PC usage"),
             new("Reports", "Launch details", "Open Cloud PC launch details"),
             new("Catalog", "Service plans", "Open service plan catalog"),
@@ -891,6 +895,531 @@ internal sealed class W365CliApp
 
         AnsiConsole.Write(panel);
         Pause();
+    }
+
+    private async Task ShowProvisioningAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        var policies = await LoadProvisioningPoliciesAsync();
+        if (policies.Count == 0)
+        {
+            TimedMessage("[yellow]No provisioning policies were returned.[/]");
+            return;
+        }
+
+        var selectedIndex = 0;
+        var filter = string.Empty;
+        var sortMode = ProvisioningPolicySortMode.Name;
+        while (true)
+        {
+            var visiblePolicies = SortProvisioningPolicies(FilterProvisioningPolicies(policies, filter), sortMode);
+            if (visiblePolicies.Count == 0)
+            {
+                selectedIndex = 0;
+            }
+            else if (selectedIndex >= visiblePolicies.Count)
+            {
+                selectedIndex = visiblePolicies.Count - 1;
+            }
+
+            AnsiConsole.Clear();
+            RenderProvisioningPolicyBrowser(policies, visiblePolicies, selectedIndex, filter, sortMode);
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(Math.Max(0, visiblePolicies.Count - 1), selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(Math.Max(0, visiblePolicies.Count - 1), selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = Math.Max(0, visiblePolicies.Count - 1);
+                    break;
+                case ConsoleKey.Enter:
+                case ConsoleKey.A:
+                    if (visiblePolicies.Count > 0)
+                    {
+                        await ShowProvisioningPolicyDetailsAsync(visiblePolicies[selectedIndex]);
+                        policies = await LoadProvisioningPoliciesAsync();
+                    }
+                    break;
+                case ConsoleKey.R:
+                    policies = await LoadProvisioningPoliciesAsync();
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.C:
+                    filter = string.Empty;
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.S:
+                    sortMode = NextProvisioningPolicySortMode(sortMode);
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
+                default:
+                    if (IsActionHistoryHotkey(key))
+                    {
+                        await ShowActionHistoryAsync();
+                    }
+                    else if (key.KeyChar is '/' or 'f' or 'F')
+                    {
+                        filter = PromptFilter();
+                        selectedIndex = 0;
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    else if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
+                    }
+                    break;
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<ProvisioningPolicySummary>> LoadProvisioningPoliciesAsync()
+    {
+        return await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading provisioning policies...", async _ => await _session.Graph.GetProvisioningPoliciesAsync());
+    }
+
+    private void RenderProvisioningPolicyBrowser(
+        IReadOnlyList<ProvisioningPolicySummary> allPolicies,
+        IReadOnlyList<ProvisioningPolicySummary> visiblePolicies,
+        int selectedIndex,
+        string filter,
+        ProvisioningPolicySortMode sortMode)
+    {
+        RenderCompactHeader();
+        RenderBreadcrumb("Provisioning", "Provisioning policies");
+        AnsiConsole.Write(CreateProvisioningPolicySummaryPanel(allPolicies, visiblePolicies, filter));
+        AnsiConsole.Write(CreateProvisioningPolicyTable(visiblePolicies, selectedIndex));
+        AnsiConsole.MarkupLine($"[grey]Sort: {FormatProvisioningPolicySortMode(sortMode)} | Up/Down move | Enter actions | / filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
+        RenderStatusBar();
+    }
+
+    private static Panel CreateProvisioningPolicySummaryPanel(IReadOnlyList<ProvisioningPolicySummary> allPolicies, IReadOnlyList<ProvisioningPolicySummary> visiblePolicies, string filter)
+    {
+        var typeSummary = string.Join("  ", allPolicies
+            .GroupBy(policy => policy.ProvisioningType ?? "unknown", StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key)
+            .Select(group => $"{group.Key}: {group.Count()}"));
+        var joinSummary = string.Join("  ", allPolicies
+            .GroupBy(policy => policy.DomainJoinTypes ?? "unknown", StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key)
+            .Select(group => $"{group.Key}: {group.Count()}"));
+
+        return new Panel(new Rows(
+                new Markup($"[white]Total[/] {allPolicies.Count}   [white]Visible[/] {visiblePolicies.Count}   [white]Filter[/] {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}"),
+                new Markup($"[white]Types[/] {Markup.Escape(typeSummary)}"),
+                new Markup($"[white]Join[/] {Markup.Escape(joinSummary)}")))
+            .Header("Provisioning policies")
+            .Border(BoxBorder.Rounded);
+    }
+
+    private static Table CreateProvisioningPolicyTable(IReadOnlyList<ProvisioningPolicySummary> visiblePolicies, int selectedIndex)
+    {
+        var widths = GetProvisioningPolicyWidths();
+        var table = new Table()
+            .Border(TableBorder.Rounded)
+            .AddColumn(" ")
+            .AddColumn("Name")
+            .AddColumn("Type")
+            .AddColumn("Image")
+            .AddColumn("Join")
+            .AddColumn("SSO");
+
+        var showGroups = Console.WindowWidth >= 130;
+        if (showGroups)
+        {
+            table.AddColumn("Groups");
+        }
+
+        if (visiblePolicies.Count == 0)
+        {
+            var cells = new List<string> { "-", "[grey]No provisioning policies match the current filter.[/]", "-", "-", "-", "-" };
+            if (showGroups) { cells.Add("-"); }
+            table.AddRow(cells.ToArray());
+            return table;
+        }
+
+        var pageSize = Math.Max(8, Math.Min(18, Console.WindowHeight - 16));
+        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, visiblePolicies.Count - pageSize));
+        var visible = visiblePolicies.Skip(start).Take(pageSize).ToArray();
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var absoluteIndex = start + index;
+            var policy = visible[index];
+            var selected = absoluteIndex == selectedIndex;
+            var row = new List<string>
+            {
+                selected ? "[black on #4091f2]>[/]" : " ",
+                selected ? Selected(Markup.Escape(Fit(policy.DisplayName, widths.Name))) : Markup.Escape(Fit(policy.DisplayName, widths.Name)),
+                selected ? Selected(Markup.Escape(Fit(policy.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(policy.ProvisioningType ?? "-", widths.Type)),
+                selected ? Selected(Markup.Escape(Fit(policy.ImageDisplayName ?? "-", widths.Image))) : Markup.Escape(Fit(policy.ImageDisplayName ?? "-", widths.Image)),
+                selected ? Selected(Markup.Escape(Fit(policy.DomainJoinTypes ?? "-", widths.Join))) : Markup.Escape(Fit(policy.DomainJoinTypes ?? "-", widths.Join)),
+                selected ? Selected(Markup.Escape(Fit(FormatBool(policy.EnableSingleSignOn), widths.Sso))) : Markup.Escape(Fit(FormatBool(policy.EnableSingleSignOn), widths.Sso))
+            };
+            if (showGroups)
+            {
+                row.Add(selected ? Selected(Markup.Escape(Fit(string.Join(", ", policy.AssignedGroupNames), widths.Groups))) : Markup.Escape(Fit(string.Join(", ", policy.AssignedGroupNames), widths.Groups)));
+            }
+
+            table.AddRow(row.ToArray());
+        }
+
+        return table;
+    }
+
+    private static (int Name, int Type, int Image, int Join, int Sso, int Groups) GetProvisioningPolicyWidths()
+    {
+        var available = Math.Max(95, Console.WindowWidth - 4);
+        const int type = 12;
+        const int join = 16;
+        const int sso = 5;
+        var showGroups = Console.WindowWidth >= 130;
+        var groups = showGroups ? Math.Max(20, (int)(available * 0.20)) : 0;
+        var remaining = Math.Max(45, available - type - join - sso - groups - (showGroups ? 6 : 5));
+        var name = Math.Clamp((int)(remaining * 0.55), 28, 44);
+        var image = Math.Max(22, remaining - name);
+        return (name, type, image, join, sso, groups);
+    }
+
+    private async Task ShowProvisioningPolicyDetailsAsync(ProvisioningPolicySummary policy)
+    {
+        var actions = new[] { "View Cloud PCs", "Export", "Create copy", "Reprovision policy Cloud PCs", "Delete", "Back" };
+        var selectedActionIndex = 0;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderProvisioningPolicyDetailLayout(policy, actions, selectedActionIndex);
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedActionIndex = Math.Max(0, selectedActionIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedActionIndex = Math.Min(actions.Length - 1, selectedActionIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedActionIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedActionIndex = actions.Length - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    var action = actions[selectedActionIndex];
+                    if (action == "Back")
+                    {
+                        return;
+                    }
+                    await InvokeProvisioningPolicyActionAsync(policy, action);
+                    if (action is "Delete")
+                    {
+                        return;
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void RenderProvisioningPolicyDetailLayout(ProvisioningPolicySummary policy, IReadOnlyList<string> actions, int selectedActionIndex)
+    {
+        RenderBreadcrumb("Provisioning", "Provisioning policies", policy.DisplayName);
+        var details = new Panel(new Rows(
+                new Markup(PropertyInline("Name", policy.DisplayName)),
+                new Markup(PropertyInline("Description", policy.Description ?? "-")),
+                new Markup(PropertyInline("Type", policy.ProvisioningType ?? "-")),
+                new Markup(PropertyInline("Image", policy.ImageDisplayName ?? "-")),
+                new Markup(PropertyInline("Image type", policy.ImageType ?? "-")),
+                new Markup(PropertyInline("Domain join", policy.DomainJoinTypes ?? "-")),
+                new Markup(PropertyInline("Single sign-on", FormatBool(policy.EnableSingleSignOn))),
+                new Markup(PropertyInline("Local admin", FormatBool(policy.LocalAdminEnabled))),
+                new Markup(PropertyInline("Naming template", policy.CloudPcNamingTemplate ?? "-")),
+                new Markup(PropertyInline("Cloud PC group", policy.CloudPcGroupDisplayName ?? "-")),
+                new Markup(PropertyInline("Managed by", policy.ManagedBy ?? "-")),
+                new Markup(PropertyInline("Grace period hours", policy.GracePeriodInHours?.ToString() ?? "-")),
+                new Markup(PropertyBlock("Assigned groups", string.Join(", ", policy.AssignedGroupNames))),
+                new Markup(PropertyBlock("Policy ID", policy.Id))))
+            .Header("Details")
+            .Border(BoxBorder.Rounded);
+
+        var actionLines = actions.Select((action, index) => index == selectedActionIndex
+            ? $"[black on #4091f2]> {Markup.Escape(action)}[/]"
+            : $"  {Markup.Escape(action)}");
+        var actionPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
+            .Header("Actions")
+            .Border(BoxBorder.Rounded);
+
+        if (Console.WindowWidth >= 120)
+        {
+            var grid = new Grid();
+            grid.AddColumn();
+            grid.AddColumn();
+            grid.AddRow(details, actionPanel);
+            AnsiConsole.Write(grid);
+        }
+        else
+        {
+            AnsiConsole.Write(details);
+            AnsiConsole.Write(actionPanel);
+        }
+
+        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
+    }
+
+    private async Task InvokeProvisioningPolicyActionAsync(ProvisioningPolicySummary policy, string action)
+    {
+        switch (action)
+        {
+            case "View Cloud PCs":
+                await ShowCloudPcsForProvisioningPolicyAsync(policy);
+                break;
+            case "Export":
+                await ExportProvisioningPolicyAsync(policy);
+                break;
+            case "Create copy":
+                await CreateProvisioningPolicyCopyAsync(policy);
+                break;
+            case "Reprovision policy Cloud PCs":
+                await ReprovisionProvisioningPolicyCloudPcsAsync(policy);
+                break;
+            case "Delete":
+                await ConfirmAndRunAsync("Delete", policy.DisplayName, async () => await _session.Graph.DeleteProvisioningPolicyAsync(policy.Id));
+                break;
+        }
+    }
+
+    private async Task ShowCloudPcsForProvisioningPolicyAsync(ProvisioningPolicySummary policy)
+    {
+        var cloudPcs = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading policy Cloud PCs...", async _ => await _session.Graph.GetCloudPcsByProvisioningPolicyAsync(policy.Id));
+        if (cloudPcs.Count == 0)
+        {
+            TimedMessage("[yellow]No Cloud PCs were returned for this provisioning policy.[/]");
+            return;
+        }
+
+        var selectedIndex = 0;
+        var filter = string.Empty;
+        var sortMode = CloudPcSortMode.Name;
+        while (true)
+        {
+            var visibleCloudPcs = SortCloudPcs(FilterCloudPcs(cloudPcs, filter), sortMode);
+            if (visibleCloudPcs.Count == 0)
+            {
+                selectedIndex = 0;
+            }
+            else if (selectedIndex >= visibleCloudPcs.Count)
+            {
+                selectedIndex = visibleCloudPcs.Count - 1;
+            }
+
+            AnsiConsole.Clear();
+            RenderBreadcrumb("Provisioning", "Provisioning policies", policy.DisplayName, "Cloud PCs");
+            AnsiConsole.Write(CreateCloudPcSummaryPanel(cloudPcs, visibleCloudPcs, filter));
+            AnsiConsole.Write(CreateCloudPcTable(cloudPcs, visibleCloudPcs, selectedIndex, filter));
+            AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(Math.Max(0, visibleCloudPcs.Count - 1), selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(Math.Max(0, visibleCloudPcs.Count - 1), selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = Math.Max(0, visibleCloudPcs.Count - 1);
+                    break;
+                case ConsoleKey.Enter:
+                case ConsoleKey.A:
+                    if (visibleCloudPcs.Count > 0)
+                    {
+                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex]);
+                    }
+                    break;
+                case ConsoleKey.R:
+                    cloudPcs = await _session.Graph.GetCloudPcsByProvisioningPolicyAsync(policy.Id);
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.C:
+                    filter = string.Empty;
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.S:
+                    sortMode = NextCloudPcSortMode(sortMode);
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is '/' or 'f' or 'F')
+                    {
+                        filter = PromptFilter();
+                        selectedIndex = 0;
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'd' or 'D')
+                    {
+                        await ShowDiskSpaceAsync(visibleCloudPcs[selectedIndex]);
+                    }
+                    else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'n' or 'N')
+                    {
+                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex]);
+                    }
+                    else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'z' or 'Z')
+                    {
+                        await ShowResizeAsync(visibleCloudPcs[selectedIndex]);
+                    }
+                    else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'y' or 'Y')
+                    {
+                        await InvokeCloudPcActionAsync(visibleCloudPcs[selectedIndex], "Sync");
+                    }
+                    break;
+            }
+        }
+    }
+
+    private async Task ExportProvisioningPolicyAsync(ProvisioningPolicySummary policy)
+    {
+        var defaultPath = Path.Combine(Environment.CurrentDirectory, $"{SanitizeFileName(policy.DisplayName)}.json");
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Provisioning", "Provisioning policies", policy.DisplayName, "Export");
+        var path = AnsiConsole.Prompt(
+            new TextPrompt<string>($"Export path [[{Markup.Escape(defaultPath)}]]:")
+                .AllowEmpty());
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = defaultPath;
+        }
+
+        var exportJson = _session.Graph.ExportProvisioningPolicyJson(policy);
+        await File.WriteAllTextAsync(path, exportJson);
+        ShowActionResult("Exported", "Export", path, "[green]Exported.[/]");
+    }
+
+    private async Task CreateProvisioningPolicyCopyAsync(ProvisioningPolicySummary policy)
+    {
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Provisioning", "Provisioning policies", policy.DisplayName, "Create copy");
+        var displayName = AnsiConsole.Ask<string>("New policy display name:");
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            TimedMessage("[yellow]Create copy cancelled. Display name is required.[/]");
+            return;
+        }
+
+        var assign = AnsiConsole.Confirm("Recreate assignment targets on the new policy?");
+        await ConfirmAndRunAsync(
+            "Create copy",
+            $"{policy.DisplayName} to {displayName}",
+            async () => await _session.Graph.CreateProvisioningPolicyCopyAsync(policy, displayName, assign));
+    }
+
+    private async Task ReprovisionProvisioningPolicyCloudPcsAsync(ProvisioningPolicySummary policy)
+    {
+        var osChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Policy reprovision OS version")
+                .HighlightStyle(SelectionHighlightStyle())
+                .AddChoices("Keep policy/default", "Windows 11", "Windows 10", "Back"));
+        if (osChoice == "Back")
+        {
+            return;
+        }
+
+        var accountChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Policy reprovision user account type")
+                .HighlightStyle(SelectionHighlightStyle())
+                .AddChoices("Keep policy/default", "Standard user", "Administrator", "Back"));
+        if (accountChoice == "Back")
+        {
+            return;
+        }
+
+        AnsiConsole.WriteLine();
+        var excludeInput = AnsiConsole.Prompt(
+            new TextPrompt<string>("Exclude Cloud PCs by name, ID, or UPN, comma-separated [[optional]]:")
+                .AllowEmpty());
+        var exclusions = string.IsNullOrWhiteSpace(excludeInput)
+            ? []
+            : excludeInput.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var osVersion = osChoice switch
+        {
+            "Windows 11" => "windows11",
+            "Windows 10" => "windows10",
+            _ => null
+        };
+        var accountType = accountChoice switch
+        {
+            "Standard user" => "standardUser",
+            "Administrator" => "administrator",
+            _ => null
+        };
+
+        await ConfirmAndRunAsync(
+            "Reprovision",
+            $"{policy.DisplayName} policy Cloud PCs",
+            async () => await _session.Graph.ReprovisionCloudPcsByPolicyAsync(policy.Id, osVersion, accountType, exclusions));
+    }
+
+    private static string SanitizeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return string.Concat(value.Select(character => invalid.Contains(character) ? '-' : character));
+    }
+
+    private static string FormatBool(bool? value)
+    {
+        return value is null ? "-" : value.Value ? "Yes" : "No";
     }
 
     private async Task ShowActionHistoryAsync()
@@ -2662,6 +3191,60 @@ internal sealed class W365CliApp
         };
     }
 
+    private static IReadOnlyList<ProvisioningPolicySummary> FilterProvisioningPolicies(IReadOnlyList<ProvisioningPolicySummary> policies, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return policies;
+        }
+
+        return policies
+            .Where(policy =>
+                Contains(policy.DisplayName, filter) ||
+                Contains(policy.Description, filter) ||
+                Contains(policy.ProvisioningType, filter) ||
+                Contains(policy.ImageDisplayName, filter) ||
+                Contains(policy.ImageType, filter) ||
+                Contains(policy.DomainJoinTypes, filter) ||
+                Contains(policy.CloudPcNamingTemplate, filter) ||
+                Contains(policy.CloudPcGroupDisplayName, filter) ||
+                policy.AssignedGroupNames.Any(groupName => Contains(groupName, filter)))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ProvisioningPolicySummary> SortProvisioningPolicies(IReadOnlyList<ProvisioningPolicySummary> policies, ProvisioningPolicySortMode sortMode)
+    {
+        return sortMode switch
+        {
+            ProvisioningPolicySortMode.Type => policies.OrderBy(policy => policy.ProvisioningType, StringComparer.OrdinalIgnoreCase).ThenBy(policy => policy.DisplayName, StringComparer.OrdinalIgnoreCase).ToArray(),
+            ProvisioningPolicySortMode.Image => policies.OrderBy(policy => policy.ImageDisplayName, StringComparer.OrdinalIgnoreCase).ThenBy(policy => policy.DisplayName, StringComparer.OrdinalIgnoreCase).ToArray(),
+            ProvisioningPolicySortMode.Join => policies.OrderBy(policy => policy.DomainJoinTypes, StringComparer.OrdinalIgnoreCase).ThenBy(policy => policy.DisplayName, StringComparer.OrdinalIgnoreCase).ToArray(),
+            _ => policies.OrderBy(policy => policy.DisplayName, StringComparer.OrdinalIgnoreCase).ToArray()
+        };
+    }
+
+    private static ProvisioningPolicySortMode NextProvisioningPolicySortMode(ProvisioningPolicySortMode sortMode)
+    {
+        return sortMode switch
+        {
+            ProvisioningPolicySortMode.Name => ProvisioningPolicySortMode.Type,
+            ProvisioningPolicySortMode.Type => ProvisioningPolicySortMode.Image,
+            ProvisioningPolicySortMode.Image => ProvisioningPolicySortMode.Join,
+            _ => ProvisioningPolicySortMode.Name
+        };
+    }
+
+    private static string FormatProvisioningPolicySortMode(ProvisioningPolicySortMode sortMode)
+    {
+        return sortMode switch
+        {
+            ProvisioningPolicySortMode.Type => "type",
+            ProvisioningPolicySortMode.Image => "image",
+            ProvisioningPolicySortMode.Join => "join",
+            _ => "name"
+        };
+    }
+
     private static bool Contains(string? value, string filter)
     {
         return value?.Contains(filter, StringComparison.OrdinalIgnoreCase) == true;
@@ -3619,6 +4202,14 @@ internal sealed class W365CliApp
         Status,
         User,
         ServicePlan
+    }
+
+    private enum ProvisioningPolicySortMode
+    {
+        Name,
+        Type,
+        Image,
+        Join
     }
 
     private async Task<bool> EnsureConnectedAsync()
