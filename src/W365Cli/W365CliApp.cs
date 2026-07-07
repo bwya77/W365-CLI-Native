@@ -1216,11 +1216,19 @@ internal sealed class W365CliApp
         }
 
         var selectedAction = remoteActions[Math.Min(selectedRemoteActionIndex, remoteActions.Count - 1)];
-        var rows = new Rows(
-            new Markup($"[bold]Total[/] {remoteActions.Count}"),
-            table,
-            new Markup($"[bold]Code[/] {Markup.Escape(selectedAction.StatusCode ?? "-")}"),
-            new Markup($"[bold]Message[/]\n{Markup.Escape(selectedAction.StatusMessage ?? "-")}"));
+        var hasStatusDetail =
+            !string.IsNullOrWhiteSpace(selectedAction.StatusCode) ||
+            !string.IsNullOrWhiteSpace(selectedAction.StatusMessage);
+
+        var rows = hasStatusDetail
+            ? new Rows(
+                new Markup($"[bold]Total[/] {remoteActions.Count}"),
+                table,
+                new Markup($"[bold]Code[/] {Markup.Escape(selectedAction.StatusCode ?? "-")}"),
+                new Markup($"[bold]Message[/]\n{Markup.Escape(selectedAction.StatusMessage ?? "-")}"))
+            : new Rows(
+                new Markup($"[bold]Total[/] {remoteActions.Count}"),
+                table);
 
         return new Panel(rows)
             .Header("Remote actions")
