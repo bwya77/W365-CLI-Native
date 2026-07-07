@@ -275,7 +275,9 @@ internal sealed class W365CliApp
                 case "Launch details":
                     await ShowGraphRowsAsync(
                         "Windows 365 launch details",
-                        async () => await _session.Graph.GetLaunchDetailRowsAsync());
+                        async () => await _session.Graph.GetLaunchDetailRowsAsync(),
+                        GetLaunchDetailsHeader,
+                        FormatLaunchDetailsRow);
                     break;
                 case "Cloud PC reports":
                     await ShowCloudPcReportsAsync();
@@ -710,6 +712,57 @@ internal sealed class W365CliApp
         var gaps = showEvent ? 4 : 3;
         var message = Math.Max(24, available - time - type - eventWidth - result - gaps);
         return (time, type, eventWidth, result, message);
+    }
+
+    private static string GetLaunchDetailsHeader()
+    {
+        var widths = GetLaunchDetailsWidths();
+        return Row("Cloud PC", widths.CloudPc, "User", widths.User, "Status", widths.Status, "Switch", widths.Switch, "Reason", widths.Reason);
+    }
+
+    private static string FormatLaunchDetailsRow(GraphTableRow row)
+    {
+        var widths = GetLaunchDetailsWidths();
+        return Row(
+            GetField(row, "Cloud PC"), widths.CloudPc,
+            GetField(row, "User"), widths.User,
+            GetField(row, "Status"), widths.Status,
+            GetSwitchValue(row), widths.Switch,
+            GetLaunchReason(row), widths.Reason);
+    }
+
+    private static (int CloudPc, int User, int Status, int Switch, int Reason) GetLaunchDetailsWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int status = 12;
+        const int switchWidth = 8;
+        var remaining = Math.Max(44, available - status - switchWidth - 4);
+        var cloudPc = Math.Max(24, (int)(remaining * 0.32));
+        var user = Math.Max(18, (int)(remaining * 0.28));
+        var reason = Math.Max(20, remaining - cloudPc - user);
+        return (cloudPc, user, status, switchWidth, reason);
+    }
+
+    private static string GetSwitchValue(GraphTableRow row)
+    {
+        var value = GetOptionalField(row, "windows365SwitchCompatible", "Windows365SwitchCompatible");
+        return value?.ToLowerInvariant() switch
+        {
+            "true" => "Yes",
+            "false" => "No",
+            null => "-",
+            _ => value
+        };
+    }
+
+    private static string GetLaunchReason(GraphTableRow row)
+    {
+        return GetOptionalField(
+            row,
+            "Reason",
+            "Error",
+            "windows365SwitchCompatibilityFailureReasonType",
+            "Windows365SwitchCompatibilityFailureReasonType") ?? "-";
     }
 
     private static string GetField(GraphTableRow row, string name)

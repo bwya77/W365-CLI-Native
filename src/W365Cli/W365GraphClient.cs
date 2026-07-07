@@ -332,10 +332,11 @@ internal sealed class W365GraphClient
             {
                 rows.Add(new GraphTableRow(
                     cloudPc.Name,
-                    "No user principal name",
+                    "Status: Skipped | Reason: No user principal name",
                     new Dictionary<string, string>
                     {
                         ["Cloud PC"] = cloudPc.Name,
+                        ["Cloud PC ID"] = cloudPc.Id,
                         ["Status"] = "Skipped",
                         ["Reason"] = "No user principal name"
                     }));
@@ -352,7 +353,8 @@ internal sealed class W365GraphClient
                     fields["Cloud PC"] = cloudPc.Name;
                     fields["Cloud PC ID"] = cloudPc.Id;
                     fields["User"] = cloudPc.UserPrincipalName;
-                    var status = GetFirst(fields, "launchDetailStatus", "status") ?? "-";
+                    fields["Status"] = "Available";
+                    var status = "Available";
                     var switchCompatible = FormatBoolean(GetFirst(fields, "windows365SwitchCompatible"));
                     rows.Add(new GraphTableRow(
                         cloudPc.Name,
@@ -368,6 +370,7 @@ internal sealed class W365GraphClient
                     new Dictionary<string, string>
                     {
                         ["Cloud PC"] = cloudPc.Name,
+                        ["Cloud PC ID"] = cloudPc.Id,
                         ["User"] = cloudPc.UserPrincipalName,
                         ["Status"] = "Unavailable",
                         ["Error"] = ex.Message
@@ -400,7 +403,7 @@ internal sealed class W365GraphClient
             return [];
         }
 
-        var columns = schema.EnumerateArray().Select(item => item.GetString() ?? "-").ToArray();
+        var columns = schema.EnumerateArray().Select(GetReportColumnName).ToArray();
         var rows = new List<GraphTableRow>();
         foreach (var valueRow in values.EnumerateArray())
         {
@@ -575,6 +578,31 @@ internal sealed class W365GraphClient
             JsonValueKind.Undefined => "-",
             _ => value.GetRawText()
         };
+    }
+
+    private static string GetReportColumnName(JsonElement schemaItem)
+    {
+        if (schemaItem.ValueKind == JsonValueKind.String)
+        {
+            return schemaItem.GetString() ?? "-";
+        }
+
+        if (schemaItem.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "Column", "column", "Name", "name" })
+            {
+                if (schemaItem.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String)
+                {
+                    var value = property.GetString();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        return value;
+                    }
+                }
+            }
+        }
+
+        return "-";
     }
 
     private static string FormatBoolean(string? value)
