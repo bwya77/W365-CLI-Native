@@ -156,11 +156,18 @@ internal sealed class W365CliApp
         }
 
         var selectedIndex = 0;
+        var filter = string.Empty;
         while (true)
         {
+            var visibleItems = FilterDiskSpaces(items, filter);
+            if (selectedIndex > visibleItems.Count)
+            {
+                selectedIndex = visibleItems.Count;
+            }
+
             AnsiConsole.Clear();
             RenderCompactHeader();
-            RenderDiskSpaceTable(items, selectedIndex);
+            RenderDiskSpaceTable(items, visibleItems, selectedIndex, filter);
             var key = Console.ReadKey(intercept: true);
             switch (key.Key)
             {
@@ -168,33 +175,45 @@ internal sealed class W365CliApp
                     selectedIndex = Math.Max(0, selectedIndex - 1);
                     break;
                 case ConsoleKey.DownArrow:
-                    selectedIndex = Math.Min(items.Count, selectedIndex + 1);
+                    selectedIndex = Math.Min(visibleItems.Count, selectedIndex + 1);
                     break;
                 case ConsoleKey.PageUp:
                     selectedIndex = Math.Max(0, selectedIndex - 10);
                     break;
                 case ConsoleKey.PageDown:
-                    selectedIndex = Math.Min(items.Count, selectedIndex + 10);
+                    selectedIndex = Math.Min(visibleItems.Count, selectedIndex + 10);
                     break;
                 case ConsoleKey.Home:
                     selectedIndex = 0;
                     break;
                 case ConsoleKey.End:
-                    selectedIndex = items.Count;
+                    selectedIndex = visibleItems.Count;
+                    break;
+                case ConsoleKey.C:
+                    filter = string.Empty;
+                    selectedIndex = 0;
                     break;
                 case ConsoleKey.Enter:
-                    if (selectedIndex == items.Count)
+                    if (selectedIndex == visibleItems.Count)
                     {
                         return;
                     }
 
-                    await OpenCloudPcFromDiskSpaceAsync(items[selectedIndex]);
+                    if (visibleItems.Count > 0)
+                    {
+                        await OpenCloudPcFromDiskSpaceAsync(visibleItems[selectedIndex]);
+                    }
                     break;
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
                 default:
-                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    if (key.KeyChar is '/' or 'f' or 'F')
+                    {
+                        filter = PromptFilter();
+                        selectedIndex = 0;
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
                         return;
                     }
@@ -203,29 +222,30 @@ internal sealed class W365CliApp
         }
     }
 
-    private static void RenderDiskSpaceTable(IReadOnlyList<CloudPcDiskSpace> items, int selectedIndex)
+    private static void RenderDiskSpaceTable(IReadOnlyList<CloudPcDiskSpace> allItems, IReadOnlyList<CloudPcDiskSpace> visibleItems, int selectedIndex, string filter)
     {
         AnsiConsole.MarkupLine("[cyan]Windows 365 Cloud PC disk space[/]");
+        AnsiConsole.MarkupLine($"[grey]Rows: {allItems.Count} | Visible: {visibleItems.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
         var header = Row("Cloud PC", 34, "Free", 10, "Used", 10, "Total", 10, "Free %", 8, "Last sync", 20);
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
         AnsiConsole.WriteLine();
 
         var pageSize = Math.Max(8, Console.WindowHeight - 12);
-        var totalRows = items.Count + 1;
+        var totalRows = visibleItems.Count + 1;
         var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, totalRows - pageSize));
         var end = Math.Min(totalRows - 1, start + pageSize - 1);
 
         for (var index = start; index <= end; index++)
         {
             string label;
-            if (index == items.Count)
+            if (index == visibleItems.Count)
             {
                 label = "Back";
             }
             else
             {
-                var disk = items[index];
+                var disk = visibleItems[index];
                 label = Row(
                     disk.CloudPcName, 34,
                     FormatGb(disk.FreeStorageGb), 10,
@@ -242,7 +262,23 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | / or F filter | C clear | Esc/B/Q back[/]");
+    }
+
+    private static IReadOnlyList<CloudPcDiskSpace> FilterDiskSpaces(IReadOnlyList<CloudPcDiskSpace> items, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return items;
+        }
+
+        return items
+            .Where(item =>
+                Contains(item.CloudPcName, filter) ||
+                Contains(item.AssignedUserUpn, filter) ||
+                Contains(item.ManagedDeviceName, filter) ||
+                Contains(item.ManagedDeviceId, filter))
+            .ToArray();
     }
 
     private async Task OpenCloudPcFromDiskSpaceAsync(CloudPcDiskSpace disk)
@@ -277,10 +313,21 @@ internal sealed class W365CliApp
         }
 
         var selectedIndex = 0;
+        var filter = string.Empty;
         while (true)
         {
+            var visibleItems = FilterSnapshotItems(items, filter);
+            if (visibleItems.Count == 0)
+            {
+                selectedIndex = 0;
+            }
+            else if (selectedIndex >= visibleItems.Count)
+            {
+                selectedIndex = visibleItems.Count - 1;
+            }
+
             AnsiConsole.Clear();
-            RenderAllSnapshotsTable(items, selectedIndex);
+            RenderAllSnapshotsTable(items, visibleItems, selectedIndex, filter);
             var key = Console.ReadKey(intercept: true);
             switch (key.Key)
             {
@@ -288,26 +335,38 @@ internal sealed class W365CliApp
                     selectedIndex = Math.Max(0, selectedIndex - 1);
                     break;
                 case ConsoleKey.DownArrow:
-                    selectedIndex = Math.Min(items.Count - 1, selectedIndex + 1);
+                    selectedIndex = Math.Min(Math.Max(0, visibleItems.Count - 1), selectedIndex + 1);
                     break;
                 case ConsoleKey.PageUp:
                     selectedIndex = Math.Max(0, selectedIndex - 10);
                     break;
                 case ConsoleKey.PageDown:
-                    selectedIndex = Math.Min(items.Count - 1, selectedIndex + 10);
+                    selectedIndex = Math.Min(Math.Max(0, visibleItems.Count - 1), selectedIndex + 10);
                     break;
                 case ConsoleKey.Home:
                     selectedIndex = 0;
                     break;
                 case ConsoleKey.End:
-                    selectedIndex = items.Count - 1;
+                    selectedIndex = Math.Max(0, visibleItems.Count - 1);
+                    break;
+                case ConsoleKey.C:
+                    filter = string.Empty;
+                    selectedIndex = 0;
                     break;
                 case ConsoleKey.Enter:
-                    await ShowCloudPcDetailsAsync(items[selectedIndex].CloudPc);
+                    if (visibleItems.Count > 0)
+                    {
+                        await ShowCloudPcDetailsAsync(visibleItems[selectedIndex].CloudPc);
+                    }
                     break;
                 case ConsoleKey.A:
                 case ConsoleKey.S:
-                    await ShowSnapshotActionMenuAsync(items[selectedIndex].CloudPc, items[selectedIndex].Snapshot);
+                    if (visibleItems.Count == 0)
+                    {
+                        break;
+                    }
+
+                    await ShowSnapshotActionMenuAsync(visibleItems[selectedIndex].CloudPc, visibleItems[selectedIndex].Snapshot);
                     items = await LoadAllSnapshotsAsync();
                     selectedIndex = Math.Min(selectedIndex, Math.Max(0, items.Count - 1));
                     if (items.Count == 0)
@@ -329,7 +388,12 @@ internal sealed class W365CliApp
                 case ConsoleKey.LeftArrow:
                     return;
                 default:
-                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    if (key.KeyChar is '/' or 'f' or 'F')
+                    {
+                        filter = PromptFilter();
+                        selectedIndex = 0;
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
                         return;
                     }
@@ -359,10 +423,10 @@ internal sealed class W365CliApp
             });
     }
 
-    private static void RenderAllSnapshotsTable(IReadOnlyList<SnapshotListItem> items, int selectedIndex)
+    private static void RenderAllSnapshotsTable(IReadOnlyList<SnapshotListItem> allItems, IReadOnlyList<SnapshotListItem> visibleItems, int selectedIndex, string filter)
     {
         AnsiConsole.MarkupLine("[cyan]Windows 365 Cloud PC snapshots[/]");
-        AnsiConsole.MarkupLine($"[grey]Rows: {items.Count}[/]");
+        AnsiConsole.MarkupLine($"[grey]Rows: {allItems.Count} | Visible: {visibleItems.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
         AnsiConsole.WriteLine();
 
         var widths = GetAllSnapshotWidths();
@@ -370,9 +434,17 @@ internal sealed class W365CliApp
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
 
+        if (visibleItems.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[grey]No snapshots match the current filter.[/]");
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | Esc/B/Q back[/]");
+            return;
+        }
+
         var pageSize = Math.Max(8, Console.WindowHeight - 10);
-        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, items.Count - pageSize));
-        var visible = items.Skip(start).Take(pageSize).ToArray();
+        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, visibleItems.Count - pageSize));
+        var visible = visibleItems.Skip(start).Take(pageSize).ToArray();
         for (var index = 0; index < visible.Length; index++)
         {
             var item = visible[index];
@@ -390,7 +462,25 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | S snapshot actions | R refresh | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | S snapshot actions | / or F filter | C clear | R refresh | Esc/B/Q back[/]");
+    }
+
+    private static IReadOnlyList<SnapshotListItem> FilterSnapshotItems(IReadOnlyList<SnapshotListItem> items, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return items;
+        }
+
+        return items
+            .Where(item =>
+                Contains(item.CloudPc.Name, filter) ||
+                Contains(item.CloudPc.UserPrincipalName, filter) ||
+                Contains(item.Snapshot.Status, filter) ||
+                Contains(item.Snapshot.SnapshotType, filter) ||
+                Contains(item.Snapshot.HealthCheckStatus, filter) ||
+                Contains(item.Snapshot.SnapshotId, filter))
+            .ToArray();
     }
 
     private static (int CloudPc, int Status, int Type, int Created, int Expires) GetAllSnapshotWidths()
@@ -902,11 +992,22 @@ internal sealed class W365CliApp
         headerFactory ??= GetDefaultGraphRowsHeader;
         rowFactory ??= FormatDefaultGraphRow;
         var selectedIndex = 0;
+        var filter = string.Empty;
 
         while (true)
         {
+            var visibleRows = FilterGraphRows(rows, filter);
+            if (visibleRows.Count == 0)
+            {
+                selectedIndex = 0;
+            }
+            else if (selectedIndex >= visibleRows.Count)
+            {
+                selectedIndex = visibleRows.Count - 1;
+            }
+
             AnsiConsole.Clear();
-            RenderGraphRows(title, rows, selectedIndex, headerFactory, rowFactory);
+            RenderGraphRows(title, rows, visibleRows, selectedIndex, filter, headerFactory, rowFactory);
             var key = Console.ReadKey(intercept: true);
 
             switch (key.Key)
@@ -915,35 +1016,49 @@ internal sealed class W365CliApp
                     selectedIndex = Math.Max(0, selectedIndex - 1);
                     break;
                 case ConsoleKey.DownArrow:
-                    selectedIndex = Math.Min(rows.Count - 1, selectedIndex + 1);
+                    selectedIndex = Math.Min(Math.Max(0, visibleRows.Count - 1), selectedIndex + 1);
                     break;
                 case ConsoleKey.PageUp:
                     selectedIndex = Math.Max(0, selectedIndex - 10);
                     break;
                 case ConsoleKey.PageDown:
-                    selectedIndex = Math.Min(rows.Count - 1, selectedIndex + 10);
+                    selectedIndex = Math.Min(Math.Max(0, visibleRows.Count - 1), selectedIndex + 10);
                     break;
                 case ConsoleKey.Home:
                     selectedIndex = 0;
                     break;
                 case ConsoleKey.End:
-                    selectedIndex = rows.Count - 1;
+                    selectedIndex = Math.Max(0, visibleRows.Count - 1);
+                    break;
+                case ConsoleKey.C:
+                    filter = string.Empty;
+                    selectedIndex = 0;
                     break;
                 case ConsoleKey.Enter:
+                    if (visibleRows.Count == 0)
+                    {
+                        break;
+                    }
+
                     if (enterAction is null)
                     {
-                        ShowGraphRowDetails(title, rows[selectedIndex]);
+                        ShowGraphRowDetails(title, visibleRows[selectedIndex]);
                     }
                     else
                     {
-                        await enterAction(rows[selectedIndex]);
+                        await enterAction(visibleRows[selectedIndex]);
                     }
                     break;
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
                 default:
-                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    if (key.KeyChar is '/' or 'f' or 'F')
+                    {
+                        filter = PromptFilter();
+                        selectedIndex = 0;
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
                         return;
                     }
@@ -1069,21 +1184,31 @@ internal sealed class W365CliApp
 
     private static void RenderGraphRows(
         string title,
-        IReadOnlyList<GraphTableRow> rows,
+        IReadOnlyList<GraphTableRow> allRows,
+        IReadOnlyList<GraphTableRow> visibleRows,
         int selectedIndex,
+        string filter,
         Func<string> headerFactory,
         Func<GraphTableRow, string> rowFactory)
     {
         var header = headerFactory();
         AnsiConsole.MarkupLine($"[cyan]{Markup.Escape(title)}[/]");
-        AnsiConsole.MarkupLine($"[grey]Rows: {rows.Count}[/]");
+        AnsiConsole.MarkupLine($"[grey]Rows: {allRows.Count} | Visible: {visibleRows.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
 
         var pageSize = Math.Max(8, Console.WindowHeight - 10);
-        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, rows.Count - pageSize));
-        var visible = rows.Skip(start).Take(pageSize).ToArray();
+        if (visibleRows.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[grey]No rows match the current filter.[/]");
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | Esc/B/Q back[/]");
+            return;
+        }
+
+        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, visibleRows.Count - pageSize));
+        var visible = visibleRows.Skip(start).Take(pageSize).ToArray();
 
         for (var index = 0; index < visible.Length; index++)
         {
@@ -1095,7 +1220,7 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | / or F filter | C clear | Esc/B/Q back[/]");
     }
 
     private static string GetDefaultGraphRowsHeader()
@@ -1116,6 +1241,21 @@ internal sealed class W365CliApp
     {
         var widths = GetDefaultGraphRowsWidths();
         return Row(row.Title, widths.Name, row.Summary, widths.Summary);
+    }
+
+    private static IReadOnlyList<GraphTableRow> FilterGraphRows(IReadOnlyList<GraphTableRow> rows, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return rows;
+        }
+
+        return rows
+            .Where(row =>
+                Contains(row.Title, filter) ||
+                Contains(row.Summary, filter) ||
+                row.Fields.Any(field => Contains(field.Key, filter) || Contains(field.Value, filter)))
+            .ToArray();
     }
 
     private static string GetUsageReportHeader()
