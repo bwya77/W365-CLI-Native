@@ -17,27 +17,36 @@ internal sealed class W365CliApp
         {
             RenderHeader();
 
+            var menuChoices = GetMainMenuChoices();
             var choice = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
+                new SelectionPrompt<MenuChoice>()
                     .Title("[cyan]Choose an area[/]")
-                    .PageSize(10)
-                    .AddChoices(
-                        "Connection - connect or disconnect Graph",
-                        "Cloud PCs - browse inventory",
-                        "Cloud Apps - browse, publish, unpublish",
-                        "About",
-                        "Exit"));
+                    .PageSize(12)
+                    .UseConverter(item => item.Label)
+                    .AddChoices(menuChoices));
 
-            switch (choice)
+            switch (choice.Key)
             {
-                case "Connection - connect or disconnect Graph":
+                case "Connection":
                     await ShowConnectionAsync();
                     break;
-                case "Cloud PCs - browse inventory":
+                case "CloudPcs":
                     await ShowCloudPcsAsync();
                     break;
-                case "Cloud Apps - browse, publish, unpublish":
+                case "CloudApps":
                     await ShowCloudAppsAsync();
+                    break;
+                case "Provisioning":
+                    ShowPlaceholderArea("Provisioning", "Provisioning policies and maintenance windows will be wired next.");
+                    break;
+                case "Reports":
+                    ShowPlaceholderArea("Reports", "Usage, connectivity, launch details, and report streams will be wired next.");
+                    break;
+                case "Catalog":
+                    ShowPlaceholderArea("Catalog", "Service plans, images, supported regions, and licensing will be wired next.");
+                    break;
+                case "Tenant":
+                    ShowPlaceholderArea("Tenant settings", "Organization settings, setting profiles, and user settings will be wired next.");
                     break;
                 case "About":
                     ShowAbout();
@@ -46,6 +55,26 @@ internal sealed class W365CliApp
                     return 0;
             }
         }
+    }
+
+    private IReadOnlyList<MenuChoice> GetMainMenuChoices()
+    {
+        var connectionDescription = _session.IsConnected
+            ? "Disconnect Microsoft Graph session"
+            : "Connect to Microsoft Graph";
+
+        return
+        [
+            new("CloudPcs", Row("Cloud PCs", 22, "Browse, inspect, and act on Cloud PCs", 58)),
+            new("Provisioning", Row("Provisioning", 22, "Policies, policy Cloud PCs, maintenance windows", 58)),
+            new("Reports", Row("Reports", 22, "Usage, connectivity, launch details, report streams", 58)),
+            new("CloudApps", Row("Cloud Apps", 22, "Browse, publish, and unpublish Cloud Apps", 58)),
+            new("Catalog", Row("Catalog", 22, "Service plans, images, regions, licensing", 58)),
+            new("Tenant", Row("Tenant settings", 22, "Organization settings, profiles, user settings", 58)),
+            new("Connection", Row("Connection", 22, connectionDescription, 58)),
+            new("About", Row("About", 22, "Version and project information", 58)),
+            new("Exit", Row("Exit", 22, "Close W365 CLI Native", 58))
+        ];
     }
 
     private void RenderHeader()
@@ -80,7 +109,7 @@ internal sealed class W365CliApp
         RenderHeader();
 
         var choices = _session.IsConnected
-            ? new[] { "Disconnect", "Reconnect", "Back" }
+            ? new[] { "Disconnect", "Back" }
             : new[] { "Connect", "Back" };
 
         var choice = AnsiConsole.Prompt(
@@ -91,7 +120,6 @@ internal sealed class W365CliApp
         switch (choice)
         {
             case "Connect":
-            case "Reconnect":
                 await _session.ConnectAsync();
                 Pause();
                 break;
@@ -101,6 +129,21 @@ internal sealed class W365CliApp
                 Pause();
                 break;
         }
+    }
+
+    private static void ShowPlaceholderArea(string title, string message)
+    {
+        AnsiConsole.Clear();
+        var panel = new Panel(
+            new Rows(
+                new Markup($"[bold]{Markup.Escape(title)}[/]"),
+                new Markup(Markup.Escape(message)),
+                new Markup("[grey]This area exists in the PowerShell CLI and is queued for native implementation.[/]")))
+            .Header(title)
+            .Border(BoxBorder.Rounded);
+
+        AnsiConsole.Write(panel);
+        Pause();
     }
 
     private async Task ShowCloudPcsAsync()
@@ -656,6 +699,8 @@ internal sealed class W365CliApp
     }
 
     private sealed record TableChoice<T>(string Label, T? Item, bool IsBack);
+
+    private sealed record MenuChoice(string Key, string Label);
 
     private async Task<bool> EnsureConnectedAsync()
     {
