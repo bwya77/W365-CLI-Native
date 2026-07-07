@@ -43,6 +43,8 @@ Download the package for your platform, extract it, and run the binary:
 | macOS Intel | `w365-osx-x64.zip` | `W365Cli` |
 | macOS Apple Silicon | `w365-osx-arm64.zip` | `W365Cli` |
 
+On macOS, the MSAL token cache is stored with Keychain protection.
+
 Recommended install folder:
 
 ```text

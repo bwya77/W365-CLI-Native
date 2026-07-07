@@ -1,6 +1,7 @@
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Extensions.Msal;
 using Spectre.Console;
+using System.Runtime.InteropServices;
 
 namespace W365Cli;
 
@@ -75,6 +76,15 @@ internal sealed class W365Session
                 AnsiConsole.MarkupLine("In Entra, enable public client flows and add a Mobile and desktop redirect URI of [grey]http://localhost[/].");
             }
         }
+        catch (Exception ex)
+        {
+            IsConnected = false;
+            Graph = W365GraphClient.NotConnected;
+            _currentAuthentication = null;
+
+            AnsiConsole.MarkupLine("[red]Authentication failed.[/]");
+            AnsiConsole.MarkupLine(Markup.Escape(ex.Message));
+        }
     }
 
     public async Task DisconnectAsync()
@@ -119,8 +129,13 @@ internal sealed class W365Session
             "W365CliNative");
         Directory.CreateDirectory(cacheDirectory);
 
-        var storageProperties = new StorageCreationPropertiesBuilder("w365cli-native.msalcache", cacheDirectory)
-            .Build();
+        var storageBuilder = new StorageCreationPropertiesBuilder("w365cli-native.msalcache", cacheDirectory);
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            storageBuilder = storageBuilder.WithMacKeyChain("com.bwya77.w365cli", "MSALCache");
+        }
+
+        var storageProperties = storageBuilder.Build();
         var cacheHelper = await MsalCacheHelper.CreateAsync(storageProperties);
         cacheHelper.RegisterCache(application.UserTokenCache);
         return application;
