@@ -22,6 +22,7 @@ internal sealed class W365CliApp
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<MenuChoice>()
                     .Title("[cyan]Select an area[/]")
+                    .HighlightStyle(SelectionHighlightStyle())
                     .PageSize(12)
                     .UseConverter(FormatMainMenuChoice)
                     .AddChoices(menuChoices));
@@ -593,6 +594,7 @@ internal sealed class W365CliApp
         var choice = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
                 .Title("[cyan]Connection[/]")
+                .HighlightStyle(SelectionHighlightStyle())
                 .AddChoices(choices));
 
         switch (choice)
@@ -636,6 +638,7 @@ internal sealed class W365CliApp
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[cyan]Reports[/]")
+                    .HighlightStyle(SelectionHighlightStyle())
                     .AddChoices(
                         "Usage",
                         "Connectivity history",
@@ -685,6 +688,7 @@ internal sealed class W365CliApp
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[cyan]Tenant settings[/]")
+                    .HighlightStyle(SelectionHighlightStyle())
                     .AddChoices(
                         "Organization settings",
                         "Setting profiles",
@@ -1799,6 +1803,7 @@ internal sealed class W365CliApp
         var selected = AnsiConsole.Prompt(
             new SelectionPrompt<TableChoice<T>>()
                 .Title($"[cyan]{Markup.Escape(title)}[/]\n[grey]{Markup.Escape(header)}[/]\n[grey]{Markup.Escape(new string('-', header.Length))}[/]")
+                .HighlightStyle(SelectionHighlightStyle())
                 .PageSize(18)
                 .UseConverter(choice => Markup.Escape(choice.Label))
                 .AddChoices(rows));
@@ -2243,6 +2248,11 @@ internal sealed class W365CliApp
         return $"[white on blue]{escapedText}[/]";
     }
 
+    private static Style SelectionHighlightStyle()
+    {
+        return new Style(Color.White, Color.Blue);
+    }
+
     private static string Row(params object[] valuesAndWidths)
     {
         if (valuesAndWidths.Length % 2 != 0)
@@ -2666,6 +2676,7 @@ internal sealed class W365CliApp
         var action = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
                 .Title("[cyan]Snapshot action[/]")
+                .HighlightStyle(SelectionHighlightStyle())
                 .AddChoices("Restore from this snapshot", "Delete this snapshot", "Back"));
 
         switch (action)
@@ -2863,6 +2874,7 @@ internal sealed class W365CliApp
         var confirm = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
                 .Title($"Submit {Markup.Escape(action)} now?")
+                .HighlightStyle(SelectionHighlightStyle())
                 .AddChoices("Confirm", "Cancel"));
 
         if (confirm != "Confirm")
