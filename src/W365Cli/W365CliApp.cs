@@ -1319,8 +1319,8 @@ internal sealed class W365CliApp
             .AddColumn("Status")
             .AddColumn("Name");
 
-        var showPublisher = Console.WindowWidth >= 105;
-        var showDates = Console.WindowWidth >= 135;
+        var showPublisher = Console.WindowWidth >= 100;
+        var showDates = Console.WindowWidth >= 150;
         if (showPublisher)
         {
             table.AddColumn("Publisher");
@@ -1575,13 +1575,15 @@ internal sealed class W365CliApp
 
     private static (int Status, int Name, int Publisher, int Published, int Added) GetCloudAppWidths()
     {
-        var available = Math.Max(90, Console.WindowWidth - 4);
         const int status = 12;
         const int published = 18;
         const int added = 18;
-        var remaining = Math.Max(40, available - status - published - added - 4);
-        var name = Math.Max(30, (int)(remaining * 0.65));
-        var publisher = Math.Max(18, remaining - name);
+        var showDates = Console.WindowWidth >= 150;
+        var reserved = status + (showDates ? published + added : 0);
+        var available = Math.Min(Math.Max(72, Console.WindowWidth - 4), showDates ? 132 : 104);
+        var remaining = Math.Max(40, available - reserved - (showDates ? 4 : 2));
+        var name = Math.Clamp((int)(remaining * 0.58), 30, 48);
+        var publisher = Math.Clamp(remaining - name, 18, 34);
         return (status, name, publisher, published, added);
     }
 
