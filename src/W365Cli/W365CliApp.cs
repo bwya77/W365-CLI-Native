@@ -121,21 +121,22 @@ internal sealed class W365CliApp
         while (true)
         {
             RenderHeader();
-            AnsiConsole.Write(CreateCloudPcTable(cloudPcs));
+            var cloudPc = SelectFromTable(
+                title: "Windows 365 Cloud PCs",
+                header: Row("Name", 34, "Status", 14, "Type", 12, "User", 34, "Service plan", 36),
+                items: cloudPcs,
+                rowFactory: pc => Row(
+                    pc.Name, 34,
+                    pc.Status ?? "-", 14,
+                    pc.ProvisioningType ?? "-", 12,
+                    pc.UserPrincipalName ?? "-", 34,
+                    pc.ServicePlanName ?? "-", 36));
 
-            var choices = cloudPcs.Select(pc => pc.Name).Concat(["Back"]).ToArray();
-            var selected = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title("[cyan]Select a Cloud PC for details[/]")
-                    .PageSize(12)
-                    .AddChoices(choices));
-
-            if (selected == "Back")
+            if (cloudPc is null)
             {
                 return;
             }
 
-            var cloudPc = cloudPcs.First(pc => pc.Name == selected);
             ShowCloudPcDetails(cloudPc);
         }
     }
@@ -169,49 +170,76 @@ internal sealed class W365CliApp
             return;
         }
 
-        var table = new Table()
-            .Title("Windows 365 Cloud Apps")
-            .AddColumn("Status")
-            .AddColumn("Name")
-            .AddColumn("Publisher")
-            .AddColumn("Added")
-            .AddColumn("Published");
-
-        foreach (var app in apps)
+        while (true)
         {
-            table.AddRow(
-                Markup.Escape(app.AppStatus ?? "-"),
-                Markup.Escape(app.DisplayName),
-                Markup.Escape(app.Publisher ?? "-"),
-                Markup.Escape(app.AddedDateTime?.ToLocalTime().ToString("g") ?? "-"),
-                Markup.Escape(app.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-"));
-        }
+            RenderHeader();
+            var app = SelectFromTable(
+                title: "Windows 365 Cloud Apps",
+                header: Row("Status", 12, "Name", 52, "Publisher", 24, "Published", 22, "Added", 22),
+                items: apps,
+                rowFactory: cloudApp => Row(
+                    cloudApp.AppStatus ?? "-", 12,
+                    cloudApp.DisplayName, 52,
+                    cloudApp.Publisher ?? "-", 24,
+                    cloudApp.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-", 22,
+                    cloudApp.AddedDateTime?.ToLocalTime().ToString("g") ?? "-", 22));
 
-        AnsiConsole.Write(table);
-        Pause();
+            if (app is null)
+            {
+                return;
+            }
+
+            ShowCloudAppDetails(app);
+        }
     }
 
-    private static Table CreateCloudPcTable(IReadOnlyList<CloudPcSummary> cloudPcs)
+    private static T? SelectFromTable<T>(
+        string title,
+        string header,
+        IReadOnlyList<T> items,
+        Func<T, string> rowFactory)
     {
-        var table = new Table()
-            .Title("Windows 365 Cloud PCs")
-            .AddColumn("Name")
-            .AddColumn("Status")
-            .AddColumn("Type")
-            .AddColumn("User")
-            .AddColumn("Service plan");
+        var rows = items
+            .Select(item => new TableChoice<T>(rowFactory(item), item, false))
+            .Concat([new TableChoice<T>("Back", default, true)])
+            .ToArray();
 
-        foreach (var pc in cloudPcs)
+        var selected = AnsiConsole.Prompt(
+            new SelectionPrompt<TableChoice<T>>()
+                .Title($"[cyan]{Markup.Escape(title)}[/]\n[grey]{Markup.Escape(header)}[/]\n[grey]{Markup.Escape(new string('-', header.Length))}[/]")
+                .PageSize(18)
+                .UseConverter(choice => Markup.Escape(choice.Label))
+                .AddChoices(rows));
+
+        return selected.IsBack ? default : selected.Item;
+    }
+
+    private static string Row(params object[] valuesAndWidths)
+    {
+        if (valuesAndWidths.Length % 2 != 0)
         {
-            table.AddRow(
-                Markup.Escape(pc.Name),
-                Markup.Escape(pc.Status ?? "-"),
-                Markup.Escape(pc.ProvisioningType ?? "-"),
-                Markup.Escape(pc.UserPrincipalName ?? "-"),
-                Markup.Escape(pc.ServicePlanName ?? "-"));
+            throw new ArgumentException("Rows require value and width pairs.", nameof(valuesAndWidths));
         }
 
-        return table;
+        var cells = new List<string>();
+        for (var index = 0; index < valuesAndWidths.Length; index += 2)
+        {
+            var value = valuesAndWidths[index]?.ToString() ?? "-";
+            var width = Convert.ToInt32(valuesAndWidths[index + 1]);
+            cells.Add(Fit(value, width));
+        }
+
+        return string.Join(" ", cells);
+    }
+
+    private static string Fit(string value, int width)
+    {
+        if (value.Length > width)
+        {
+            return string.Concat(value.AsSpan(0, Math.Max(0, width - 3)), "...");
+        }
+
+        return value.PadRight(width);
     }
 
     private static void ShowCloudPcDetails(CloudPcSummary cloudPc)
@@ -231,6 +259,27 @@ internal sealed class W365CliApp
         AnsiConsole.Write(panel);
         Pause();
     }
+
+    private static void ShowCloudAppDetails(CloudAppSummary app)
+    {
+        AnsiConsole.Clear();
+        var panel = new Panel(
+            new Rows(
+                new Markup($"[bold]Name:[/] {Markup.Escape(app.DisplayName)}"),
+                new Markup($"[bold]Status:[/] {Markup.Escape(app.AppStatus ?? "-")}"),
+                new Markup($"[bold]Publisher:[/] {Markup.Escape(app.Publisher ?? "-")}"),
+                new Markup($"[bold]Discovered app:[/] {Markup.Escape(app.DiscoveredAppName ?? "-")}"),
+                new Markup($"[bold]Added:[/] {Markup.Escape(app.AddedDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
+                new Markup($"[bold]Published:[/] {Markup.Escape(app.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
+                new Markup($"[bold]Cloud app ID:[/] {Markup.Escape(app.Id)}")))
+            .Header("Cloud App details")
+            .Border(BoxBorder.Rounded);
+
+        AnsiConsole.Write(panel);
+        Pause();
+    }
+
+    private sealed record TableChoice<T>(string Label, T? Item, bool IsBack);
 
     private async Task<bool> EnsureConnectedAsync()
     {
