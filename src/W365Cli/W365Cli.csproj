@@ -5,6 +5,12 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>W365Cli</AssemblyName>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Authors>Bradley Wyatt</Authors>
+    <RepositoryUrl>https://github.com/bwya77/W365-CLI-Native</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/bwya77/W365-CLI-Native</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>

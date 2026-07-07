@@ -1,9 +1,13 @@
 using Spectre.Console;
+using System.Reflection;
+using System.Text.Json;
 
 namespace W365Cli;
 
 internal sealed class W365CliApp
 {
+    private const string GitHubRepositoryUrl = "https://github.com/bwya77/W365-CLI-Native";
+    private const string GitHubLatestReleaseApiUrl = "https://api.github.com/repos/bwya77/W365-CLI-Native/releases/latest";
     private readonly W365Session _session = new();
     private static readonly List<ActionHistoryItem> ActionHistory = [];
     private static string? statusMessage;
@@ -131,6 +135,9 @@ internal sealed class W365CliApp
                 break;
             case "About":
                 ShowAbout();
+                break;
+            case "Update":
+                await ShowUpdateCheckAsync();
                 break;
             case "Exit":
                 AnsiConsole.Clear();
@@ -659,6 +666,7 @@ internal sealed class W365CliApp
             new("Catalog", "Catalog", "Service plans, images, regions"),
             new("Tenant", "Tenant settings", "Organization settings, profiles, user settings"),
             new("Connection", "Connection", connectionDescription),
+            new("Update", "Check for updates", "Compare this build with GitHub Releases"),
             new("About", "About", "Version and project information"),
             new("Exit", "Exit", "Close W365 CLI Native")
         ];
@@ -826,7 +834,8 @@ internal sealed class W365CliApp
             new("Reports", "Launch details", "Open Cloud PC launch details"),
             new("Catalog", "Service plans", "Open service plan catalog"),
             new("Catalog", "Gallery images", "Open gallery images"),
-            new("Catalog", "Supported regions", "Open supported regions")
+            new("Catalog", "Supported regions", "Open supported regions"),
+            new("Update", "Check for updates", "Compare this build with GitHub Releases")
         ];
     }
 
@@ -851,7 +860,7 @@ internal sealed class W365CliApp
         AnsiConsole.MarkupLine("[#4091f2]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]");
         AnsiConsole.MarkupLine("[#4091f2]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]");
         AnsiConsole.MarkupLine("[#4091f2] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]");
-        AnsiConsole.MarkupLine("[grey]W365 CLI Native v0.1.0 | Bradley Wyatt[/]");
+        AnsiConsole.MarkupLine($"[grey]W365 CLI Native v{GetCurrentVersion()} | Bradley Wyatt[/]");
         AnsiConsole.WriteLine();
     }
 
@@ -895,6 +904,62 @@ internal sealed class W365CliApp
 
         AnsiConsole.Write(panel);
         Pause();
+    }
+
+    private static async Task ShowUpdateCheckAsync()
+    {
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Updates");
+        AnsiConsole.MarkupLine("[#4091f2]Check for updates[/]");
+        AnsiConsole.WriteLine();
+
+        try
+        {
+            var latest = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Checking GitHub Releases...", async _ => await GetLatestReleaseAsync());
+
+            var currentVersion = GetCurrentVersion();
+            var current = ParseVersion(currentVersion);
+            var latestVersion = ParseVersion(latest.TagName);
+            var isNewer = latestVersion is not null && current is not null && latestVersion > current;
+
+            var rows = new Rows(
+                new Markup(PropertyInline("Current version", currentVersion)),
+                new Markup(PropertyInline("Latest release", latest.TagName)),
+                new Markup(PropertyInline("Published", latest.PublishedAt?.ToLocalTime().ToString("g") ?? "-")),
+                new Markup(PropertyInline("Status", isNewer ? "Update available" : "Up to date", isNewer ? "yellow" : "green")),
+                new Markup(PropertyBlock("Release URL", latest.HtmlUrl)));
+
+            AnsiConsole.Write(new Panel(rows).Header("Update status").Border(BoxBorder.Rounded));
+            if (isNewer)
+            {
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine("[grey]Download the latest w365-win-x64.zip from the release URL. Self-update will be added after the install path is finalized.[/]");
+            }
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine("[red]Failed to check for updates.[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(ex.Message)}[/]");
+        }
+
+        WaitForBack();
+    }
+
+    private static async Task<GitHubReleaseInfo> GetLatestReleaseAsync()
+    {
+        using var http = new HttpClient();
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("W365CliNative");
+        await using var stream = await http.GetStreamAsync(GitHubLatestReleaseApiUrl);
+        using var document = await JsonDocument.ParseAsync(stream);
+        var root = document.RootElement;
+        return new GitHubReleaseInfo(
+            root.TryGetProperty("tag_name", out var tag) ? tag.GetString() ?? "unknown" : "unknown",
+            root.TryGetProperty("html_url", out var url) ? url.GetString() ?? GitHubRepositoryUrl : GitHubRepositoryUrl,
+            root.TryGetProperty("published_at", out var published) && published.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(published.GetString(), out var publishedAt)
+                ? publishedAt
+                : null);
     }
 
     private async Task ShowProvisioningAsync()
@@ -2893,11 +2958,11 @@ internal sealed class W365CliApp
             var tenantText = _session.TenantName is not null
                 ? $"{_session.TenantName} ({_session.TenantId})"
                 : _session.TenantId ?? "unknown";
-            AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native[/] [grey]v0.1.0 | Bradley Wyatt[/]   [green]Connected[/] [grey]{Markup.Escape(tenantText)}[/]");
+            AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native[/] [grey]v{GetCurrentVersion()} | Bradley Wyatt[/]   [green]Connected[/] [grey]{Markup.Escape(tenantText)}[/]");
         }
         else
         {
-            AnsiConsole.MarkupLine("[#4091f2]W365 CLI Native[/] [grey]v0.1.0 | Bradley Wyatt[/]   [yellow]Not connected[/]");
+            AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native[/] [grey]v{GetCurrentVersion()} | Bradley Wyatt[/]   [yellow]Not connected[/]");
         }
         AnsiConsole.WriteLine();
     }
@@ -4199,6 +4264,8 @@ internal sealed class W365CliApp
 
     private sealed record ActionHistoryItem(string Action, string Target, string ResourceType, string? ResourceName, string Status, DateTimeOffset RequestedAt, string? Detail);
 
+    private sealed record GitHubReleaseInfo(string TagName, string HtmlUrl, DateTimeOffset? PublishedAt);
+
     private enum GraphRowSortMode
     {
         None,
@@ -4245,10 +4312,36 @@ internal sealed class W365CliApp
     private static void ShowAbout()
     {
         AnsiConsole.MarkupLine("[#4091f2]W365 CLI Native[/]");
+        AnsiConsole.MarkupLine($"Version: {GetCurrentVersion()}");
         AnsiConsole.MarkupLine("A native .NET rewrite experiment for Windows 365 Cloud PC workflows.");
         AnsiConsole.MarkupLine("This project does not depend on the PowerShell W365CLI module.");
-        AnsiConsole.MarkupLine("[grey]GitHub:[/] https://github.com/bwya77/W365-CLI-Native");
+        AnsiConsole.MarkupLine($"[grey]GitHub:[/] {GitHubRepositoryUrl}");
         Pause();
+    }
+
+    private static string GetCurrentVersion()
+    {
+        return typeof(W365CliApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? typeof(W365CliApp).Assembly.GetName().Version?.ToString(3)
+            ?? "0.0.0";
+    }
+
+    private static Version? ParseVersion(string value)
+    {
+        var normalized = value.Trim().TrimStart('v', 'V');
+        var metadataIndex = normalized.IndexOf('+', StringComparison.Ordinal);
+        if (metadataIndex >= 0)
+        {
+            normalized = normalized[..metadataIndex];
+        }
+
+        var prereleaseIndex = normalized.IndexOf('-', StringComparison.Ordinal);
+        if (prereleaseIndex >= 0)
+        {
+            normalized = normalized[..prereleaseIndex];
+        }
+
+        return Version.TryParse(normalized, out var version) ? version : null;
     }
 
     private static void Pause()

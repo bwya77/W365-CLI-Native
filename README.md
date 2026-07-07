@@ -96,6 +96,33 @@ Single-file Windows x64:
 dotnet publish .\src\W365Cli\W365Cli.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o .\artifacts\publish\win-x64
 ```
 
+Self-contained single-file Windows x64:
+
+```powershell
+dotnet publish .\src\W365Cli\W365Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -o .\artifacts\publish\win-x64
+```
+
+## Releases and updates
+
+Tagged releases use GitHub Actions to publish `w365-win-x64.zip` and a SHA256 checksum to GitHub Releases.
+
+Use semantic version tags:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The native app embeds the release version in assembly metadata and shows it in the header/About screen. Use **Check for updates** in the app to compare the current binary with the latest GitHub Release.
+
+Recommended install location:
+
+```text
+%LOCALAPPDATA%\Programs\W365CLI\w365.exe
+```
+
+Add that folder to the user PATH. The Microsoft Graph token cache remains under the app data path managed by MSAL.
+
 ## Direction
 
 The native rewrite should eventually cover:
