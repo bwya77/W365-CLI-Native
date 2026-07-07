@@ -717,7 +717,7 @@ internal sealed class W365CliApp
     private static string GetLaunchDetailsHeader()
     {
         var widths = GetLaunchDetailsWidths();
-        return Row("Cloud PC", widths.CloudPc, "User", widths.User, "Status", widths.Status, "Switch", widths.Switch, "Reason", widths.Reason);
+        return Row("Cloud PC", widths.CloudPc, "User", widths.User, "Status", widths.Status, "Switch", widths.Switch);
     }
 
     private static string FormatLaunchDetailsRow(GraphTableRow row)
@@ -727,20 +727,18 @@ internal sealed class W365CliApp
             GetField(row, "Cloud PC"), widths.CloudPc,
             GetField(row, "User"), widths.User,
             GetField(row, "Status"), widths.Status,
-            GetSwitchValue(row), widths.Switch,
-            GetLaunchReason(row), widths.Reason);
+            GetSwitchValue(row), widths.Switch);
     }
 
-    private static (int CloudPc, int User, int Status, int Switch, int Reason) GetLaunchDetailsWidths()
+    private static (int CloudPc, int User, int Status, int Switch) GetLaunchDetailsWidths()
     {
         var available = Math.Max(76, Console.WindowWidth - 4);
         const int status = 12;
         const int switchWidth = 8;
-        var remaining = Math.Max(44, available - status - switchWidth - 4);
-        var cloudPc = Math.Max(24, (int)(remaining * 0.32));
-        var user = Math.Max(18, (int)(remaining * 0.28));
-        var reason = Math.Max(20, remaining - cloudPc - user);
-        return (cloudPc, user, status, switchWidth, reason);
+        var remaining = Math.Max(44, available - status - switchWidth - 3);
+        var cloudPc = Math.Max(28, (int)(remaining * 0.48));
+        var user = Math.Max(18, remaining - cloudPc);
+        return (cloudPc, user, status, switchWidth);
     }
 
     private static string GetSwitchValue(GraphTableRow row)
@@ -753,16 +751,6 @@ internal sealed class W365CliApp
             null => "-",
             _ => value
         };
-    }
-
-    private static string GetLaunchReason(GraphTableRow row)
-    {
-        return GetOptionalField(
-            row,
-            "Reason",
-            "Error",
-            "windows365SwitchCompatibilityFailureReasonType",
-            "Windows365SwitchCompatibilityFailureReasonType") ?? "-";
     }
 
     private static string GetField(GraphTableRow row, string name)
