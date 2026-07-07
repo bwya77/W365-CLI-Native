@@ -1,17 +1,27 @@
 # W365 CLI Native
 
-Native .NET rewrite experiment for Windows 365 Cloud PC workflows.
+[![CI](https://github.com/bwya77/W365-CLI-Native/actions/workflows/ci.yml/badge.svg)](https://github.com/bwya77/W365-CLI-Native/actions/workflows/ci.yml)
+[![Release](https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml/badge.svg)](https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/bwya77/W365-CLI-Native?label=release)](https://github.com/bwya77/W365-CLI-Native/releases/latest)
+[![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/8.0)
+[![Platform](https://img.shields.io/badge/platform-Windows-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
+
+Native .NET CLI for Windows 365 Cloud PC workflows.
 
 This repo is separate from the PowerShell-based `W365CLI` module. The goal is to learn whether a fully native binary can provide the same workflows without depending on the PowerShell module runtime.
 
 ## Current status
 
-This is an early scaffold. It currently includes:
+This is an active native CLI implementation. It currently includes:
 
-- Spectre.Console menu shell.
-- Interactive browser authentication using Azure.Identity.
-- Initial Cloud PC inventory table.
-- Initial Cloud Apps table.
+- Persistent Microsoft Graph sign-in using MSAL.
+- Cloud PC inventory, detail pages, lifecycle actions, disk space, snapshots, resize, and remote action history.
+- Provisioning policy browsing, Cloud PCs by policy, export, create copy, reprovision, and delete.
+- Reports for usage, connectivity history, launch details, and Cloud PC report streams.
+- Cloud Apps browsing, publish, and unpublish.
+- Catalog browsing for service plans, gallery images, custom images, and supported regions.
+- Tenant settings views for organization settings, setting profiles, and user settings.
+- Keyboard-first table UX with filtering, sorting, paging, breadcrumbs, command palette, and action history.
 
 ## Prerequisites
 
@@ -127,6 +137,12 @@ Use semantic version tags:
 ```powershell
 git tag v0.1.0
 git push origin v0.1.0
+```
+
+After the release workflow completes, download `w365-win-x64.zip` from:
+
+```text
+https://github.com/bwya77/W365-CLI-Native/releases/latest
 ```
 
 The native app embeds the release version in assembly metadata and shows it in the header/About screen. Use **Check for updates** in the app to compare the current binary with the latest GitHub Release.
