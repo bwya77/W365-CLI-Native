@@ -66,15 +66,15 @@ internal sealed class W365CliApp
 
         return
         [
-            new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs", "cyan"),
-            new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows", "mediumpurple1"),
-            new("Reports", "Reports", "Usage, connectivity, launch details, report streams", "steelblue1"),
-            new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps", "deepskyblue1"),
-            new("Catalog", "Catalog", "Service plans, images, regions, licensing", "darkseagreen2"),
-            new("Tenant", "Tenant settings", "Organization settings, profiles, user settings", "khaki1"),
-            new("Connection", "Connection", connectionDescription, _session.IsConnected ? "green" : "yellow"),
-            new("About", "About", "Version and project information", "grey"),
-            new("Exit", "Exit", "Close W365 CLI Native", "grey")
+            new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs"),
+            new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows"),
+            new("Reports", "Reports", "Usage, connectivity, launch details, report streams"),
+            new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
+            new("Catalog", "Catalog", "Service plans, images, regions, licensing"),
+            new("Tenant", "Tenant settings", "Organization settings, profiles, user settings"),
+            new("Connection", "Connection", connectionDescription),
+            new("About", "About", "Version and project information"),
+            new("Exit", "Exit", "Close W365 CLI Native")
         ];
     }
 
@@ -83,8 +83,8 @@ internal sealed class W365CliApp
         var connectionText = _session.IsConnected ? "Connected" : "Not connected";
         var connectionColor = _session.IsConnected ? "green" : "yellow";
         var connectionLight = _session.IsConnected ? "[green1]●[/]" : "[yellow]●[/]";
-        var tenantText = _session.TenantName ?? _session.TenantId ?? "No tenant selected";
-        var areaCount = choices.Count(choice => choice.Key is not "About" and not "Exit");
+        var tenantName = _session.TenantName ?? "No tenant selected";
+        var tenantId = _session.TenantId ?? "-";
 
         var dashboard = new Grid();
         dashboard.AddColumn();
@@ -92,8 +92,8 @@ internal sealed class W365CliApp
         dashboard.AddColumn();
         dashboard.AddRow(
             new Panel(new Markup($"{connectionLight} [bold {connectionColor}]{connectionText}[/]\n[grey]Graph session[/]")).Border(BoxBorder.Rounded),
-            new Panel(new Markup($"[bold cyan]{areaCount}[/]\n[grey]Navigation areas[/]")).Border(BoxBorder.Rounded),
-            new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantText, 30))}[/]\n[grey]Tenant context[/]")).Border(BoxBorder.Rounded));
+            new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantId, 36))}[/]\n[grey]Tenant ID[/]")).Border(BoxBorder.Rounded),
+            new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantName, 30))}[/]\n[grey]Tenant name[/]")).Border(BoxBorder.Rounded));
 
         AnsiConsole.Write(dashboard);
         AnsiConsole.WriteLine();
@@ -103,7 +103,7 @@ internal sealed class W365CliApp
 
     private static string FormatMainMenuChoice(MenuChoice choice)
     {
-        return $"[{choice.Accent}]{Markup.Escape(Fit(choice.Title, 22))}[/] [grey]{Markup.Escape(choice.Description)}[/]";
+        return $"[white]{Markup.Escape(Fit(choice.Title, 22))}[/] [grey]{Markup.Escape(choice.Description)}[/]";
     }
 
     private void RenderHeader()
@@ -116,20 +116,6 @@ internal sealed class W365CliApp
         AnsiConsole.MarkupLine("[cyan]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]");
         AnsiConsole.MarkupLine("[cyan] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]");
         AnsiConsole.MarkupLine("[grey]W365 CLI Native v0.1.0 | Bradley Wyatt[/]");
-        AnsiConsole.WriteLine();
-
-        if (_session.IsConnected)
-        {
-            var tenantText = _session.TenantName is not null
-                ? $"{_session.TenantName} ({_session.TenantId})"
-                : _session.TenantId ?? "unknown";
-            AnsiConsole.MarkupLine($"[green1]●[/] [green]Connected[/] Tenant: [grey]{Markup.Escape(tenantText)}[/]");
-        }
-        else
-        {
-            AnsiConsole.MarkupLine("[yellow]●[/] [yellow]Not connected[/]");
-        }
-
         AnsiConsole.WriteLine();
     }
 
@@ -729,7 +715,7 @@ internal sealed class W365CliApp
 
     private sealed record TableChoice<T>(string Label, T? Item, bool IsBack);
 
-    private sealed record MenuChoice(string Key, string Title, string Description, string Accent);
+    private sealed record MenuChoice(string Key, string Title, string Description);
 
     private async Task<bool> EnsureConnectedAsync()
     {
