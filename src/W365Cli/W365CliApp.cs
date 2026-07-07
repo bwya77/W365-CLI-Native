@@ -162,7 +162,7 @@ internal sealed class W365CliApp
                 case ConsoleKey.A:
                     if (visibleCloudPcs.Count > 0)
                     {
-                        ShowCloudPcActions(visibleCloudPcs[selectedIndex]);
+                        ShowCloudPcDetails(visibleCloudPcs[selectedIndex]);
                     }
                     break;
                 case ConsoleKey.R:
@@ -423,7 +423,7 @@ internal sealed class W365CliApp
             new Markup($"[bold]User[/]\n{Markup.Escape(cloudPc.UserPrincipalName ?? "-")}"),
             new Markup($"[bold]Service plan[/]\n{Markup.Escape(cloudPc.ServicePlanName ?? "-")}"),
             new Markup($"[bold]Cloud PC ID[/]\n[grey]{Markup.Escape(cloudPc.Id)}[/]"),
-            new Markup("[bold]Actions[/]\n[grey]Press A to open actions for this Cloud PC.[/]"));
+            new Markup("[bold]Actions[/]\n[grey]Enter details, A actions[/]"));
 
         return new Panel(content)
             .Header("Selected Cloud PC")
@@ -476,44 +476,6 @@ internal sealed class W365CliApp
     private static string Selected(string escapedText)
     {
         return $"[white on blue]{escapedText}[/]";
-    }
-
-    private static void ShowCloudPcActions(CloudPcSummary cloudPc)
-    {
-        while (true)
-        {
-            AnsiConsole.Clear();
-            AnsiConsole.MarkupLine($"[cyan]Cloud PC actions[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
-            AnsiConsole.WriteLine();
-
-            var action = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title("[cyan]Choose an action[/]")
-                    .PageSize(12)
-                    .AddChoices(
-                        "Details",
-                        "Snapshots",
-                        "Resize",
-                        "Restart",
-                        "Sync",
-                        "Reprovision",
-                        "Remote action history",
-                        "Back"));
-
-            switch (action)
-            {
-                case "Details":
-                    ShowCloudPcDetails(cloudPc);
-                    break;
-                case "Back":
-                    return;
-                default:
-                    AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(action)} is not implemented in the native CLI yet.[/]");
-                    AnsiConsole.MarkupLine("[grey]This is where the native action workflow will be added next.[/]");
-                    Pause();
-                    break;
-            }
-        }
     }
 
     private static string Row(params object[] valuesAndWidths)
@@ -570,19 +532,107 @@ internal sealed class W365CliApp
 
     private static void ShowCloudPcDetails(CloudPcSummary cloudPc)
     {
-        AnsiConsole.Clear();
-        var panel = new Panel(
+        var actions = new[]
+        {
+            "Snapshots",
+            "Resize",
+            "Restart",
+            "Sync",
+            "Reprovision",
+            "Remote action history",
+            "Back"
+        };
+        var selectedActionIndex = 0;
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex);
+            var key = Console.ReadKey(intercept: true);
+
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedActionIndex = Math.Max(0, selectedActionIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedActionIndex = Math.Min(actions.Length - 1, selectedActionIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedActionIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedActionIndex = actions.Length - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    var action = actions[selectedActionIndex];
+                    if (action == "Back")
+                    {
+                        return;
+                    }
+
+                    ShowNotImplementedAction(action);
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar == 'b' || key.KeyChar == 'B' || key.KeyChar == 'q' || key.KeyChar == 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex)
+    {
+        AnsiConsole.MarkupLine($"[cyan]W365 CLI Native > Cloud PCs > {Markup.Escape(cloudPc.Name)}[/]");
+        AnsiConsole.WriteLine();
+
+        var details = new Panel(
             new Rows(
                 new Markup($"[bold]Name:[/] {Markup.Escape(cloudPc.Name)}"),
-                new Markup($"[bold]Status:[/] {Markup.Escape(cloudPc.Status ?? "-")}"),
+                new Markup($"[bold]Status:[/] {StatusMarkup(cloudPc.Status)}"),
                 new Markup($"[bold]Type:[/] {Markup.Escape(cloudPc.ProvisioningType ?? "-")}"),
                 new Markup($"[bold]User:[/] {Markup.Escape(cloudPc.UserPrincipalName ?? "-")}"),
                 new Markup($"[bold]Service plan:[/] {Markup.Escape(cloudPc.ServicePlanName ?? "-")}"),
-                new Markup($"[bold]Cloud PC ID:[/] {Markup.Escape(cloudPc.Id)}")))
-            .Header("Cloud PC details")
+                new Markup($"[bold]Cloud PC ID:[/] [grey]{Markup.Escape(cloudPc.Id)}[/]")))
+            .Header("Details")
             .Border(BoxBorder.Rounded);
 
-        AnsiConsole.Write(panel);
+        var actionLines = actions
+            .Select((action, index) => index == selectedActionIndex
+                ? $"[white on blue]> {Markup.Escape(action)}[/]"
+                : $"  {Markup.Escape(action)}");
+
+        var actionsPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
+            .Header("Actions")
+            .Border(BoxBorder.Rounded);
+
+        if (Console.WindowWidth >= 120)
+        {
+            var grid = new Grid();
+            grid.AddColumn();
+            grid.AddColumn();
+            grid.AddRow(details, actionsPanel);
+            AnsiConsole.Write(grid);
+        }
+        else
+        {
+            AnsiConsole.Write(details);
+            AnsiConsole.Write(actionsPanel);
+        }
+
+        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
+    }
+
+    private static void ShowNotImplementedAction(string action)
+    {
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(action)} is not implemented in the native CLI yet.[/]");
+        AnsiConsole.MarkupLine("[grey]The action shell is in place. The next native milestone is wiring each action to Graph.[/]");
         Pause();
     }
 
