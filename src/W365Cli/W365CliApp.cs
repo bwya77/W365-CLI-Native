@@ -442,7 +442,7 @@ internal sealed class W365CliApp
             new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows"),
             new("Reports", "Reports", "Usage, connectivity, launch details, report streams"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
-            new("Catalog", "Catalog", "Service plans, images, regions, licensing"),
+            new("Catalog", "Catalog", "Service plans, images, regions"),
             new("Tenant", "Tenant settings", "Organization settings, profiles, user settings"),
             new("Connection", "Connection", connectionDescription),
             new("About", "About", "Version and project information"),
@@ -630,13 +630,13 @@ internal sealed class W365CliApp
             return;
         }
 
-        var choices = new[] { "Service plans", "Gallery images", "Custom images", "Supported regions", "Licensing allotments", "Back" };
+        var choices = new[] { "Service plans", "Gallery images", "Custom images", "Supported regions", "Back" };
         var selectedIndex = 0;
         while (true)
         {
             AnsiConsole.Clear();
             AnsiConsole.MarkupLine("[cyan]Catalog[/]");
-            AnsiConsole.MarkupLine("[grey]Plans, images, regions, and licensing used by Windows 365.[/]");
+            AnsiConsole.MarkupLine("[grey]Plans, images, and regions used by Windows 365.[/]");
             AnsiConsole.WriteLine();
 
             for (var index = 0; index < choices.Length; index++)
@@ -678,9 +678,6 @@ internal sealed class W365CliApp
                             break;
                         case "Supported regions":
                             await ShowGraphRowsAsync("Windows 365 supported regions", _session.Graph.GetSupportedRegionRowsAsync, GetSupportedRegionsHeader, FormatSupportedRegionRow);
-                            break;
-                        case "Licensing allotments":
-                            await ShowGraphRowsAsync("Windows 365 licensing allotments", _session.Graph.GetLicensingAllotmentRowsAsync, GetLicensingAllotmentsHeader, FormatLicensingAllotmentRow);
                             break;
                         case "Back":
                             return;
@@ -1300,21 +1297,6 @@ internal sealed class W365CliApp
             GetField(row, "supportedSolution"), 16,
             GetField(row, "regionGroup"), 20,
             GetField(row, "geographicLocationType"), 20);
-    }
-
-    private static string GetLicensingAllotmentsHeader()
-    {
-        return Row("SKU", 34, "Allotted", 10, "Consumed", 10, "Available", 10, "Assignable", 18);
-    }
-
-    private static string FormatLicensingAllotmentRow(GraphTableRow row)
-    {
-        return Row(
-            GetField(row, "skuPartNumber"), 34,
-            GetField(row, "allottedUnits"), 10,
-            GetField(row, "consumedUnits"), 10,
-            GetField(row, "availableUnits"), 10,
-            GetField(row, "assignableTo"), 18);
     }
 
     private static string FormatCatalogGb(string value)

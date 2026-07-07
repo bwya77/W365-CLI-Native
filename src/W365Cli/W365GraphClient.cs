@@ -228,27 +228,6 @@ internal sealed class W365GraphClient
         return rows.OrderBy(row => GetFirst(row.Fields, "regionGroup")).ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    public async Task<IReadOnlyList<GraphTableRow>> GetLicensingAllotmentRowsAsync()
-    {
-        var rows = await GetJsonRowsAsync("https://graph.microsoft.com/beta/admin/cloudLicensing/allotments", "skuPartNumber", "allottedUnits", "consumedUnits");
-        return rows
-            .Select(row =>
-            {
-                var fields = new Dictionary<string, string>(row.Fields, StringComparer.OrdinalIgnoreCase);
-                if (int.TryParse(GetFirst(fields, "allottedUnits"), out var allotted) &&
-                    int.TryParse(GetFirst(fields, "consumedUnits"), out var consumed))
-                {
-                    fields["availableUnits"] = (allotted - consumed).ToString();
-                }
-
-                var title = GetFirst(fields, "skuPartNumber", "skuId", "id") ?? "-";
-                var summary = JoinSummary($"Allotted: {GetFirst(fields, "allottedUnits") ?? "-"}", $"Consumed: {GetFirst(fields, "consumedUnits") ?? "-"}", $"Available: {GetFirst(fields, "availableUnits") ?? "-"}");
-                return new GraphTableRow(title, summary, fields);
-            })
-            .OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
     public async Task ResizeCloudPcAsync(string cloudPcId, string targetServicePlanId)
     {
         await PostJsonAsync(
