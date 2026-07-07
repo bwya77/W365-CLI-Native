@@ -265,13 +265,8 @@ internal sealed class W365CliApp
                     await ShowGraphRowsAsync(
                         "Windows 365 Cloud PC usage",
                         async () => await _session.Graph.GetUsageRowsAsync(),
-                        Row("Cloud PC", 34, "Status", 14, "Power", 12, "User", 34, "Service plan", 34),
-                        row => Row(
-                            GetField(row, "Cloud PC"), 34,
-                            GetField(row, "Status"), 14,
-                            GetField(row, "Power state"), 12,
-                            GetField(row, "User"), 34,
-                            GetField(row, "Service plan"), 34));
+                        GetUsageReportHeader,
+                        FormatUsageReportRow);
                     break;
                 case "Connectivity history":
                     await ShowConnectivityHistoryAsync();
@@ -353,13 +348,8 @@ internal sealed class W365CliApp
             await ShowGraphRowsAsync(
                 $"Connectivity history for {cloudPc.Name}",
                 async () => await _session.Graph.GetConnectivityHistoryAsync(cloudPc),
-                Row("Time", 22, "Type", 18, "Event", 28, "Result", 12, "Message", 54),
-                row => Row(
-                    GetField(row, "eventDateTime"), 22,
-                    GetField(row, "eventType"), 18,
-                    GetField(row, "eventName"), 28,
-                    GetField(row, "eventResult"), 12,
-                    GetField(row, "message"), 54));
+                GetConnectivityHistoryHeader,
+                FormatConnectivityHistoryRow);
         }
     }
 
@@ -409,7 +399,7 @@ internal sealed class W365CliApp
     private async Task ShowGraphRowsAsync(
         string title,
         Func<Task<IReadOnlyList<GraphTableRow>>> loader,
-        string? header = null,
+        Func<string>? headerFactory = null,
         Func<GraphTableRow, string>? rowFactory = null)
     {
         var rows = await AnsiConsole.Status()
@@ -422,14 +412,14 @@ internal sealed class W365CliApp
             return;
         }
 
-        header ??= Row("Name", 42, "Summary", 90);
-        rowFactory ??= item => Row(item.Title, 42, item.Summary, 90);
+        headerFactory ??= GetDefaultGraphRowsHeader;
+        rowFactory ??= FormatDefaultGraphRow;
         var selectedIndex = 0;
 
         while (true)
         {
             AnsiConsole.Clear();
-            RenderGraphRows(title, rows, selectedIndex, header, rowFactory);
+            RenderGraphRows(title, rows, selectedIndex, headerFactory, rowFactory);
             var key = Console.ReadKey(intercept: true);
 
             switch (key.Key)
@@ -475,7 +465,10 @@ internal sealed class W365CliApp
         {
             AnsiConsole.Clear();
             AnsiConsole.MarkupLine("[cyan]Select Cloud PC for connectivity history[/]");
-            var header = Row("Name", 34, "Status", 14, "User", 34, "Service plan", 28);
+            var widths = GetConnectivityCloudPcWidths();
+            var header = widths.ServicePlan > 0
+                ? Row("Name", widths.Name, "Status", widths.Status, "User", widths.User, "Service plan", widths.ServicePlan)
+                : Row("Name", widths.Name, "Status", widths.Status, "User", widths.User);
             AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
             AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
 
@@ -486,7 +479,9 @@ internal sealed class W365CliApp
             {
                 var pc = visible[index];
                 var absoluteIndex = start + index;
-                var row = Row(pc.Name, 34, pc.Status ?? "-", 14, pc.UserPrincipalName ?? "-", 34, pc.ServicePlanName ?? "-", 28);
+                var row = widths.ServicePlan > 0
+                    ? Row(pc.Name, widths.Name, pc.Status ?? "-", widths.Status, pc.UserPrincipalName ?? "-", widths.User, pc.ServicePlanName ?? "-", widths.ServicePlan)
+                    : Row(pc.Name, widths.Name, pc.Status ?? "-", widths.Status, pc.UserPrincipalName ?? "-", widths.User);
                 var escaped = Markup.Escape(row);
                 AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
                     ? $"[white on blue]> {escaped}[/]"
@@ -531,13 +526,27 @@ internal sealed class W365CliApp
         }
     }
 
+    private static (int Name, int Status, int User, int ServicePlan) GetConnectivityCloudPcWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int status = 12;
+        var showServicePlan = available >= 112;
+        var gaps = showServicePlan ? 3 : 2;
+        var remaining = Math.Max(42, available - status - gaps);
+        var servicePlan = showServicePlan ? Math.Max(24, (int)(remaining * 0.28)) : 0;
+        var user = Math.Max(24, (int)((remaining - servicePlan) * 0.48));
+        var name = Math.Max(24, remaining - servicePlan - user);
+        return (name, status, user, servicePlan);
+    }
+
     private static void RenderGraphRows(
         string title,
         IReadOnlyList<GraphTableRow> rows,
         int selectedIndex,
-        string header,
+        Func<string> headerFactory,
         Func<GraphTableRow, string> rowFactory)
     {
+        var header = headerFactory();
         AnsiConsole.MarkupLine($"[cyan]{Markup.Escape(title)}[/]");
         AnsiConsole.MarkupLine($"[grey]Rows: {rows.Count}[/]");
         AnsiConsole.WriteLine();
@@ -559,6 +568,103 @@ internal sealed class W365CliApp
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | Esc/B/Q back[/]");
+    }
+
+    private static string GetDefaultGraphRowsHeader()
+    {
+        var widths = GetDefaultGraphRowsWidths();
+        return Row("Name", widths.Name, "Summary", widths.Summary);
+    }
+
+    private static (int Name, int Summary) GetDefaultGraphRowsWidths()
+    {
+        var available = Math.Max(70, Console.WindowWidth - 4);
+        var name = Math.Max(28, Math.Min(42, available / 3));
+        var summary = Math.Max(28, available - name - 1);
+        return (name, summary);
+    }
+
+    private static string FormatDefaultGraphRow(GraphTableRow row)
+    {
+        var widths = GetDefaultGraphRowsWidths();
+        return Row(row.Title, widths.Name, row.Summary, widths.Summary);
+    }
+
+    private static string GetUsageReportHeader()
+    {
+        var widths = GetUsageReportWidths();
+        return widths.ServicePlan > 0
+            ? Row("Cloud PC", widths.CloudPc, "Status", widths.Status, "Power", widths.Power, "User", widths.User, "Service plan", widths.ServicePlan)
+            : Row("Cloud PC", widths.CloudPc, "Status", widths.Status, "Power", widths.Power, "User", widths.User);
+    }
+
+    private static string FormatUsageReportRow(GraphTableRow row)
+    {
+        var widths = GetUsageReportWidths();
+        return widths.ServicePlan > 0
+            ? Row(
+                GetField(row, "Cloud PC"), widths.CloudPc,
+                GetField(row, "Status"), widths.Status,
+                GetField(row, "Power state"), widths.Power,
+                GetField(row, "User"), widths.User,
+                GetField(row, "Service plan"), widths.ServicePlan)
+            : Row(
+                GetField(row, "Cloud PC"), widths.CloudPc,
+                GetField(row, "Status"), widths.Status,
+                GetField(row, "Power state"), widths.Power,
+                GetField(row, "User"), widths.User);
+    }
+
+    private static (int CloudPc, int Status, int Power, int User, int ServicePlan) GetUsageReportWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int status = 12;
+        const int power = 10;
+        var showServicePlan = available >= 118;
+        var gaps = showServicePlan ? 4 : 3;
+        var remaining = Math.Max(42, available - status - power - gaps);
+        var servicePlan = showServicePlan ? Math.Max(22, (int)(remaining * 0.28)) : 0;
+        var user = Math.Max(22, (int)((remaining - servicePlan) * 0.48));
+        var cloudPc = Math.Max(24, remaining - servicePlan - user);
+        return (cloudPc, status, power, user, servicePlan);
+    }
+
+    private static string GetConnectivityHistoryHeader()
+    {
+        var widths = GetConnectivityHistoryWidths();
+        return widths.Event > 0
+            ? Row("Time", widths.Time, "Type", widths.Type, "Event", widths.Event, "Result", widths.Result, "Message", widths.Message)
+            : Row("Time", widths.Time, "Type", widths.Type, "Result", widths.Result, "Message", widths.Message);
+    }
+
+    private static string FormatConnectivityHistoryRow(GraphTableRow row)
+    {
+        var widths = GetConnectivityHistoryWidths();
+        return widths.Event > 0
+            ? Row(
+                GetField(row, "eventDateTime"), widths.Time,
+                GetField(row, "eventType"), widths.Type,
+                GetField(row, "eventName"), widths.Event,
+                GetField(row, "eventResult"), widths.Result,
+                GetField(row, "message"), widths.Message)
+            : Row(
+                GetField(row, "eventDateTime"), widths.Time,
+                GetField(row, "eventType"), widths.Type,
+                GetField(row, "eventResult"), widths.Result,
+                GetField(row, "message"), widths.Message);
+    }
+
+    private static (int Time, int Type, int Event, int Result, int Message) GetConnectivityHistoryWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        var showEvent = available >= 112;
+        var time = showEvent ? 22 : 19;
+        var type = showEvent ? 16 : 14;
+        const int result = 10;
+        var eventWidth = showEvent ? 24 : 0;
+        var gaps = showEvent ? 4 : 3;
+        var message = Math.Max(24, available - time - type - eventWidth - result - gaps);
+        return (time, type, eventWidth, result, message);
     }
 
     private static string GetField(GraphTableRow row, string name)
