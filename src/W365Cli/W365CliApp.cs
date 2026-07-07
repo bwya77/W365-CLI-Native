@@ -278,27 +278,70 @@ internal sealed class W365CliApp
             return;
         }
 
+        var selectedIndex = 0;
+        var filter = string.Empty;
+
         while (true)
         {
-            RenderHeader();
-            var cloudAppWidths = GetCloudAppWidths();
-            var app = SelectFromTable(
-                title: "Windows 365 Cloud Apps",
-                header: Row("Status", cloudAppWidths.Status, "Name", cloudAppWidths.Name, "Publisher", cloudAppWidths.Publisher, "Published", cloudAppWidths.Published, "Added", cloudAppWidths.Added),
-                items: apps,
-                rowFactory: cloudApp => Row(
-                    cloudApp.AppStatus ?? "-", cloudAppWidths.Status,
-                    cloudApp.DisplayName, cloudAppWidths.Name,
-                    cloudApp.Publisher ?? "-", cloudAppWidths.Publisher,
-                    cloudApp.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-", cloudAppWidths.Published,
-                    cloudApp.AddedDateTime?.ToLocalTime().ToString("g") ?? "-", cloudAppWidths.Added));
-
-            if (app is null)
+            var visibleApps = FilterCloudApps(apps, filter);
+            if (selectedIndex >= visibleApps.Count)
             {
-                return;
+                selectedIndex = Math.Max(0, visibleApps.Count - 1);
             }
 
-            ShowCloudAppDetails(app);
+            RenderCloudAppBrowser(apps, visibleApps, selectedIndex, filter);
+            var key = Console.ReadKey(intercept: true);
+
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(Math.Max(0, visibleApps.Count - 1), selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(Math.Max(0, visibleApps.Count - 1), selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = Math.Max(0, visibleApps.Count - 1);
+                    break;
+                case ConsoleKey.Enter:
+                case ConsoleKey.A:
+                    if (visibleApps.Count > 0)
+                    {
+                        ShowCloudAppDetails(visibleApps[selectedIndex]);
+                    }
+                    break;
+                case ConsoleKey.R:
+                    apps = await LoadCloudAppsAsync();
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.C:
+                    filter = string.Empty;
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
+                    {
+                        filter = PromptFilter();
+                        selectedIndex = 0;
+                    }
+                    else if (key.KeyChar == 'q' || key.KeyChar == 'Q' || key.KeyChar == 'b' || key.KeyChar == 'B')
+                    {
+                        return;
+                    }
+                    break;
+            }
         }
     }
 
@@ -328,6 +371,13 @@ internal sealed class W365CliApp
         return await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .StartAsync("Loading Cloud PCs...", async _ => await _session.Graph.GetCloudPcsAsync());
+    }
+
+    private async Task<IReadOnlyList<CloudAppSummary>> LoadCloudAppsAsync()
+    {
+        return await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading Cloud Apps...", async _ => await _session.Graph.GetCloudAppsAsync());
     }
 
     private void RenderCloudPcBrowser(
@@ -488,6 +538,142 @@ internal sealed class W365CliApp
             .Border(BoxBorder.Rounded);
     }
 
+    private void RenderCloudAppBrowser(
+        IReadOnlyList<CloudAppSummary> allApps,
+        IReadOnlyList<CloudAppSummary> visibleApps,
+        int selectedIndex,
+        string filter)
+    {
+        AnsiConsole.Clear();
+        var selectedApp = visibleApps.Count > 0 ? visibleApps[selectedIndex] : null;
+        var grid = new Grid();
+        grid.AddColumn();
+        grid.AddColumn();
+        grid.AddRow(CreateCloudAppTable(allApps, visibleApps, selectedIndex, filter), CreateCloudAppSidePanel(selectedApp));
+
+        RenderCompactHeader();
+        AnsiConsole.Write(CreateCloudAppSummaryPanel(allApps, visibleApps, filter));
+        if (Console.WindowWidth >= 125)
+        {
+            AnsiConsole.Write(grid);
+        }
+        else
+        {
+            AnsiConsole.Write(CreateCloudAppTable(allApps, visibleApps, selectedIndex, filter));
+            AnsiConsole.Write(CreateCloudAppSidePanel(selectedApp));
+        }
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | A actions | / filter | C clear | R refresh | Esc back[/]");
+    }
+
+    private static Panel CreateCloudAppSummaryPanel(IReadOnlyList<CloudAppSummary> allApps, IReadOnlyList<CloudAppSummary> visibleApps, string filter)
+    {
+        var statusSummary = string.Join("  ", allApps
+            .GroupBy(app => app.AppStatus ?? "unknown", StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key)
+            .Select(group => $"{group.Key}: {group.Count()}"));
+
+        var content = new Rows(
+            new Markup($"[bold]Total[/] {allApps.Count}   [bold]Visible[/] {visibleApps.Count}   [bold]Filter[/] {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}"),
+            new Markup($"[bold]Status[/] {Markup.Escape(statusSummary)}"));
+
+        return new Panel(content).Border(BoxBorder.Rounded).Header("Cloud Apps");
+    }
+
+    private static Table CreateCloudAppTable(IReadOnlyList<CloudAppSummary> allApps, IReadOnlyList<CloudAppSummary> visibleApps, int selectedIndex, string filter)
+    {
+        var widths = GetCloudAppWidths();
+        var table = new Table()
+            .Title("Cloud Apps")
+            .Border(TableBorder.Rounded)
+            .AddColumn(" ")
+            .AddColumn("Status")
+            .AddColumn("Name");
+
+        var showPublisher = Console.WindowWidth >= 105;
+        var showDates = Console.WindowWidth >= 135;
+        if (showPublisher)
+        {
+            table.AddColumn("Publisher");
+        }
+        if (showDates)
+        {
+            table.AddColumn("Published");
+            table.AddColumn("Added");
+        }
+
+        if (visibleApps.Count == 0)
+        {
+            var emptyCells = new List<string> { "-", "-", "[grey]No Cloud Apps match the current filter.[/]" };
+            if (showPublisher) { emptyCells.Add("-"); }
+            if (showDates) { emptyCells.Add("-"); emptyCells.Add("-"); }
+            table.AddRow(emptyCells.ToArray());
+            return table;
+        }
+
+        var pageSize = Math.Max(8, Math.Min(18, Console.WindowHeight - 15));
+        var start = Math.Max(0, Math.Min(selectedIndex - pageSize / 2, Math.Max(0, visibleApps.Count - pageSize)));
+        var end = Math.Min(visibleApps.Count - 1, start + pageSize - 1);
+
+        for (var index = start; index <= end; index++)
+        {
+            var app = visibleApps[index];
+            var selected = index == selectedIndex;
+            var row = new List<string>
+            {
+                selected ? "[white on blue]>[/]" : " ",
+                selected ? Selected(Markup.Escape(Fit(app.AppStatus ?? "unknown", widths.Status))) : AppStatusMarkup(app.AppStatus, widths.Status),
+                selected ? Selected(Markup.Escape(Fit(app.DisplayName, widths.Name))) : Markup.Escape(Fit(app.DisplayName, widths.Name))
+            };
+            if (showPublisher)
+            {
+                row.Add(selected ? Selected(Markup.Escape(Fit(app.Publisher ?? "-", widths.Publisher))) : Markup.Escape(Fit(app.Publisher ?? "-", widths.Publisher)));
+            }
+            if (showDates)
+            {
+                row.Add(selected ? Selected(Markup.Escape(Fit(app.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Published))) : Markup.Escape(Fit(app.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Published)));
+                row.Add(selected ? Selected(Markup.Escape(Fit(app.AddedDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Added))) : Markup.Escape(Fit(app.AddedDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Added)));
+            }
+            table.AddRow(row.ToArray());
+        }
+
+        return table;
+    }
+
+    private static Panel CreateCloudAppSidePanel(CloudAppSummary? app)
+    {
+        if (app is null)
+        {
+            return new Panel("[grey]No Cloud App selected.[/]").Header("Details").Border(BoxBorder.Rounded);
+        }
+
+        var content = new Rows(
+            new Markup($"[bold]Name[/]\n{Markup.Escape(app.DisplayName)}"),
+            new Markup($"[bold]Status[/] {AppStatusMarkup(app.AppStatus, 12)}"),
+            new Markup($"[bold]Publisher[/]\n{Markup.Escape(app.Publisher ?? "-")}"),
+            new Markup($"[bold]Added[/] {Markup.Escape(app.AddedDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
+            new Markup($"[bold]Published[/] {Markup.Escape(app.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
+            new Markup($"[bold]Cloud app ID[/]\n[grey]{Markup.Escape(app.Id)}[/]"),
+            new Markup("[bold]Actions[/]\n[grey]Press A to open actions for this Cloud App.[/]"));
+
+        return new Panel(content).Header("Selected Cloud App").Border(BoxBorder.Rounded);
+    }
+
+    private static IReadOnlyList<CloudAppSummary> FilterCloudApps(IReadOnlyList<CloudAppSummary> apps, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return apps;
+        }
+
+        return apps
+            .Where(app =>
+                Contains(app.DisplayName, filter) ||
+                Contains(app.AppStatus, filter) ||
+                Contains(app.Publisher, filter) ||
+                Contains(app.DiscoveredAppName, filter))
+            .ToArray();
+    }
+
     private static IReadOnlyList<CloudPcSummary> FilterCloudPcs(IReadOnlyList<CloudPcSummary> cloudPcs, string filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
@@ -529,6 +715,20 @@ internal sealed class W365CliApp
         };
 
         return $"[{color}]{Markup.Escape(Fit(text, 12))}[/]";
+    }
+
+    private static string AppStatusMarkup(string? status, int width)
+    {
+        var text = status ?? "unknown";
+        var color = text.ToLowerInvariant() switch
+        {
+            "ready" => "khaki1",
+            "published" => "darkolivegreen3_1",
+            "failed" => "indianred1",
+            _ => "grey"
+        };
+
+        return $"[{color}]{Markup.Escape(Fit(text, width))}[/]";
     }
 
     private static string Selected(string escapedText)
@@ -696,21 +896,90 @@ internal sealed class W365CliApp
 
     private static void ShowCloudAppDetails(CloudAppSummary app)
     {
-        AnsiConsole.Clear();
-        var panel = new Panel(
+        var actions = new[] { "Publish", "Unpublish", "Back" };
+        var selectedActionIndex = 0;
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderCloudAppDetailLayout(app, actions, selectedActionIndex);
+            var key = Console.ReadKey(intercept: true);
+
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedActionIndex = Math.Max(0, selectedActionIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedActionIndex = Math.Min(actions.Length - 1, selectedActionIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedActionIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedActionIndex = actions.Length - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    var action = actions[selectedActionIndex];
+                    if (action == "Back")
+                    {
+                        return;
+                    }
+                    ShowNotImplementedAction(action);
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar == 'b' || key.KeyChar == 'B' || key.KeyChar == 'q' || key.KeyChar == 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void RenderCloudAppDetailLayout(CloudAppSummary app, string[] actions, int selectedActionIndex)
+    {
+        AnsiConsole.MarkupLine($"[cyan]W365 CLI Native > Cloud Apps > {Markup.Escape(app.DisplayName)}[/]");
+        AnsiConsole.WriteLine();
+
+        var details = new Panel(
             new Rows(
                 new Markup($"[bold]Name:[/] {Markup.Escape(app.DisplayName)}"),
-                new Markup($"[bold]Status:[/] {Markup.Escape(app.AppStatus ?? "-")}"),
+                new Markup($"[bold]Status:[/] {AppStatusMarkup(app.AppStatus, 12)}"),
                 new Markup($"[bold]Publisher:[/] {Markup.Escape(app.Publisher ?? "-")}"),
                 new Markup($"[bold]Discovered app:[/] {Markup.Escape(app.DiscoveredAppName ?? "-")}"),
                 new Markup($"[bold]Added:[/] {Markup.Escape(app.AddedDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
                 new Markup($"[bold]Published:[/] {Markup.Escape(app.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
-                new Markup($"[bold]Cloud app ID:[/] {Markup.Escape(app.Id)}")))
-            .Header("Cloud App details")
+                new Markup($"[bold]Cloud app ID:[/] [grey]{Markup.Escape(app.Id)}[/]")))
+            .Header("Details")
             .Border(BoxBorder.Rounded);
 
-        AnsiConsole.Write(panel);
-        Pause();
+        var actionLines = actions.Select((action, index) => index == selectedActionIndex
+            ? $"[white on blue]> {Markup.Escape(action)}[/]"
+            : $"  {Markup.Escape(action)}");
+
+        var actionsPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
+            .Header("Actions")
+            .Border(BoxBorder.Rounded);
+
+        if (Console.WindowWidth >= 120)
+        {
+            var grid = new Grid();
+            grid.AddColumn();
+            grid.AddColumn();
+            grid.AddRow(details, actionsPanel);
+            AnsiConsole.Write(grid);
+        }
+        else
+        {
+            AnsiConsole.Write(details);
+            AnsiConsole.Write(actionsPanel);
+        }
+
+        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
     }
 
     private sealed record TableChoice<T>(string Label, T? Item, bool IsBack);
