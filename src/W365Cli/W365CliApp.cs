@@ -5,6 +5,9 @@ namespace W365Cli;
 internal sealed class W365CliApp
 {
     private readonly W365Session _session = new();
+    private static readonly List<ActionHistoryItem> ActionHistory = [];
+    private static string? statusMessage;
+    private static DateTimeOffset? statusMessageAt;
 
     public async Task<int> RunAsync(string[] args)
     {
@@ -113,6 +116,9 @@ internal sealed class W365CliApp
             case "Reports":
                 await ShowReportsAsync();
                 break;
+            case "ActionHistory":
+                ShowActionHistory();
+                break;
             case "Catalog":
                 await ShowCatalogAsync();
                 break;
@@ -155,6 +161,7 @@ internal sealed class W365CliApp
 
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | Esc/B/Q back[/]");
+            RenderStatusBar();
             var key = Console.ReadKey(intercept: true);
             switch (key.Key)
             {
@@ -354,6 +361,7 @@ internal sealed class W365CliApp
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | / or F filter | C clear | Esc/B/Q back[/]");
+        RenderStatusBar();
     }
 
     private static IReadOnlyList<CloudPcDiskSpace> FilterDiskSpaces(IReadOnlyList<CloudPcDiskSpace> items, string filter)
@@ -562,6 +570,7 @@ internal sealed class W365CliApp
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | S snapshot actions | / or F filter | C clear | R refresh | Esc/B/Q back[/]");
+        RenderStatusBar();
     }
 
     private static IReadOnlyList<SnapshotListItem> FilterSnapshotItems(IReadOnlyList<SnapshotListItem> items, string filter)
@@ -630,6 +639,7 @@ internal sealed class W365CliApp
             new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs"),
             new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows"),
             new("Reports", "Reports", "Usage, connectivity, launch details, report streams"),
+            new("ActionHistory", "Action history", "Recent submitted native actions"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
             new("Catalog", "Catalog", "Service plans, images, regions"),
             new("Tenant", "Tenant settings", "Organization settings, profiles, user settings"),
@@ -679,6 +689,7 @@ internal sealed class W365CliApp
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | P or Ctrl+K command palette[/]");
+        RenderStatusBar();
     }
 
     private async Task ShowCommandPaletteAsync()
@@ -792,6 +803,7 @@ internal sealed class W365CliApp
         return
         [
             ..GetMainMenuChoices().Where(choice => choice.Key != "Exit"),
+            new("ActionHistory", "Recent actions", "Open in-session action history"),
             new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
             new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
             new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots"),
@@ -868,6 +880,81 @@ internal sealed class W365CliApp
 
         AnsiConsole.Write(panel);
         Pause();
+    }
+
+    private static void ShowActionHistory()
+    {
+        var selectedIndex = 0;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderBreadcrumb("Action history");
+            AnsiConsole.MarkupLine("[#4091f2]Action history[/]");
+            AnsiConsole.MarkupLine($"[grey]Rows: {ActionHistory.Count}[/]");
+            AnsiConsole.WriteLine();
+
+            if (ActionHistory.Count == 0)
+            {
+                AnsiConsole.MarkupLine("[grey]No actions have been submitted in this session.[/]");
+            }
+            else
+            {
+                var header = Row("Time", 18, "Status", 12, "Action", 24, "Target", 54);
+                AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
+                AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
+                var pageSize = Math.Max(8, Console.WindowHeight - 10);
+                var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, ActionHistory.Count - pageSize));
+                var visible = ActionHistory.Skip(start).Take(pageSize).ToArray();
+                for (var index = 0; index < visible.Length; index++)
+                {
+                    var item = visible[index];
+                    var absoluteIndex = start + index;
+                    var row = Row(
+                        item.RequestedAt.ToLocalTime().ToString("g"), 18,
+                        item.Status, 12,
+                        item.Action, 24,
+                        item.Target, 54);
+                    var escaped = Markup.Escape(row);
+                    AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
+                        ? $"[black on #4091f2]> {escaped}[/]"
+                        : $"  {escaped}");
+                }
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Up/Down move | C clear | Esc/B/Q back[/]");
+            RenderStatusBar();
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(Math.Max(0, ActionHistory.Count - 1), selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(Math.Max(0, ActionHistory.Count - 1), selectedIndex + 10);
+                    break;
+                case ConsoleKey.C:
+                    ActionHistory.Clear();
+                    SetStatus("[green]Action history cleared.[/]");
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
     }
 
     private async Task ShowReportsAsync()
@@ -996,6 +1083,7 @@ internal sealed class W365CliApp
 
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | Esc/B/Q back[/]");
+            RenderStatusBar();
             var key = Console.ReadKey(intercept: true);
             switch (key.Key)
             {
@@ -1480,6 +1568,7 @@ internal sealed class W365CliApp
             AnsiConsole.MarkupLine("[grey]No rows match the current filter.[/]");
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | S sort | Esc/B/Q back[/]");
+            RenderStatusBar();
             return;
         }
 
@@ -1497,6 +1586,7 @@ internal sealed class W365CliApp
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | / or F filter | C clear | S sort | Esc/B/Q back[/]");
+        RenderStatusBar();
     }
 
     private static string GetDefaultGraphRowsHeader()
@@ -2182,6 +2272,7 @@ internal sealed class W365CliApp
             AnsiConsole.Write(CreateCloudPcSidePanel(selectedCloudPc));
         }
         AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Up/Down move | PgUp/PgDn page | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc back[/]");
+        RenderStatusBar();
     }
 
     private void RenderCompactHeader()
@@ -2339,6 +2430,7 @@ internal sealed class W365CliApp
             AnsiConsole.Write(CreateCloudAppSidePanel(selectedApp));
         }
         AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | A actions | / filter | C clear | R refresh | Esc back[/]");
+        RenderStatusBar();
     }
 
     private static Panel CreateCloudAppSummaryPanel(IReadOnlyList<CloudAppSummary> allApps, IReadOnlyList<CloudAppSummary> visibleApps, string filter)
@@ -2610,6 +2702,33 @@ internal sealed class W365CliApp
     private static string Selected(string escapedText)
     {
         return $"[black on #4091f2]{escapedText}[/]";
+    }
+
+    private static void SetStatus(string markup)
+    {
+        statusMessage = markup;
+        statusMessageAt = DateTimeOffset.Now;
+    }
+
+    private static void RenderStatusBar()
+    {
+        if (string.IsNullOrWhiteSpace(statusMessage))
+        {
+            return;
+        }
+
+        var age = statusMessageAt is null ? string.Empty : $" [grey]({Math.Max(0, (int)(DateTimeOffset.Now - statusMessageAt.Value).TotalSeconds)}s ago)[/]";
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[grey]Status:[/] {statusMessage}{age}");
+    }
+
+    private static void AddActionHistory(string action, string target, string status, string? detail = null)
+    {
+        ActionHistory.Insert(0, new ActionHistoryItem(action, target, status, DateTimeOffset.Now, detail));
+        if (ActionHistory.Count > 100)
+        {
+            ActionHistory.RemoveRange(100, ActionHistory.Count - 100);
+        }
     }
 
     private static Style SelectionHighlightStyle()
@@ -2905,6 +3024,7 @@ internal sealed class W365CliApp
             _ => "Up/Down choose action | Enter run | Esc/B/Q back"
         };
         AnsiConsole.MarkupLine($"[grey]{hint}[/]");
+        RenderStatusBar();
     }
 
     private static Panel CreateDiskSpaceSubPanel(CloudPcDiskSpace? disk)
@@ -3243,7 +3363,7 @@ internal sealed class W365CliApp
 
         if (confirm != "Confirm")
         {
-            TimedMessage("[yellow]Cancelled.[/]");
+            SetStatus($"[yellow]Cancelled {Markup.Escape(action)}.[/]");
             return;
         }
 
@@ -3252,13 +3372,13 @@ internal sealed class W365CliApp
             await AnsiConsole.Status()
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync($"Submitting {action}...", async _ => await operation());
-            TimedMessage("[green]Submitted.[/]");
+            AddActionHistory(action, target, "Submitted");
+            SetStatus($"[green]Submitted {Markup.Escape(action)} for {Markup.Escape(Fit(target, 70))}.[/]");
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine("[red]Action failed.[/]");
-            AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
-            TimedMessage("[grey]Returning...[/]");
+            AddActionHistory(action, target, "Failed", ex.Message);
+            SetStatus($"[red]{Markup.Escape(action)} failed for {Markup.Escape(Fit(target, 70))}.[/]");
         }
     }
 
@@ -3365,6 +3485,7 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
+        RenderStatusBar();
     }
 
     private sealed record TableChoice<T>(string Label, T? Item, bool IsBack);
@@ -3372,6 +3493,8 @@ internal sealed class W365CliApp
     private sealed record SnapshotListItem(CloudPcSummary CloudPc, CloudPcSnapshot Snapshot);
 
     private sealed record MenuChoice(string Key, string Title, string Description);
+
+    private sealed record ActionHistoryItem(string Action, string Target, string Status, DateTimeOffset RequestedAt, string? Detail);
 
     private enum GraphRowSortMode
     {
@@ -3444,4 +3567,3 @@ internal sealed class W365CliApp
         }
     }
 }
-
