@@ -266,7 +266,8 @@ internal sealed class W365CliApp
                         "Windows 365 Cloud PC usage",
                         async () => await _session.Graph.GetUsageRowsAsync(),
                         GetUsageReportHeader,
-                        FormatUsageReportRow);
+                        FormatUsageReportRow,
+                        OpenCloudPcFromReportRowAsync);
                     break;
                 case "Connectivity history":
                     await ShowConnectivityHistoryAsync();
@@ -349,7 +350,8 @@ internal sealed class W365CliApp
                 $"Connectivity history for {cloudPc.Name}",
                 async () => await _session.Graph.GetConnectivityHistoryAsync(cloudPc),
                 GetConnectivityHistoryHeader,
-                FormatConnectivityHistoryRow);
+                FormatConnectivityHistoryRow,
+                async _ => await ShowCloudPcDetailsAsync(cloudPc));
         }
     }
 
@@ -392,7 +394,8 @@ internal sealed class W365CliApp
 
             await ShowGraphRowsAsync(
                 $"Report: {reportName}",
-                async () => await _session.Graph.GetCloudPcReportRowsAsync(reportName, top));
+                async () => await _session.Graph.GetCloudPcReportRowsAsync(reportName, top),
+                enterAction: OpenCloudPcFromReportRowAsync);
         }
     }
 
@@ -400,7 +403,8 @@ internal sealed class W365CliApp
         string title,
         Func<Task<IReadOnlyList<GraphTableRow>>> loader,
         Func<string>? headerFactory = null,
-        Func<GraphTableRow, string>? rowFactory = null)
+        Func<GraphTableRow, string>? rowFactory = null,
+        Func<GraphTableRow, Task>? enterAction = null)
     {
         var rows = await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
@@ -443,7 +447,14 @@ internal sealed class W365CliApp
                     selectedIndex = rows.Count - 1;
                     break;
                 case ConsoleKey.Enter:
-                    ShowGraphRowDetails(title, rows[selectedIndex]);
+                    if (enterAction is null)
+                    {
+                        ShowGraphRowDetails(title, rows[selectedIndex]);
+                    }
+                    else
+                    {
+                        await enterAction(rows[selectedIndex]);
+                    }
                     break;
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
@@ -456,6 +467,40 @@ internal sealed class W365CliApp
                     break;
             }
         }
+    }
+
+    private async Task OpenCloudPcFromReportRowAsync(GraphTableRow row)
+    {
+        var cloudPc = await ResolveCloudPcFromReportRowAsync(row);
+        if (cloudPc is null)
+        {
+            ShowGraphRowDetails("Report row details", row);
+            return;
+        }
+
+        await ShowCloudPcDetailsAsync(cloudPc);
+    }
+
+    private async Task<CloudPcSummary?> ResolveCloudPcFromReportRowAsync(GraphTableRow row)
+    {
+        var cloudPcs = await LoadCloudPcsAsync();
+        var cloudPcId = GetOptionalField(row, "Cloud PC ID", "CloudPcId", "cloudPcId", "Cloud PC Id");
+        if (!string.IsNullOrWhiteSpace(cloudPcId))
+        {
+            var idMatch = cloudPcs.FirstOrDefault(pc => string.Equals(pc.Id, cloudPcId, StringComparison.OrdinalIgnoreCase));
+            if (idMatch is not null)
+            {
+                return idMatch;
+            }
+        }
+
+        var cloudPcName = GetOptionalField(row, "Cloud PC", "CloudPcName", "cloudPcName", "ManagedDeviceName", "managedDeviceName", "DisplayName", "displayName");
+        return string.IsNullOrWhiteSpace(cloudPcName)
+            ? null
+            : cloudPcs.FirstOrDefault(pc =>
+                string.Equals(pc.Name, cloudPcName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pc.ManagedDeviceName, cloudPcName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pc.DisplayName, cloudPcName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static CloudPcSummary? SelectCloudPcForConnectivityHistory(IReadOnlyList<CloudPcSummary> cloudPcs)
@@ -672,6 +717,19 @@ internal sealed class W365CliApp
         return row.Fields.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : "-";
+    }
+
+    private static string? GetOptionalField(GraphTableRow row, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (row.Fields.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value) && value != "-")
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static void ShowGraphRowDetails(string title, GraphTableRow row)

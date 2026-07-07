@@ -350,8 +350,14 @@ internal sealed class W365GraphClient
                 {
                     var fields = FlattenJsonObject(item);
                     fields["Cloud PC"] = cloudPc.Name;
+                    fields["Cloud PC ID"] = cloudPc.Id;
                     fields["User"] = cloudPc.UserPrincipalName;
-                    rows.Add(ToTableRow(fields, "Cloud PC", "launchDetailStatus", "windows365SwitchCompatible"));
+                    var status = GetFirst(fields, "launchDetailStatus", "status") ?? "-";
+                    var switchCompatible = FormatBoolean(GetFirst(fields, "windows365SwitchCompatible"));
+                    rows.Add(new GraphTableRow(
+                        cloudPc.Name,
+                        JoinSummary($"Status: {status}", $"Switch compatible: {switchCompatible}"),
+                        fields));
                 }
             }
             catch (HttpRequestException ex)
@@ -568,6 +574,17 @@ internal sealed class W365GraphClient
             JsonValueKind.Null => "-",
             JsonValueKind.Undefined => "-",
             _ => value.GetRawText()
+        };
+    }
+
+    private static string FormatBoolean(string? value)
+    {
+        return value?.ToLowerInvariant() switch
+        {
+            "true" => "Yes",
+            "false" => "No",
+            null or "" or "-" => "Unknown",
+            _ => value
         };
     }
 
