@@ -888,41 +888,7 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            RenderBreadcrumb("Action history");
-            AnsiConsole.MarkupLine("[#4091f2]Action history[/]");
-            AnsiConsole.MarkupLine($"[grey]Rows: {ActionHistory.Count}[/]");
-            AnsiConsole.WriteLine();
-
-            if (ActionHistory.Count == 0)
-            {
-                AnsiConsole.MarkupLine("[grey]No actions have been submitted in this session.[/]");
-            }
-            else
-            {
-                var header = Row("Time", 18, "Status", 12, "Action", 24, "Target", 54);
-                AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
-                AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
-                var pageSize = Math.Max(8, Console.WindowHeight - 10);
-                var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, ActionHistory.Count - pageSize));
-                var visible = ActionHistory.Skip(start).Take(pageSize).ToArray();
-                for (var index = 0; index < visible.Length; index++)
-                {
-                    var item = visible[index];
-                    var absoluteIndex = start + index;
-                    var row = Row(
-                        item.RequestedAt.ToLocalTime().ToString("g"), 18,
-                        item.Status, 12,
-                        item.Action, 24,
-                        item.Target, 54);
-                    var escaped = Markup.Escape(row);
-                    AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                        ? $"[black on #4091f2]> {escaped}[/]"
-                        : $"  {escaped}");
-                }
-            }
-
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]Up/Down move | C clear | Esc/B/Q back[/]");
+            RenderActionHistory(selectedIndex);
             RenderStatusBar();
             var key = Console.ReadKey(intercept: true);
             switch (key.Key)
@@ -955,6 +921,105 @@ internal sealed class W365CliApp
                     break;
             }
         }
+    }
+
+    private static void RenderActionHistory(int selectedIndex)
+    {
+        RenderBreadcrumb("Action history");
+        AnsiConsole.Write(CreateActionHistorySummaryPanel());
+
+        if (ActionHistory.Count == 0)
+        {
+            AnsiConsole.Write(
+                new Panel("[grey]Actions submitted from this session will appear here.[/]")
+                    .Header("Recent actions")
+                    .Border(BoxBorder.Rounded));
+        }
+        else if (Console.WindowWidth >= 120)
+        {
+            var grid = new Grid();
+            grid.AddColumn();
+            grid.AddColumn();
+            grid.AddRow(CreateActionHistoryListPanel(selectedIndex), CreateActionHistoryDetailPanel(ActionHistory[selectedIndex]));
+            AnsiConsole.Write(grid);
+        }
+        else
+        {
+            AnsiConsole.Write(CreateActionHistoryListPanel(selectedIndex));
+            AnsiConsole.Write(CreateActionHistoryDetailPanel(ActionHistory[selectedIndex]));
+        }
+
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | C clear | Esc/B/Q back[/]");
+    }
+
+    private static Panel CreateActionHistorySummaryPanel()
+    {
+        var submitted = ActionHistory.Count(item => item.Status.Equals("Submitted", StringComparison.OrdinalIgnoreCase));
+        var failed = ActionHistory.Count(item => item.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase));
+        var latest = ActionHistory.FirstOrDefault();
+        var content = new Rows(
+            new Markup($"[white]Total:[/] [grey]{ActionHistory.Count}[/]   [white]Submitted:[/] [green]{submitted}[/]   [white]Failed:[/] [red]{failed}[/]"),
+            new Markup($"[white]Latest:[/] [grey]{Markup.Escape(latest is null ? "none" : $"{latest.Action} for {Fit(latest.Target, 70)}")}[/]"));
+
+        return new Panel(content)
+            .Header("Action history")
+            .Border(BoxBorder.Rounded);
+    }
+
+    private static Panel CreateActionHistoryListPanel(int selectedIndex)
+    {
+        var rows = new List<Markup>();
+        var pageSize = Math.Max(6, Math.Min(14, Console.WindowHeight - 16));
+        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, ActionHistory.Count - pageSize));
+        var visible = ActionHistory.Skip(start).Take(pageSize).ToArray();
+
+        foreach (var item in visible.Select((value, index) => new { value, index }))
+        {
+            var absoluteIndex = start + item.index;
+            var row = Row(
+                item.value.RequestedAt.ToLocalTime().ToString("t"), 8,
+                item.value.Status, 10,
+                item.value.Action, 22,
+                item.value.Target, 36);
+            var escaped = Markup.Escape(row);
+            rows.Add(new Markup(absoluteIndex == selectedIndex
+                ? $"[black on #4091f2]> {escaped}[/]"
+                : $"  {escaped}"));
+        }
+
+        return new Panel(new Rows(rows))
+            .Header("Recent actions")
+            .Border(BoxBorder.Rounded);
+    }
+
+    private static Panel CreateActionHistoryDetailPanel(ActionHistoryItem item)
+    {
+        var detailRows = new List<Markup>
+        {
+            new Markup(PropertyInline("Status", ActionHistoryStatusMarkup(item.Status), valueIsMarkup: true)),
+            new Markup(PropertyInline("Action", item.Action)),
+            new Markup(PropertyBlock("Target", item.Target)),
+            new Markup(PropertyInline("Requested", item.RequestedAt.ToLocalTime().ToString("g")))
+        };
+
+        if (!string.IsNullOrWhiteSpace(item.Detail))
+        {
+            detailRows.Add(new Markup(PropertyBlock("Detail", item.Detail)));
+        }
+
+        return new Panel(new Rows(detailRows))
+            .Header("Selected action")
+            .Border(BoxBorder.Rounded);
+    }
+
+    private static string ActionHistoryStatusMarkup(string status)
+    {
+        var color = status.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+            ? "red"
+            : status.Equals("Submitted", StringComparison.OrdinalIgnoreCase)
+                ? "green"
+                : "grey";
+        return $"[{color}]{Markup.Escape(status)}[/]";
     }
 
     private async Task ShowReportsAsync()
