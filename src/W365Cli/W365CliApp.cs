@@ -13,52 +13,121 @@ internal sealed class W365CliApp
             .Spinner(Spinner.Known.Dots)
             .StartAsync("Checking cached sign-in...", async _ => await _session.TryRestoreAsync());
 
+        var selectedIndex = 0;
         while (true)
         {
-            RenderHeader();
-
             var menuChoices = GetMainMenuChoices();
-            RenderMainMenuDashboard(menuChoices);
-            var choice = AnsiConsole.Prompt(
-                new SelectionPrompt<MenuChoice>()
-                    .Title("[cyan]Select an area[/]")
-                    .HighlightStyle(SelectionHighlightStyle())
-                    .PageSize(12)
-                    .UseConverter(FormatMainMenuChoice)
-                    .AddChoices(menuChoices));
-
-            switch (choice.Key)
+            if (selectedIndex >= menuChoices.Count)
             {
-                case "Connection":
-                    await ShowConnectionAsync();
-                    break;
-                case "CloudPcs":
-                    await ShowCloudPcAreaAsync();
-                    break;
-                case "CloudApps":
-                    await ShowCloudAppsAsync();
-                    break;
-                case "Provisioning":
-                    ShowPlaceholderArea("Provisioning", "Provisioning policies and maintenance windows will be wired next.");
-                    break;
-                case "Reports":
-                    await ShowReportsAsync();
-                    break;
-                case "Catalog":
-                    await ShowCatalogAsync();
-                    break;
-                case "Tenant":
-                    await ShowTenantSettingsAsync();
-                    break;
-                case "About":
-                    ShowAbout();
-                    break;
-                case "Exit":
-                    AnsiConsole.Clear();
-                    return 0;
+                selectedIndex = menuChoices.Count - 1;
             }
+
+            RenderMainMenu(menuChoices, selectedIndex);
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(menuChoices.Count - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = menuChoices.Count - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    if (await ExecuteMainMenuChoiceAsync(menuChoices[selectedIndex]))
+                    {
+                        return 0;
+                    }
+                    break;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
+                default:
+                    if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
+                    }
+                    break;
+            }
+        }
     }
 
+    private async Task<bool> ExecuteMainMenuChoiceAsync(MenuChoice choice)
+    {
+        switch (choice.Title)
+        {
+            case "Browse Cloud PCs":
+                await ShowCloudPcsAsync();
+                return false;
+            case "Disk space":
+                await ShowDiskSpaceAsync();
+                return false;
+            case "Snapshots":
+                await ShowAllSnapshotsAsync();
+                return false;
+            case "Usage report":
+                await ShowGraphRowsAsync(
+                    "Windows 365 Cloud PC usage",
+                    async () => await _session.Graph.GetUsageRowsAsync(),
+                    GetUsageReportHeader,
+                    FormatUsageReportRow,
+                    OpenCloudPcFromReportRowAsync);
+                return false;
+            case "Launch details":
+                await ShowGraphRowsAsync(
+                    "Windows 365 launch details",
+                    async () => await _session.Graph.GetLaunchDetailRowsAsync(),
+                    GetLaunchDetailsHeader,
+                    FormatLaunchDetailsRow);
+                return false;
+            case "Service plans":
+                await ShowGraphRowsAsync("Windows 365 service plans", _session.Graph.GetServicePlanRowsAsync, GetServicePlansHeader, FormatServicePlanRow);
+                return false;
+            case "Gallery images":
+                await ShowGraphRowsAsync("Windows 365 gallery images", _session.Graph.GetGalleryImageRowsAsync, GetGalleryImagesHeader, FormatGalleryImageRow);
+                return false;
+            case "Supported regions":
+                await ShowGraphRowsAsync("Windows 365 supported regions", _session.Graph.GetSupportedRegionRowsAsync, GetSupportedRegionsHeader, FormatSupportedRegionRow);
+                return false;
+        }
+
+        switch (choice.Key)
+        {
+            case "Connection":
+                await ShowConnectionAsync();
+                break;
+            case "CloudPcs":
+                await ShowCloudPcAreaAsync();
+                break;
+            case "CloudApps":
+                await ShowCloudAppsAsync();
+                break;
+            case "Provisioning":
+                ShowPlaceholderArea("Provisioning", "Provisioning policies and maintenance windows will be wired next.");
+                break;
+            case "Reports":
+                await ShowReportsAsync();
+                break;
+            case "Catalog":
+                await ShowCatalogAsync();
+                break;
+            case "Tenant":
+                await ShowTenantSettingsAsync();
+                break;
+            case "About":
+                ShowAbout();
+                break;
+            case "Exit":
+                AnsiConsole.Clear();
+                return true;
+        }
+
+        return false;
     }
 
     private async Task ShowCloudPcAreaAsync()
@@ -73,6 +142,7 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
+            RenderBreadcrumb("Cloud PCs");
             AnsiConsole.MarkupLine("[cyan]Cloud PCs[/]");
             AnsiConsole.WriteLine();
             for (var index = 0; index < choices.Length; index++)
@@ -119,10 +189,21 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
-                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
                         return;
+                    }
+                    else if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
                     }
                     break;
             }
@@ -169,6 +250,7 @@ internal sealed class W365CliApp
 
             AnsiConsole.Clear();
             RenderCompactHeader();
+            RenderBreadcrumb("Cloud PCs", "Disk space");
             RenderDiskSpaceTable(items, visibleItems, selectedIndex, filter);
             var key = Console.ReadKey(intercept: true);
             switch (key.Key)
@@ -209,6 +291,9 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
                     if (key.KeyChar is '/' or 'f' or 'F')
                     {
@@ -218,6 +303,10 @@ internal sealed class W365CliApp
                     else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
                         return;
+                    }
+                    else if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
                     }
                     break;
             }
@@ -329,6 +418,7 @@ internal sealed class W365CliApp
             }
 
             AnsiConsole.Clear();
+            RenderBreadcrumb("Cloud PCs", "Snapshots");
             RenderAllSnapshotsTable(items, visibleItems, selectedIndex, filter);
             var key = Console.ReadKey(intercept: true);
             switch (key.Key)
@@ -389,6 +479,9 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
                     if (key.KeyChar is '/' or 'f' or 'F')
                     {
@@ -398,6 +491,10 @@ internal sealed class W365CliApp
                     else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
                         return;
+                    }
+                    else if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
                     }
                     break;
             }
@@ -565,9 +662,157 @@ internal sealed class W365CliApp
         AnsiConsole.WriteLine();
     }
 
+    private void RenderMainMenu(IReadOnlyList<MenuChoice> choices, int selectedIndex)
+    {
+        RenderHeader();
+        RenderMainMenuDashboard(choices);
+        RenderBreadcrumb("Main menu");
+
+        AnsiConsole.MarkupLine("[cyan]Select an area[/]");
+        for (var index = 0; index < choices.Count; index++)
+        {
+            var label = FormatMainMenuChoice(choices[index]);
+            AnsiConsole.MarkupLine(index == selectedIndex
+                ? $"[black on cyan]> {label}[/]"
+                : $"  {label}");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | P or Ctrl+K command palette[/]");
+    }
+
+    private async Task ShowCommandPaletteAsync()
+    {
+        var commands = GetCommandPaletteChoices();
+        var selectedIndex = 0;
+        var filter = string.Empty;
+        while (true)
+        {
+            var visibleCommands = FilterMenuChoices(commands, filter);
+            if (visibleCommands.Count == 0)
+            {
+                selectedIndex = 0;
+            }
+            else if (selectedIndex >= visibleCommands.Count)
+            {
+                selectedIndex = visibleCommands.Count - 1;
+            }
+
+            AnsiConsole.Clear();
+            RenderBreadcrumb("Command palette");
+            AnsiConsole.MarkupLine("[cyan]Command palette[/]");
+            AnsiConsole.MarkupLine($"[grey]Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
+            AnsiConsole.WriteLine();
+
+            if (visibleCommands.Count == 0)
+            {
+                AnsiConsole.MarkupLine("[grey]No commands match the current filter.[/]");
+            }
+            else
+            {
+                var pageSize = Math.Max(8, Console.WindowHeight - 8);
+                var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, visibleCommands.Count - pageSize));
+                var visiblePage = visibleCommands.Skip(start).Take(pageSize).ToArray();
+                for (var index = 0; index < visiblePage.Length; index++)
+                {
+                    var absoluteIndex = start + index;
+                    var label = FormatMainMenuChoice(visiblePage[index]);
+                    AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
+                        ? $"[black on cyan]> {label}[/]"
+                        : $"  {label}");
+                }
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Type to filter | Up/Down move | Enter run | Backspace edit | Esc/B/Q back[/]");
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(Math.Max(0, visibleCommands.Count - 1), selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(Math.Max(0, visibleCommands.Count - 1), selectedIndex + 10);
+                    break;
+                case ConsoleKey.Enter:
+                    if (visibleCommands.Count > 0)
+                    {
+                        await ExecuteMainMenuChoiceAsync(visibleCommands[selectedIndex]);
+                        return;
+                    }
+                    break;
+                case ConsoleKey.Backspace:
+                    if (filter.Length > 0)
+                    {
+                        filter = filter[..^1];
+                        selectedIndex = 0;
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (string.IsNullOrWhiteSpace(filter) && key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+
+                    if (!char.IsControl(key.KeyChar))
+                    {
+                        filter += key.KeyChar;
+                        selectedIndex = 0;
+                    }
+                    break;
+            }
+        }
+    }
+
     private static string FormatMainMenuChoice(MenuChoice choice)
     {
         return $"[white]{Markup.Escape(Fit(choice.Title, 22))}[/] [grey]{Markup.Escape(choice.Description)}[/]";
+    }
+
+    private static void RenderBreadcrumb(params string[] parts)
+    {
+        var allParts = new[] { "W365 CLI Native" }
+            .Concat(parts.Where(part => !string.IsNullOrWhiteSpace(part)))
+            .ToArray();
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(string.Join(" > ", allParts))}[/]");
+        AnsiConsole.WriteLine();
+    }
+
+    private IReadOnlyList<MenuChoice> GetCommandPaletteChoices()
+    {
+        return
+        [
+            ..GetMainMenuChoices().Where(choice => choice.Key != "Exit"),
+            new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
+            new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
+            new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots"),
+            new("Reports", "Usage report", "Open Cloud PC usage"),
+            new("Reports", "Launch details", "Open Cloud PC launch details"),
+            new("Catalog", "Service plans", "Open service plan catalog"),
+            new("Catalog", "Gallery images", "Open gallery images"),
+            new("Catalog", "Supported regions", "Open supported regions")
+        ];
+    }
+
+    private static IReadOnlyList<MenuChoice> FilterMenuChoices(IReadOnlyList<MenuChoice> choices, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return choices;
+        }
+
+        return choices
+            .Where(choice => Contains(choice.Title, filter) || Contains(choice.Description, filter))
+            .ToArray();
     }
 
     private void RenderHeader()
@@ -736,6 +981,7 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
+            RenderBreadcrumb("Catalog");
             AnsiConsole.MarkupLine("[cyan]Catalog[/]");
             AnsiConsole.MarkupLine("[grey]Plans, images, and regions used by Windows 365.[/]");
             AnsiConsole.WriteLine();
@@ -787,8 +1033,15 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
-                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
                         return;
                     }
@@ -911,6 +1164,8 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return null;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    return null;
                 default:
                     if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
@@ -1004,10 +1259,11 @@ internal sealed class W365CliApp
         rowFactory ??= FormatDefaultGraphRow;
         var selectedIndex = 0;
         var filter = string.Empty;
+        var sortMode = GraphRowSortMode.None;
 
         while (true)
         {
-            var visibleRows = FilterGraphRows(rows, filter);
+            var visibleRows = SortGraphRows(FilterGraphRows(rows, filter), sortMode);
             if (visibleRows.Count == 0)
             {
                 selectedIndex = 0;
@@ -1018,7 +1274,7 @@ internal sealed class W365CliApp
             }
 
             AnsiConsole.Clear();
-            RenderGraphRows(title, rows, visibleRows, selectedIndex, filter, headerFactory, rowFactory);
+            RenderGraphRows(title, rows, visibleRows, selectedIndex, filter, sortMode, headerFactory, rowFactory);
             var key = Console.ReadKey(intercept: true);
 
             switch (key.Key)
@@ -1045,6 +1301,10 @@ internal sealed class W365CliApp
                     filter = string.Empty;
                     selectedIndex = 0;
                     break;
+                case ConsoleKey.S:
+                    sortMode = NextSortMode(sortMode);
+                    selectedIndex = 0;
+                    break;
                 case ConsoleKey.Enter:
                     if (visibleRows.Count == 0)
                     {
@@ -1063,6 +1323,9 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
                     if (key.KeyChar is '/' or 'f' or 'F')
                     {
@@ -1199,12 +1462,14 @@ internal sealed class W365CliApp
         IReadOnlyList<GraphTableRow> visibleRows,
         int selectedIndex,
         string filter,
+        GraphRowSortMode sortMode,
         Func<string> headerFactory,
         Func<GraphTableRow, string> rowFactory)
     {
         var header = headerFactory();
+        RenderBreadcrumb(title);
         AnsiConsole.MarkupLine($"[cyan]{Markup.Escape(title)}[/]");
-        AnsiConsole.MarkupLine($"[grey]Rows: {allRows.Count} | Visible: {visibleRows.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
+        AnsiConsole.MarkupLine($"[grey]Rows: {allRows.Count} | Visible: {visibleRows.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)} | Sort: {FormatSortMode(sortMode)}[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
@@ -1214,7 +1479,7 @@ internal sealed class W365CliApp
         {
             AnsiConsole.MarkupLine("[grey]No rows match the current filter.[/]");
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | Esc/B/Q back[/]");
+            AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | S sort | Esc/B/Q back[/]");
             return;
         }
 
@@ -1231,7 +1496,7 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | / or F filter | C clear | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | / or F filter | C clear | S sort | Esc/B/Q back[/]");
     }
 
     private static string GetDefaultGraphRowsHeader()
@@ -1267,6 +1532,42 @@ internal sealed class W365CliApp
                 Contains(row.Summary, filter) ||
                 row.Fields.Any(field => Contains(field.Key, filter) || Contains(field.Value, filter)))
             .ToArray();
+    }
+
+    private static IReadOnlyList<GraphTableRow> SortGraphRows(IReadOnlyList<GraphTableRow> rows, GraphRowSortMode sortMode)
+    {
+        return sortMode switch
+        {
+            GraphRowSortMode.TitleAscending => rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray(),
+            GraphRowSortMode.TitleDescending => rows.OrderByDescending(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray(),
+            GraphRowSortMode.SummaryAscending => rows.OrderBy(row => row.Summary, StringComparer.OrdinalIgnoreCase).ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray(),
+            GraphRowSortMode.SummaryDescending => rows.OrderByDescending(row => row.Summary, StringComparer.OrdinalIgnoreCase).ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray(),
+            _ => rows
+        };
+    }
+
+    private static GraphRowSortMode NextSortMode(GraphRowSortMode sortMode)
+    {
+        return sortMode switch
+        {
+            GraphRowSortMode.None => GraphRowSortMode.TitleAscending,
+            GraphRowSortMode.TitleAscending => GraphRowSortMode.TitleDescending,
+            GraphRowSortMode.TitleDescending => GraphRowSortMode.SummaryAscending,
+            GraphRowSortMode.SummaryAscending => GraphRowSortMode.SummaryDescending,
+            _ => GraphRowSortMode.None
+        };
+    }
+
+    private static string FormatSortMode(GraphRowSortMode sortMode)
+    {
+        return sortMode switch
+        {
+            GraphRowSortMode.TitleAscending => "title asc",
+            GraphRowSortMode.TitleDescending => "title desc",
+            GraphRowSortMode.SummaryAscending => "summary asc",
+            GraphRowSortMode.SummaryDescending => "summary desc",
+            _ => "none"
+        };
     }
 
     private static string GetUsageReportHeader()
@@ -1623,16 +1924,17 @@ internal sealed class W365CliApp
 
         var selectedIndex = 0;
         var filter = string.Empty;
+        var sortMode = CloudPcSortMode.Name;
 
         while (true)
         {
-            var visibleCloudPcs = FilterCloudPcs(cloudPcs, filter);
+            var visibleCloudPcs = SortCloudPcs(FilterCloudPcs(cloudPcs, filter), sortMode);
             if (selectedIndex >= visibleCloudPcs.Count)
             {
                 selectedIndex = Math.Max(0, visibleCloudPcs.Count - 1);
             }
 
-            RenderCloudPcBrowser(cloudPcs, visibleCloudPcs, selectedIndex, filter);
+            RenderCloudPcBrowser(cloudPcs, visibleCloudPcs, selectedIndex, filter, sortMode);
             var key = Console.ReadKey(intercept: true);
 
             switch (key.Key)
@@ -1675,9 +1977,16 @@ internal sealed class W365CliApp
                     filter = string.Empty;
                     selectedIndex = 0;
                     break;
+                case ConsoleKey.S:
+                    sortMode = NextCloudPcSortMode(sortMode);
+                    selectedIndex = 0;
+                    break;
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
                     if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
                     {
@@ -1687,6 +1996,26 @@ internal sealed class W365CliApp
                     else if (key.KeyChar == 'q' || key.KeyChar == 'Q' || key.KeyChar == 'b' || key.KeyChar == 'B')
                     {
                         return;
+                    }
+                    else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'd' or 'D')
+                    {
+                        await ShowDiskSpaceAsync(visibleCloudPcs[selectedIndex]);
+                    }
+                    else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'n' or 'N')
+                    {
+                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex]);
+                    }
+                    else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'z' or 'Z')
+                    {
+                        await ShowResizeAsync(visibleCloudPcs[selectedIndex]);
+                    }
+                    else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'y' or 'Y')
+                    {
+                        await InvokeCloudPcActionAsync(visibleCloudPcs[selectedIndex], "Sync");
+                    }
+                    else if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
                     }
                     break;
             }
@@ -1829,7 +2158,8 @@ internal sealed class W365CliApp
         IReadOnlyList<CloudPcSummary> allCloudPcs,
         IReadOnlyList<CloudPcSummary> visibleCloudPcs,
         int selectedIndex,
-        string filter)
+        string filter,
+        CloudPcSortMode sortMode)
     {
         AnsiConsole.Clear();
 
@@ -1840,6 +2170,7 @@ internal sealed class W365CliApp
         grid.AddRow(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter), CreateCloudPcSidePanel(selectedCloudPc));
 
         RenderCompactHeader();
+        RenderBreadcrumb("Cloud PCs", "Browse");
         AnsiConsole.Write(CreateCloudPcSummaryPanel(allCloudPcs, visibleCloudPcs, filter));
         if (Console.WindowWidth >= 125)
         {
@@ -1850,7 +2181,7 @@ internal sealed class W365CliApp
             AnsiConsole.Write(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter));
             AnsiConsole.Write(CreateCloudPcSidePanel(selectedCloudPc));
         }
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | A actions | / filter | C clear | R refresh | Esc back[/]");
+        AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Up/Down move | PgUp/PgDn page | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc back[/]");
     }
 
     private void RenderCompactHeader()
@@ -2134,6 +2465,39 @@ internal sealed class W365CliApp
                 Contains(pc.UserPrincipalName, filter) ||
                 Contains(pc.ServicePlanName, filter))
             .ToArray();
+    }
+
+    private static IReadOnlyList<CloudPcSummary> SortCloudPcs(IReadOnlyList<CloudPcSummary> cloudPcs, CloudPcSortMode sortMode)
+    {
+        return sortMode switch
+        {
+            CloudPcSortMode.Status => cloudPcs.OrderBy(pc => pc.Status, StringComparer.OrdinalIgnoreCase).ThenBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
+            CloudPcSortMode.User => cloudPcs.OrderBy(pc => pc.UserPrincipalName, StringComparer.OrdinalIgnoreCase).ThenBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
+            CloudPcSortMode.ServicePlan => cloudPcs.OrderBy(pc => pc.ServicePlanName, StringComparer.OrdinalIgnoreCase).ThenBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
+            _ => cloudPcs.OrderBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray()
+        };
+    }
+
+    private static CloudPcSortMode NextCloudPcSortMode(CloudPcSortMode sortMode)
+    {
+        return sortMode switch
+        {
+            CloudPcSortMode.Name => CloudPcSortMode.Status,
+            CloudPcSortMode.Status => CloudPcSortMode.User,
+            CloudPcSortMode.User => CloudPcSortMode.ServicePlan,
+            _ => CloudPcSortMode.Name
+        };
+    }
+
+    private static string FormatCloudPcSortMode(CloudPcSortMode sortMode)
+    {
+        return sortMode switch
+        {
+            CloudPcSortMode.Status => "status",
+            CloudPcSortMode.User => "user",
+            CloudPcSortMode.ServicePlan => "service plan",
+            _ => "name"
+        };
     }
 
     private static bool Contains(string? value, string filter)
@@ -3008,6 +3372,23 @@ internal sealed class W365CliApp
     private sealed record SnapshotListItem(CloudPcSummary CloudPc, CloudPcSnapshot Snapshot);
 
     private sealed record MenuChoice(string Key, string Title, string Description);
+
+    private enum GraphRowSortMode
+    {
+        None,
+        TitleAscending,
+        TitleDescending,
+        SummaryAscending,
+        SummaryDescending
+    }
+
+    private enum CloudPcSortMode
+    {
+        Name,
+        Status,
+        User,
+        ServicePlan
+    }
 
     private async Task<bool> EnsureConnectedAsync()
     {
