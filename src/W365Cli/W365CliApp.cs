@@ -695,17 +695,23 @@ internal sealed class W365CliApp
                 case "Organization settings":
                     await ShowGraphRowsAsync(
                         "Windows 365 organization settings",
-                        async () => await _session.Graph.GetOrganizationSettingsAsync());
+                        async () => await _session.Graph.GetOrganizationSettingsAsync(),
+                        GetOrganizationSettingsHeader,
+                        FormatOrganizationSettingRow);
                     break;
                 case "Setting profiles":
                     await ShowGraphRowsAsync(
                         "Windows 365 setting profiles",
-                        async () => await _session.Graph.GetSettingProfilesAsync());
+                        async () => await _session.Graph.GetSettingProfilesAsync(),
+                        GetSettingProfilesHeader,
+                        FormatSettingProfileRow);
                     break;
                 case "User settings":
                     await ShowGraphRowsAsync(
                         "Windows 365 user settings",
-                        async () => await _session.Graph.GetUserSettingsAsync());
+                        async () => await _session.Graph.GetUserSettingsAsync(),
+                        GetUserSettingsHeader,
+                        FormatUserSettingRow);
                     break;
                 case "Back":
                     return;
@@ -1442,6 +1448,109 @@ internal sealed class W365CliApp
     private static string FormatCatalogGb(string value)
     {
         return value == "-" ? "-" : $"{value} GB";
+    }
+
+    private static string GetOrganizationSettingsHeader()
+    {
+        return Row("OS", 14, "User", 18, "MEM auto", 10, "SSO", 8, "Language", 14);
+    }
+
+    private static string FormatOrganizationSettingRow(GraphTableRow row)
+    {
+        return Row(
+            GetField(row, "osVersion"), 14,
+            GetField(row, "userAccountType"), 18,
+            FormatBooleanCell(GetField(row, "memAutoEnrollEnabled")), 10,
+            FormatBooleanCell(GetField(row, "singleSignOnEnabled")), 8,
+            GetField(row, "windowsLanguage"), 14);
+    }
+
+    private static string GetSettingProfilesHeader()
+    {
+        return Row("Name", 42, "Type", 18, "Assigned", 10, "Priority", 10, "Modified", 20);
+    }
+
+    private static string FormatSettingProfileRow(GraphTableRow row)
+    {
+        return Row(
+            GetField(row, "displayName"), 42,
+            GetField(row, "profileType"), 18,
+            FormatBooleanCell(GetField(row, "isAssigned")), 10,
+            GetNestedField(row, "priorityMetaData", "priority"), 10,
+            FormatDateCell(GetField(row, "lastModifiedDateTime")), 20);
+    }
+
+    private static string GetUserSettingsHeader()
+    {
+        return Row("Name", 38, "Self svc", 10, "Admin", 8, "Reset", 8, "Restore", 9, "DR", 8);
+    }
+
+    private static string FormatUserSettingRow(GraphTableRow row)
+    {
+        return Row(
+            GetField(row, "displayName"), 38,
+            FormatBooleanCell(GetField(row, "selfServiceEnabled")), 10,
+            FormatBooleanCell(GetField(row, "localAdminEnabled")), 8,
+            FormatBooleanCell(GetField(row, "resetEnabled")), 8,
+            FormatBooleanCell(GetNestedField(row, "restorePointSetting", "userRestoreEnabled")), 9,
+            FormatBooleanCell(GetNestedField(row, "crossRegionDisasterRecoverySetting", "crossRegionDisasterRecoveryEnabled")), 8);
+    }
+
+    private static string GetNestedField(GraphTableRow row, string objectName, string propertyName)
+    {
+        var value = GetOptionalField(row, propertyName);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        var raw = GetOptionalField(row, objectName);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "-";
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(raw);
+            if (document.RootElement.TryGetProperty(propertyName, out var property))
+            {
+                return property.ValueKind switch
+                {
+                    System.Text.Json.JsonValueKind.String => property.GetString() ?? "-",
+                    System.Text.Json.JsonValueKind.True => "true",
+                    System.Text.Json.JsonValueKind.False => "false",
+                    System.Text.Json.JsonValueKind.Number => property.GetRawText(),
+                    _ => "-"
+                };
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return "-";
+        }
+
+        return "-";
+    }
+
+    private static string FormatBooleanCell(string value)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "true" => "Yes",
+            "false" => "No",
+            _ => value
+        };
+    }
+
+    private static string FormatDateCell(string value)
+    {
+        if (DateTimeOffset.TryParse(value, out var parsed))
+        {
+            return parsed.ToLocalTime().ToString("g");
+        }
+
+        return value;
     }
 
     private static string GetSwitchValue(GraphTableRow row)
@@ -2910,6 +3019,7 @@ internal sealed class W365CliApp
         AnsiConsole.MarkupLine("[cyan]W365 CLI Native[/]");
         AnsiConsole.MarkupLine("A native .NET rewrite experiment for Windows 365 Cloud PC workflows.");
         AnsiConsole.MarkupLine("This project does not depend on the PowerShell W365CLI module.");
+        AnsiConsole.MarkupLine("[grey]GitHub:[/] https://github.com/bwya77/W365-CLI-Native");
         Pause();
     }
 
