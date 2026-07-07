@@ -79,7 +79,7 @@ internal sealed class W365CliApp
             {
                 var escaped = Markup.Escape(choices[index]);
                 AnsiConsole.MarkupLine(index == selectedIndex
-                    ? $"[white on blue]> {escaped}[/]"
+                    ? $"[black on cyan]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
@@ -259,7 +259,7 @@ internal sealed class W365CliApp
 
             var escaped = Markup.Escape(label);
             AnsiConsole.MarkupLine(index == selectedIndex
-                ? $"[white on blue]> {escaped}[/]"
+                ? $"[black on cyan]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -459,7 +459,7 @@ internal sealed class W365CliApp
                 item.Snapshot.ExpirationDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Expires);
             var escaped = Markup.Escape(row);
             AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                ? $"[white on blue]> {escaped}[/]"
+                ? $"[black on cyan]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -744,7 +744,7 @@ internal sealed class W365CliApp
             {
                 var escaped = Markup.Escape(choices[index]);
                 AnsiConsole.MarkupLine(index == selectedIndex
-                    ? $"[white on blue]> {escaped}[/]"
+                    ? $"[black on cyan]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
@@ -879,7 +879,7 @@ internal sealed class W365CliApp
                 var absoluteIndex = start + index;
                 var escaped = Markup.Escape(visible[index]);
                 AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                    ? $"[white on blue]> {escaped}[/]"
+                    ? $"[black on cyan]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
@@ -1138,7 +1138,7 @@ internal sealed class W365CliApp
                     : Row(pc.Name, widths.Name, pc.Status ?? "-", widths.Status, pc.UserPrincipalName ?? "-", widths.User);
                 var escaped = Markup.Escape(row);
                 AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                    ? $"[white on blue]> {escaped}[/]"
+                    ? $"[black on cyan]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
@@ -1226,7 +1226,7 @@ internal sealed class W365CliApp
             var absoluteIndex = start + index;
             var escaped = Markup.Escape(rowFactory(visible[index]));
             AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                ? $"[white on blue]> {escaped}[/]"
+                ? $"[black on cyan]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -1938,7 +1938,7 @@ internal sealed class W365CliApp
             var selected = index == selectedIndex;
             var row = new List<string>
             {
-                selected ? "[white on blue]>[/]" : " ",
+                selected ? "[black on cyan]>[/]" : " ",
                 selected ? Selected(Markup.Escape(Fit(pc.Status ?? "unknown", 12))) : StatusMarkup(pc.Status),
                 selected ? Selected(Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type)),
                 selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name))
@@ -2065,7 +2065,7 @@ internal sealed class W365CliApp
             var selected = index == selectedIndex;
             var row = new List<string>
             {
-                selected ? "[white on blue]>[/]" : " ",
+                selected ? "[black on cyan]>[/]" : " ",
                 selected ? Selected(Markup.Escape(Fit(app.AppStatus ?? "unknown", widths.Status))) : AppStatusMarkup(app.AppStatus, widths.Status),
                 selected ? Selected(Markup.Escape(Fit(app.DisplayName, widths.Name))) : Markup.Escape(Fit(app.DisplayName, widths.Name))
             };
@@ -2245,12 +2245,12 @@ internal sealed class W365CliApp
 
     private static string Selected(string escapedText)
     {
-        return $"[white on blue]{escapedText}[/]";
+        return $"[black on cyan]{escapedText}[/]";
     }
 
     private static Style SelectionHighlightStyle()
     {
-        return new Style(Color.White, Color.Blue);
+        return new Style(Color.Black, Color.Cyan);
     }
 
     private static string Row(params object[] valuesAndWidths)
@@ -2506,7 +2506,7 @@ internal sealed class W365CliApp
 
         var actionLines = actions
             .Select((action, index) => index == selectedActionIndex
-                ? $"[white on blue]> {Markup.Escape(action)}[/]"
+                ? $"[black on cyan]> {Markup.Escape(action)}[/]"
                 : $"  {Markup.Escape(action)}");
 
         var rightPanel = activeSubPanel switch
@@ -2837,7 +2837,7 @@ internal sealed class W365CliApp
 
             var escaped = Markup.Escape(row);
             AnsiConsole.MarkupLine(absoluteIndex == selectedPlanIndex
-                ? $"[white on blue]> {escaped}[/]"
+                ? $"[black on cyan]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -2979,7 +2979,7 @@ internal sealed class W365CliApp
             .Border(BoxBorder.Rounded);
 
         var actionLines = actions.Select((action, index) => index == selectedActionIndex
-            ? $"[white on blue]> {Markup.Escape(action)}[/]"
+            ? $"[black on cyan]> {Markup.Escape(action)}[/]"
             : $"  {Markup.Escape(action)}");
 
         var actionsPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
