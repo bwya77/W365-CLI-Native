@@ -159,6 +159,12 @@ internal sealed class W365CliApp
                         ShowCloudPcDetails(visibleCloudPcs[selectedIndex]);
                     }
                     break;
+                case ConsoleKey.A:
+                    if (visibleCloudPcs.Count > 0)
+                    {
+                        ShowCloudPcActions(visibleCloudPcs[selectedIndex]);
+                    }
+                    break;
                 case ConsoleKey.R:
                     cloudPcs = await LoadCloudPcsAsync();
                     selectedIndex = 0;
@@ -282,8 +288,16 @@ internal sealed class W365CliApp
 
         RenderCompactHeader();
         AnsiConsole.Write(CreateCloudPcSummaryPanel(allCloudPcs, visibleCloudPcs, filter));
-        AnsiConsole.Write(grid);
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | / filter | C clear | R refresh | Esc back[/]");
+        if (Console.WindowWidth >= 125)
+        {
+            AnsiConsole.Write(grid);
+        }
+        else
+        {
+            AnsiConsole.Write(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter));
+            AnsiConsole.Write(CreateCloudPcSidePanel(selectedCloudPc));
+        }
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | A actions | / filter | C clear | R refresh | Esc back[/]");
     }
 
     private void RenderCompactHeader()
@@ -331,13 +345,33 @@ internal sealed class W365CliApp
             .AddColumn(" ")
             .AddColumn("Status")
             .AddColumn("Type")
-            .AddColumn("Name")
-            .AddColumn("User")
-            .AddColumn("Service plan");
+            .AddColumn("Name");
+
+        var showUser = Console.WindowWidth >= 105;
+        var showServicePlan = Console.WindowWidth >= 135;
+
+        if (showUser)
+        {
+            table.AddColumn("User");
+        }
+
+        if (showServicePlan)
+        {
+            table.AddColumn("Service plan");
+        }
 
         if (visibleCloudPcs.Count == 0)
         {
-            table.AddRow("-", "-", "-", "[grey]No Cloud PCs match the current filter.[/]", "-", "-");
+            var emptyCells = new List<string> { "-", "-", "-", "[grey]No Cloud PCs match the current filter.[/]" };
+            if (showUser)
+            {
+                emptyCells.Add("-");
+            }
+            if (showServicePlan)
+            {
+                emptyCells.Add("-");
+            }
+            table.AddRow(emptyCells.ToArray());
             return table;
         }
 
@@ -349,13 +383,25 @@ internal sealed class W365CliApp
         {
             var pc = visibleCloudPcs[index];
             var selected = index == selectedIndex;
-            table.AddRow(
-                selected ? "[black on aqua]>[/]" : " ",
+            var row = new List<string>
+            {
+                selected ? "[white on blue]>[/]" : " ",
                 selected ? Selected(Markup.Escape(Fit(pc.Status ?? "unknown", 12))) : StatusMarkup(pc.Status),
                 selected ? Selected(Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type)),
-                selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name)),
-                selected ? Selected(Markup.Escape(Fit(pc.UserPrincipalName ?? "-", widths.User))) : Markup.Escape(Fit(pc.UserPrincipalName ?? "-", widths.User)),
-                selected ? Selected(Markup.Escape(Fit(pc.ServicePlanName ?? "-", widths.ServicePlan))) : Markup.Escape(Fit(pc.ServicePlanName ?? "-", widths.ServicePlan)));
+                selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name))
+            };
+
+            if (showUser)
+            {
+                row.Add(selected ? Selected(Markup.Escape(Fit(pc.UserPrincipalName ?? "-", widths.User))) : Markup.Escape(Fit(pc.UserPrincipalName ?? "-", widths.User)));
+            }
+
+            if (showServicePlan)
+            {
+                row.Add(selected ? Selected(Markup.Escape(Fit(pc.ServicePlanName ?? "-", widths.ServicePlan))) : Markup.Escape(Fit(pc.ServicePlanName ?? "-", widths.ServicePlan)));
+            }
+
+            table.AddRow(row.ToArray());
         }
 
         return table;
@@ -377,7 +423,7 @@ internal sealed class W365CliApp
             new Markup($"[bold]User[/]\n{Markup.Escape(cloudPc.UserPrincipalName ?? "-")}"),
             new Markup($"[bold]Service plan[/]\n{Markup.Escape(cloudPc.ServicePlanName ?? "-")}"),
             new Markup($"[bold]Cloud PC ID[/]\n[grey]{Markup.Escape(cloudPc.Id)}[/]"),
-            new Markup("[bold]Available actions[/]\n[grey]Details, resize, snapshots, restart, sync, reprovision[/]"));
+            new Markup("[bold]Actions[/]\n[grey]Press A to open actions for this Cloud PC.[/]"));
 
         return new Panel(content)
             .Header("Selected Cloud PC")
@@ -417,10 +463,10 @@ internal sealed class W365CliApp
         var text = status ?? "unknown";
         var color = text.ToLowerInvariant() switch
         {
-            "provisioned" or "available" or "ready" => "green",
-            "provisioning" or "pending" or "inprogress" => "yellow",
-            "failed" or "error" => "red",
-            "ingraceperiod" => "magenta",
+            "provisioned" or "available" or "ready" => "darkolivegreen3_1",
+            "provisioning" or "pending" or "inprogress" => "khaki1",
+            "failed" or "error" => "indianred1",
+            "ingraceperiod" => "plum1",
             _ => "grey"
         };
 
@@ -429,7 +475,45 @@ internal sealed class W365CliApp
 
     private static string Selected(string escapedText)
     {
-        return $"[black on aqua]{escapedText}[/]";
+        return $"[white on blue]{escapedText}[/]";
+    }
+
+    private static void ShowCloudPcActions(CloudPcSummary cloudPc)
+    {
+        while (true)
+        {
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine($"[cyan]Cloud PC actions[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
+            AnsiConsole.WriteLine();
+
+            var action = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[cyan]Choose an action[/]")
+                    .PageSize(12)
+                    .AddChoices(
+                        "Details",
+                        "Snapshots",
+                        "Resize",
+                        "Restart",
+                        "Sync",
+                        "Reprovision",
+                        "Remote action history",
+                        "Back"));
+
+            switch (action)
+            {
+                case "Details":
+                    ShowCloudPcDetails(cloudPc);
+                    break;
+                case "Back":
+                    return;
+                default:
+                    AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(action)} is not implemented in the native CLI yet.[/]");
+                    AnsiConsole.MarkupLine("[grey]This is where the native action workflow will be added next.[/]");
+                    Pause();
+                    break;
+            }
+        }
     }
 
     private static string Row(params object[] valuesAndWidths)
@@ -466,7 +550,7 @@ internal sealed class W365CliApp
         const int status = 12;
         const int type = 10;
         var remaining = Math.Max(40, available - status - type - 4);
-        var name = Math.Max(24, (int)(remaining * 0.32));
+        var name = Console.WindowWidth < 105 ? Math.Max(28, remaining - 4) : Math.Max(24, (int)(remaining * 0.32));
         var user = Math.Max(24, (int)(remaining * 0.34));
         var servicePlan = Math.Max(24, remaining - name - user);
         return (name, status, type, user, servicePlan);
