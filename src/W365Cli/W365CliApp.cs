@@ -371,33 +371,136 @@ internal sealed class W365CliApp
             "actionStatusReport",
             "performanceTrendReport",
             "regionalConnectionQualityTrendReport",
-            "cloudPcUsageCategoryReport",
-            "Back"
+            "cloudPcUsageCategoryReport"
         };
 
         while (true)
         {
-            AnsiConsole.Clear();
-            var reportName = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title("[cyan]Cloud PC report[/]")
-                    .PageSize(12)
-                    .AddChoices(reportNames));
-
-            if (reportName == "Back")
+            var reportName = SelectCloudPcReportName(reportNames);
+            if (reportName is null)
             {
                 return;
             }
 
-            var top = AnsiConsole.Prompt(
-                new TextPrompt<int>("Top rows:")
-                    .DefaultValue(50)
-                    .Validate(value => value > 0 ? ValidationResult.Success() : ValidationResult.Error("Enter a positive row count.")));
+            var top = PromptTopRows();
+            if (top is null)
+            {
+                continue;
+            }
 
             await ShowGraphRowsAsync(
                 $"Report: {reportName}",
-                async () => await _session.Graph.GetCloudPcReportRowsAsync(reportName, top),
+                async () => await _session.Graph.GetCloudPcReportRowsAsync(reportName, top.Value),
                 enterAction: OpenCloudPcFromReportRowAsync);
+        }
+    }
+
+    private static string? SelectCloudPcReportName(IReadOnlyList<string> reportNames)
+    {
+        var selectedIndex = 0;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine("[cyan]Cloud PC report[/]");
+            AnsiConsole.WriteLine();
+
+            var pageSize = Math.Max(8, Console.WindowHeight - 7);
+            var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, reportNames.Count - pageSize));
+            var visible = reportNames.Skip(start).Take(pageSize).ToArray();
+            for (var index = 0; index < visible.Length; index++)
+            {
+                var absoluteIndex = start + index;
+                var escaped = Markup.Escape(visible[index]);
+                AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
+                    ? $"[white on blue]> {escaped}[/]"
+                    : $"  {escaped}");
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter select | Esc/B/Q back[/]");
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(reportNames.Count - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(reportNames.Count - 1, selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = reportNames.Count - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    return reportNames[selectedIndex];
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return null;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return null;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static int? PromptTopRows()
+    {
+        var input = string.Empty;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine("[cyan]Top rows[/]");
+            AnsiConsole.MarkupLine("[grey]Enter a positive number, press Enter for 50, or Esc/B/Q to go back.[/]");
+            AnsiConsole.WriteLine();
+            AnsiConsole.Markup($"Top rows [50]: {Markup.Escape(input)}");
+
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.Enter:
+                    if (string.IsNullOrWhiteSpace(input))
+                    {
+                        return 50;
+                    }
+
+                    if (int.TryParse(input, out var top) && top > 0)
+                    {
+                        return top;
+                    }
+
+                    TimedMessage("[yellow]Enter a positive row count.[/]");
+                    break;
+                case ConsoleKey.Backspace:
+                    if (input.Length > 0)
+                    {
+                        input = input[..^1];
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                    return null;
+                default:
+                    if (string.IsNullOrWhiteSpace(input) && key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return null;
+                    }
+
+                    if (char.IsDigit(key.KeyChar))
+                    {
+                        input += key.KeyChar;
+                    }
+                    break;
+            }
         }
     }
 
