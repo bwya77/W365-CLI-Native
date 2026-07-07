@@ -1381,37 +1381,93 @@ internal sealed class W365CliApp
             return;
         }
 
+        var selectedPlanIndex = plans
+            .Select((plan, index) => new { plan, index })
+            .FirstOrDefault(item => string.Equals(item.plan.Name, cloudPc.ServicePlanName, StringComparison.OrdinalIgnoreCase))
+            ?.index ?? 0;
+
         while (true)
         {
-            RenderCompactHeader();
+            AnsiConsole.Clear();
             AnsiConsole.MarkupLine($"[cyan]Resize[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
             AnsiConsole.MarkupLine($"Current service plan: [grey]{Markup.Escape(cloudPc.ServicePlanName ?? "-")}[/]");
             AnsiConsole.WriteLine();
 
-            var plan = SelectFromTable(
-                "Select target service plan",
-                Row("Name", 46, "Type", 12, "vCPU", 6, "RAM", 8, "Storage", 10, "Profile", 10),
-                plans,
-                item => Row(
-                    item.Name, 46,
-                    item.Type ?? "-", 12,
-                    item.VCpuCount?.ToString() ?? "-", 6,
-                    item.RamGb is null ? "-" : $"{item.RamGb} GB", 8,
-                    item.StorageGb is null ? "-" : $"{item.StorageGb} GB", 10,
-                    item.UserProfileGb is null ? "-" : $"{item.UserProfileGb} GB", 10));
+            RenderServicePlanTable(plans, selectedPlanIndex);
+            var key = Console.ReadKey(intercept: true);
 
-            if (plan is null)
+            switch (key.Key)
             {
-                return;
+                case ConsoleKey.UpArrow:
+                    selectedPlanIndex = Math.Max(0, selectedPlanIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedPlanIndex = Math.Min(plans.Count - 1, selectedPlanIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedPlanIndex = Math.Max(0, selectedPlanIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedPlanIndex = Math.Min(plans.Count - 1, selectedPlanIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedPlanIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedPlanIndex = plans.Count - 1;
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                case ConsoleKey.Enter:
+                    var plan = plans[selectedPlanIndex];
+                    await ConfirmAndRunAsync(
+                        "Resize",
+                        $"{cloudPc.Name} to {plan.Name}",
+                        async () => await _session.Graph.ResizeCloudPcAsync(cloudPc.Id, plan.Id));
+
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
             }
-
-            await ConfirmAndRunAsync(
-                "Resize",
-                $"{cloudPc.Name} to {plan.Name}",
-                async () => await _session.Graph.ResizeCloudPcAsync(cloudPc.Id, plan.Id));
-
-            return;
         }
+    }
+
+    private static void RenderServicePlanTable(IReadOnlyList<CloudPcServicePlan> plans, int selectedPlanIndex)
+    {
+        AnsiConsole.MarkupLine("[cyan]Select target service plan[/]");
+        var header = Row("Name", 46, "Type", 12, "vCPU", 6, "RAM", 8, "Storage", 10, "Profile", 10);
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
+
+        var pageSize = Math.Max(8, Console.WindowHeight - 10);
+        var start = Math.Clamp(selectedPlanIndex - pageSize / 2, 0, Math.Max(0, plans.Count - pageSize));
+        var visible = plans.Skip(start).Take(pageSize).ToArray();
+
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var plan = visible[index];
+            var absoluteIndex = start + index;
+            var row = Row(
+                plan.Name, 46,
+                plan.Type ?? "-", 12,
+                plan.VCpuCount?.ToString() ?? "-", 6,
+                plan.RamGb is null ? "-" : $"{plan.RamGb} GB", 8,
+                plan.StorageGb is null ? "-" : $"{plan.StorageGb} GB", 10,
+                plan.UserProfileGb is null ? "-" : $"{plan.UserProfileGb} GB", 10);
+
+            var escaped = Markup.Escape(row);
+            AnsiConsole.MarkupLine(absoluteIndex == selectedPlanIndex
+                ? $"[white on blue]> {escaped}[/]"
+                : $"  {escaped}");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter resize | Esc/B/Q back[/]");
     }
 
     private async Task ShowRenameAsync(CloudPcSummary cloudPc)
