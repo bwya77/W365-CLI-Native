@@ -85,6 +85,51 @@ internal sealed class W365GraphClient
         await PostJsonAsync($"deviceManagement/managedDevices/{Uri.EscapeDataString(managedDeviceId)}/syncDevice", new { });
     }
 
+    public async Task<IReadOnlyList<CloudPcDiskSpace>> GetCloudPcDiskSpacesAsync(IReadOnlyList<CloudPcSummary>? cloudPcs = null)
+    {
+        cloudPcs ??= await GetCloudPcsAsync();
+        var results = new List<CloudPcDiskSpace>();
+
+        foreach (var cloudPc in cloudPcs)
+        {
+            ManagedDeviceDiskInfo? managedDevice = null;
+            if (!string.IsNullOrWhiteSpace(cloudPc.ManagedDeviceId))
+            {
+                var escapedManagedDeviceId = Uri.EscapeDataString(cloudPc.ManagedDeviceId);
+                managedDevice = await GetAsync<ManagedDeviceDiskInfo>(
+                    $"deviceManagement/managedDevices/{escapedManagedDeviceId}?$select=id,deviceName,totalStorageSpaceInBytes,freeStorageSpaceInBytes,lastSyncDateTime");
+            }
+
+            var totalGb = ToGb(managedDevice?.TotalStorageSpaceInBytes);
+            var freeGb = ToGb(managedDevice?.FreeStorageSpaceInBytes);
+            double? usedGb = totalGb is not null && freeGb is not null
+                ? Math.Round(totalGb.Value - freeGb.Value, 2)
+                : null;
+            double? percentFree = totalGb is > 0 && freeGb is not null
+                ? Math.Round((freeGb.Value / totalGb.Value) * 100, 1)
+                : null;
+
+            results.Add(new CloudPcDiskSpace
+            {
+                CloudPcId = cloudPc.Id,
+                CloudPcName = cloudPc.Name,
+                AssignedUserUpn = cloudPc.UserPrincipalName,
+                ManagedDeviceId = cloudPc.ManagedDeviceId,
+                ManagedDeviceName = managedDevice?.DeviceName ?? cloudPc.ManagedDeviceName,
+                TotalStorageGb = totalGb,
+                FreeStorageGb = freeGb,
+                UsedStorageGb = usedGb,
+                PercentFree = percentFree,
+                LastSyncDateTime = managedDevice?.LastSyncDateTime
+            });
+        }
+
+        return results
+            .OrderBy(item => item.PercentFree ?? double.MaxValue)
+            .ThenBy(item => item.CloudPcName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
     {
         if (_accessTokenProvider is null)
@@ -120,6 +165,21 @@ internal sealed class W365GraphClient
         return output;
     }
 
+    private async Task<T?> GetAsync<T>(string relativeUri)
+    {
+        if (_accessTokenProvider is null)
+        {
+            throw new InvalidOperationException("Not connected to Microsoft Graph.");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, relativeUri);
+        await AuthorizeAsync(request);
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions);
+    }
+
     private async Task PostJsonAsync(string relativeUri, object body)
     {
         if (_accessTokenProvider is null)
@@ -140,5 +200,10 @@ internal sealed class W365GraphClient
     {
         var token = await _accessTokenProvider!();
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+
+    private static double? ToGb(long? bytes)
+    {
+        return bytes is null ? null : Math.Round(bytes.Value / 1024d / 1024d / 1024d, 2);
     }
 }

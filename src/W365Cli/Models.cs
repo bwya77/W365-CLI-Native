@@ -70,6 +70,47 @@ internal sealed record CloudAppSummary
         : AppName ?? DiscoveredAppName ?? Id;
 }
 
+internal sealed record ManagedDeviceDiskInfo
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("deviceName")]
+    public string? DeviceName { get; init; }
+
+    [JsonPropertyName("totalStorageSpaceInBytes")]
+    public long? TotalStorageSpaceInBytes { get; init; }
+
+    [JsonPropertyName("freeStorageSpaceInBytes")]
+    public long? FreeStorageSpaceInBytes { get; init; }
+
+    [JsonPropertyName("lastSyncDateTime")]
+    public DateTimeOffset? LastSyncDateTime { get; init; }
+}
+
+internal sealed record CloudPcDiskSpace
+{
+    public string CloudPcId { get; init; } = string.Empty;
+
+    public string CloudPcName { get; init; } = string.Empty;
+
+    public string? AssignedUserUpn { get; init; }
+
+    public string? ManagedDeviceId { get; init; }
+
+    public string? ManagedDeviceName { get; init; }
+
+    public double? TotalStorageGb { get; init; }
+
+    public double? FreeStorageGb { get; init; }
+
+    public double? UsedStorageGb { get; init; }
+
+    public double? PercentFree { get; init; }
+
+    public DateTimeOffset? LastSyncDateTime { get; init; }
+}
+
 internal sealed record OrganizationSummary
 {
     [JsonPropertyName("id")]

@@ -34,6 +34,9 @@ internal sealed class W365CliApp
                 case "CloudPcs":
                     await ShowCloudPcsAsync();
                     break;
+                case "DiskSpace":
+                    await ShowDiskSpaceAsync();
+                    break;
                 case "CloudApps":
                     await ShowCloudAppsAsync();
                     break;
@@ -55,7 +58,80 @@ internal sealed class W365CliApp
                 case "Exit":
                     return 0;
             }
+    }
+
+    }
+
+    private async Task ShowDiskSpaceAsync(CloudPcSummary? cloudPc = null)
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
         }
+
+        var items = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading Cloud PC disk space...", async _ =>
+            {
+                IReadOnlyList<CloudPcSummary>? targets = cloudPc is null ? null : new[] { cloudPc };
+                return await _session.Graph.GetCloudPcDiskSpacesAsync(targets);
+            });
+
+        if (items.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No disk space rows returned.[/]");
+            Pause();
+            return;
+        }
+
+        while (true)
+        {
+            RenderCompactHeader();
+            var item = SelectFromTable(
+                cloudPc is null ? "Windows 365 Cloud PC disk space" : $"Disk space for {cloudPc.Name}",
+                Row("Cloud PC", 34, "Free", 10, "Used", 10, "Total", 10, "Free %", 8, "Last sync", 20),
+                items,
+                disk => Row(
+                    disk.CloudPcName, 34,
+                    FormatGb(disk.FreeStorageGb), 10,
+                    FormatGb(disk.UsedStorageGb), 10,
+                    FormatGb(disk.TotalStorageGb), 10,
+                    disk.PercentFree is null ? "-" : $"{disk.PercentFree}%", 8,
+                    disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-", 20));
+
+            if (item is null)
+            {
+                return;
+            }
+
+            ShowDiskSpaceDetails(item);
+        }
+    }
+
+    private static void ShowDiskSpaceDetails(CloudPcDiskSpace disk)
+    {
+        AnsiConsole.Clear();
+        var panel = new Panel(
+            new Rows(
+                new Markup($"[bold]Cloud PC:[/] {Markup.Escape(disk.CloudPcName)}"),
+                new Markup($"[bold]Managed device:[/] {Markup.Escape(disk.ManagedDeviceName ?? "-")}"),
+                new Markup($"[bold]User:[/] {Markup.Escape(disk.AssignedUserUpn ?? "-")}"),
+                new Markup($"[bold]Free:[/] {Markup.Escape(FormatGb(disk.FreeStorageGb))}"),
+                new Markup($"[bold]Used:[/] {Markup.Escape(FormatGb(disk.UsedStorageGb))}"),
+                new Markup($"[bold]Total:[/] {Markup.Escape(FormatGb(disk.TotalStorageGb))}"),
+                new Markup($"[bold]Percent free:[/] {Markup.Escape(disk.PercentFree is null ? "-" : $"{disk.PercentFree}%")}"),
+                new Markup($"[bold]Last sync:[/] {Markup.Escape(disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
+                new Markup($"[bold]Cloud PC ID:[/] [grey]{Markup.Escape(disk.CloudPcId)}[/]"),
+                new Markup($"[bold]Managed device ID:[/] [grey]{Markup.Escape(disk.ManagedDeviceId ?? "-")}[/]")))
+            .Header("Disk space details")
+            .Border(BoxBorder.Rounded);
+        AnsiConsole.Write(panel);
+        Pause();
+    }
+
+    private static string FormatGb(double? value)
+    {
+        return value is null ? "-" : $"{value:0.##} GB";
     }
 
     private IReadOnlyList<MenuChoice> GetMainMenuChoices()
@@ -67,6 +143,7 @@ internal sealed class W365CliApp
         return
         [
             new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs"),
+            new("DiskSpace", "Disk space", "View Cloud PC disk capacity and free space"),
             new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows"),
             new("Reports", "Reports", "Usage, connectivity, launch details, report streams"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
@@ -792,6 +869,7 @@ internal sealed class W365CliApp
     {
         var actions = new[]
         {
+            "Disk space",
             "Snapshots",
             "Resize",
             "Restart",
@@ -890,6 +968,9 @@ internal sealed class W365CliApp
     {
         switch (action)
         {
+            case "Disk space":
+                await ShowDiskSpaceAsync(cloudPc);
+                break;
             case "Restart":
                 await ConfirmAndRunAsync("Restart", cloudPc.Name, async () => await _session.Graph.RestartCloudPcAsync(cloudPc.Id));
                 break;
