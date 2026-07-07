@@ -175,8 +175,25 @@ internal sealed class W365CliApp
                 return;
             }
 
-            ShowDiskSpaceDetails(item);
+            await OpenCloudPcFromDiskSpaceAsync(item);
         }
+    }
+
+    private async Task OpenCloudPcFromDiskSpaceAsync(CloudPcDiskSpace disk)
+    {
+        var cloudPcs = await LoadCloudPcsAsync();
+        var cloudPc = cloudPcs.FirstOrDefault(pc =>
+            string.Equals(pc.Id, disk.CloudPcId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(pc.ManagedDeviceId, disk.ManagedDeviceId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(pc.Name, disk.CloudPcName, StringComparison.OrdinalIgnoreCase));
+
+        if (cloudPc is null)
+        {
+            ShowDiskSpaceDetails(disk);
+            return;
+        }
+
+        await ShowCloudPcDetailsAsync(cloudPc);
     }
 
     private async Task ShowAllSnapshotsAsync()
@@ -220,6 +237,10 @@ internal sealed class W365CliApp
                     selectedIndex = items.Count - 1;
                     break;
                 case ConsoleKey.Enter:
+                    await ShowCloudPcDetailsAsync(items[selectedIndex].CloudPc);
+                    break;
+                case ConsoleKey.A:
+                case ConsoleKey.S:
                     await ShowSnapshotActionMenuAsync(items[selectedIndex].CloudPc, items[selectedIndex].Snapshot);
                     items = await LoadAllSnapshotsAsync();
                     selectedIndex = Math.Min(selectedIndex, Math.Max(0, items.Count - 1));
@@ -303,7 +324,7 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter actions | R refresh | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | S snapshot actions | R refresh | Esc/B/Q back[/]");
     }
 
     private static (int CloudPc, int Status, int Type, int Created, int Expires) GetAllSnapshotWidths()
