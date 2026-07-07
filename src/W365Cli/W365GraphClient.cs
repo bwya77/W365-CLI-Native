@@ -200,14 +200,35 @@ internal sealed class W365GraphClient
         });
     }
 
-    public async Task DeleteSnapshotAsync(string snapshotId)
+    public async Task DeleteSnapshotAsync(string cloudPcId, string snapshotId)
     {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Delete,
-            $"deviceManagement/virtualEndpoint/snapshots/{Uri.EscapeDataString(snapshotId)}");
-        await AuthorizeAsync(request);
-        using var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
+        var escapedSnapshotId = Uri.EscapeDataString(snapshotId);
+        var attempts = new List<string>
+        {
+            $"deviceManagement/virtualEndpoint/snapshots/{escapedSnapshotId}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(cloudPcId))
+        {
+            attempts.Add($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/snapshots/{escapedSnapshotId}");
+        }
+
+        var errors = new List<string>();
+        foreach (var relativeUri in attempts)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Delete, relativeUri);
+            await AuthorizeAsync(request);
+            using var response = await _httpClient.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            var body = await response.Content.ReadAsStringAsync();
+            errors.Add($"{relativeUri} returned {(int)response.StatusCode} {response.ReasonPhrase}. {body}");
+        }
+
+        throw new HttpRequestException($"Snapshot delete failed. Attempted: {string.Join("; ", errors)}");
     }
 
     public async Task<IReadOnlyList<CloudPcRemoteActionResult>> GetCloudPcRemoteActionResultsAsync(CloudPcSummary cloudPc)
