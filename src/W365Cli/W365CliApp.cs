@@ -9,6 +9,9 @@ internal sealed class W365CliApp
     public async Task<int> RunAsync(string[] args)
     {
         Console.Title = "W365 CLI Native";
+        await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Checking cached sign-in...", async _ => await _session.TryRestoreAsync());
 
         while (true)
         {
@@ -93,7 +96,7 @@ internal sealed class W365CliApp
                 Pause();
                 break;
             case "Disconnect":
-                _session.Disconnect();
+                await _session.DisconnectAsync();
                 AnsiConsole.MarkupLine("[green]Disconnected.[/]");
                 Pause();
                 break;
@@ -121,16 +124,17 @@ internal sealed class W365CliApp
         while (true)
         {
             RenderHeader();
+            var cloudPcWidths = GetCloudPcWidths();
             var cloudPc = SelectFromTable(
                 title: "Windows 365 Cloud PCs",
-                header: Row("Name", 34, "Status", 14, "Type", 12, "User", 34, "Service plan", 36),
+                header: Row("Name", cloudPcWidths.Name, "Status", cloudPcWidths.Status, "Type", cloudPcWidths.Type, "User", cloudPcWidths.User, "Service plan", cloudPcWidths.ServicePlan),
                 items: cloudPcs,
                 rowFactory: pc => Row(
-                    pc.Name, 34,
-                    pc.Status ?? "-", 14,
-                    pc.ProvisioningType ?? "-", 12,
-                    pc.UserPrincipalName ?? "-", 34,
-                    pc.ServicePlanName ?? "-", 36));
+                    pc.Name, cloudPcWidths.Name,
+                    pc.Status ?? "-", cloudPcWidths.Status,
+                    pc.ProvisioningType ?? "-", cloudPcWidths.Type,
+                    pc.UserPrincipalName ?? "-", cloudPcWidths.User,
+                    pc.ServicePlanName ?? "-", cloudPcWidths.ServicePlan));
 
             if (cloudPc is null)
             {
@@ -173,16 +177,17 @@ internal sealed class W365CliApp
         while (true)
         {
             RenderHeader();
+            var cloudAppWidths = GetCloudAppWidths();
             var app = SelectFromTable(
                 title: "Windows 365 Cloud Apps",
-                header: Row("Status", 12, "Name", 52, "Publisher", 24, "Published", 22, "Added", 22),
+                header: Row("Status", cloudAppWidths.Status, "Name", cloudAppWidths.Name, "Publisher", cloudAppWidths.Publisher, "Published", cloudAppWidths.Published, "Added", cloudAppWidths.Added),
                 items: apps,
                 rowFactory: cloudApp => Row(
-                    cloudApp.AppStatus ?? "-", 12,
-                    cloudApp.DisplayName, 52,
-                    cloudApp.Publisher ?? "-", 24,
-                    cloudApp.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-", 22,
-                    cloudApp.AddedDateTime?.ToLocalTime().ToString("g") ?? "-", 22));
+                    cloudApp.AppStatus ?? "-", cloudAppWidths.Status,
+                    cloudApp.DisplayName, cloudAppWidths.Name,
+                    cloudApp.Publisher ?? "-", cloudAppWidths.Publisher,
+                    cloudApp.LastPublishedDateTime?.ToLocalTime().ToString("g") ?? "-", cloudAppWidths.Published,
+                    cloudApp.AddedDateTime?.ToLocalTime().ToString("g") ?? "-", cloudAppWidths.Added));
 
             if (app is null)
             {
@@ -240,6 +245,30 @@ internal sealed class W365CliApp
         }
 
         return value.PadRight(width);
+    }
+
+    private static (int Name, int Status, int Type, int User, int ServicePlan) GetCloudPcWidths()
+    {
+        var available = Math.Max(90, Console.WindowWidth - 4);
+        const int status = 12;
+        const int type = 10;
+        var remaining = Math.Max(40, available - status - type - 4);
+        var name = Math.Max(24, (int)(remaining * 0.32));
+        var user = Math.Max(24, (int)(remaining * 0.34));
+        var servicePlan = Math.Max(24, remaining - name - user);
+        return (name, status, type, user, servicePlan);
+    }
+
+    private static (int Status, int Name, int Publisher, int Published, int Added) GetCloudAppWidths()
+    {
+        var available = Math.Max(90, Console.WindowWidth - 4);
+        const int status = 12;
+        const int published = 18;
+        const int added = 18;
+        var remaining = Math.Max(40, available - status - published - added - 4);
+        var name = Math.Max(30, (int)(remaining * 0.65));
+        var publisher = Math.Max(18, remaining - name);
+        return (status, name, publisher, published, added);
     }
 
     private static void ShowCloudPcDetails(CloudPcSummary cloudPc)

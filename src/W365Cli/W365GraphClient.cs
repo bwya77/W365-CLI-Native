@@ -1,22 +1,19 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Azure.Core;
 
 namespace W365Cli;
 
 internal sealed class W365GraphClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly TokenCredential? _credential;
-    private readonly string[] _scopes;
+    private readonly Func<Task<string>>? _accessTokenProvider;
     private readonly HttpClient _httpClient;
 
-    public static W365GraphClient NotConnected { get; } = new(null, []);
+    public static W365GraphClient NotConnected { get; } = new(null);
 
-    public W365GraphClient(TokenCredential? credential, string[] scopes)
+    public W365GraphClient(Func<Task<string>>? accessTokenProvider)
     {
-        _credential = credential;
-        _scopes = scopes;
+        _accessTokenProvider = accessTokenProvider;
         _httpClient = new HttpClient
         {
             BaseAddress = new Uri("https://graph.microsoft.com/beta/")
@@ -54,7 +51,7 @@ internal sealed class W365GraphClient
 
     private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
     {
-        if (_credential is null)
+        if (_accessTokenProvider is null)
         {
             throw new InvalidOperationException("Not connected to Microsoft Graph.");
         }
@@ -89,7 +86,7 @@ internal sealed class W365GraphClient
 
     private async Task AuthorizeAsync(HttpRequestMessage request)
     {
-        var token = await _credential!.GetTokenAsync(new TokenRequestContext(_scopes), CancellationToken.None);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+        var token = await _accessTokenProvider!();
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
 }

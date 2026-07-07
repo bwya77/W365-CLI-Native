@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.85.2" />
+    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.85.2" />
     <PackageReference Include="Spectre.Console" Version="0.57.2" />
     <PackageReference Include="System.Text.Json" Version="10.0.9" />
   </ItemGroup>

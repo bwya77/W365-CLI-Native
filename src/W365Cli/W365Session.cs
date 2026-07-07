@@ -1,5 +1,5 @@
-using Azure.Core;
-using Azure.Identity;
+using Microsoft.Identity.Client;
+using Microsoft.Identity.Client.Extensions.Msal;
 using Spectre.Console;
 
 namespace W365Cli;
@@ -13,7 +13,8 @@ internal sealed class W365Session
         "https://graph.microsoft.com/.default"
     ];
 
-    private InteractiveBrowserCredential? _credential;
+    private IPublicClientApplication? _application;
+    private AuthenticationResult? _currentAuthentication;
 
     public bool IsConnected { get; private set; }
 
@@ -23,58 +24,46 @@ internal sealed class W365Session
 
     public W365GraphClient Graph { get; private set; } = W365GraphClient.NotConnected;
 
-    public async Task ConnectAsync()
+    public async Task TryRestoreAsync()
     {
-        var clientId = Environment.GetEnvironmentVariable("W365CLI_CLIENT_ID");
-        if (string.IsNullOrWhiteSpace(clientId))
-        {
-            clientId = DefaultClientId;
-        }
-
-        TenantId = Environment.GetEnvironmentVariable("W365CLI_TENANT_ID");
-
-        var options = new InteractiveBrowserCredentialOptions
-        {
-            ClientId = clientId,
-            TenantId = string.IsNullOrWhiteSpace(TenantId) ? null : TenantId,
-            RedirectUri = new Uri("http://localhost"),
-            TokenCachePersistenceOptions = new TokenCachePersistenceOptions
-            {
-                Name = "W365CliNative"
-            }
-        };
-
         try
         {
-            _credential = new InteractiveBrowserCredential(options);
-            var token = await _credential.GetTokenAsync(new TokenRequestContext(_scopes), CancellationToken.None);
-
-            Graph = new W365GraphClient(_credential, _scopes);
-            IsConnected = !string.IsNullOrWhiteSpace(token.Token);
-            if (IsConnected)
+            _application = await CreateApplicationAsync();
+            var account = (await _application.GetAccountsAsync()).FirstOrDefault();
+            if (account is null)
             {
-                try
-                {
-                    var organization = await Graph.GetOrganizationAsync();
-                    if (organization is not null)
-                    {
-                        TenantId = organization.Id;
-                        TenantName = organization.DisplayName;
-                    }
-                }
-                catch
-                {
-                    // Tenant display is helpful but not required for command execution.
-                }
+                return;
             }
 
-            AnsiConsole.MarkupLine(IsConnected ? "[green]Connected.[/]" : "[red]Connection failed.[/]");
+            _currentAuthentication = await _application.AcquireTokenSilent(_scopes, account).ExecuteAsync();
+            ConfigureConnectedGraph();
         }
-        catch (AuthenticationFailedException ex)
+        catch
         {
             IsConnected = false;
             Graph = W365GraphClient.NotConnected;
-            _credential = null;
+            _currentAuthentication = null;
+        }
+    }
+
+    public async Task ConnectAsync()
+    {
+        try
+        {
+            _application = await CreateApplicationAsync();
+            _currentAuthentication = await _application
+                .AcquireTokenInteractive(_scopes)
+                .WithPrompt(Prompt.SelectAccount)
+                .ExecuteAsync();
+
+            ConfigureConnectedGraph();
+            AnsiConsole.MarkupLine(IsConnected ? "[green]Connected.[/]" : "[red]Connection failed.[/]");
+        }
+        catch (MsalServiceException ex)
+        {
+            IsConnected = false;
+            Graph = W365GraphClient.NotConnected;
+            _currentAuthentication = null;
 
             AnsiConsole.MarkupLine("[red]Authentication failed.[/]");
             AnsiConsole.MarkupLine(Markup.Escape(ex.Message));
@@ -88,12 +77,89 @@ internal sealed class W365Session
         }
     }
 
-    public void Disconnect()
+    public async Task DisconnectAsync()
     {
-        _credential = null;
+        if (_application is not null)
+        {
+            foreach (var account in await _application.GetAccountsAsync())
+            {
+                await _application.RemoveAsync(account);
+            }
+        }
+
+        _currentAuthentication = null;
         Graph = W365GraphClient.NotConnected;
         IsConnected = false;
         TenantId = null;
         TenantName = null;
+    }
+
+    private async Task<IPublicClientApplication> CreateApplicationAsync()
+    {
+        var clientId = Environment.GetEnvironmentVariable("W365CLI_CLIENT_ID");
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            clientId = DefaultClientId;
+        }
+
+        var tenantId = Environment.GetEnvironmentVariable("W365CLI_TENANT_ID");
+        TenantId = tenantId;
+
+        var builder = PublicClientApplicationBuilder
+            .Create(clientId)
+            .WithRedirectUri("http://localhost");
+
+        builder = string.IsNullOrWhiteSpace(tenantId)
+            ? builder.WithAuthority(AadAuthorityAudience.AzureAdMultipleOrgs)
+            : builder.WithAuthority(AzureCloudInstance.AzurePublic, tenantId);
+
+        var application = builder.Build();
+        var storageProperties = new StorageCreationPropertiesBuilder("w365cli-native.msalcache", "W365CliNative")
+            .Build();
+        var cacheHelper = await MsalCacheHelper.CreateAsync(storageProperties);
+        cacheHelper.RegisterCache(application.UserTokenCache);
+        return application;
+    }
+
+    private void ConfigureConnectedGraph()
+    {
+        IsConnected = _currentAuthentication is not null && !string.IsNullOrWhiteSpace(_currentAuthentication.AccessToken);
+        Graph = new W365GraphClient(GetAccessTokenAsync);
+        TenantId = _currentAuthentication?.TenantId;
+        LoadTenantMetadataAsync().GetAwaiter().GetResult();
+    }
+
+    private async Task<string> GetAccessTokenAsync()
+    {
+        if (_application is null)
+        {
+            throw new InvalidOperationException("Not connected to Microsoft Graph.");
+        }
+
+        var account = _currentAuthentication?.Account ?? (await _application.GetAccountsAsync()).FirstOrDefault();
+        if (account is null)
+        {
+            throw new InvalidOperationException("No cached Microsoft Graph account was found.");
+        }
+
+        _currentAuthentication = await _application.AcquireTokenSilent(_scopes, account).ExecuteAsync();
+        return _currentAuthentication.AccessToken;
+    }
+
+    private async Task LoadTenantMetadataAsync()
+    {
+        try
+        {
+            var organization = await Graph.GetOrganizationAsync();
+            if (organization is not null)
+            {
+                TenantId = organization.Id;
+                TenantName = organization.DisplayName;
+            }
+        }
+        catch
+        {
+            // Tenant display is helpful but not required for command execution.
+        }
     }
 }

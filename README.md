@@ -66,6 +66,10 @@ email
 
 The app uses a persistent token cache so users do not need to sign in every run when refresh tokens are available.
 
+On startup, the CLI attempts to silently restore a cached Microsoft Graph session. If no cached session exists, use **Connection > Connect**.
+
+Cloud PC and Cloud App browsers use selectable, fixed-width table rows that resize to the current terminal width.
+
 ## Build
 
 ```powershell
