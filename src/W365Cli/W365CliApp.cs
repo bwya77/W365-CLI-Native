@@ -51,7 +51,11 @@ internal sealed class W365CliApp
                     await ShowCommandPaletteAsync();
                     break;
                 default:
-                    if (key.KeyChar is 'p' or 'P')
+                    if (IsActionHistoryHotkey(key))
+                    {
+                        ShowActionHistory();
+                    }
+                    else if (key.KeyChar is 'p' or 'P')
                     {
                         await ShowCommandPaletteAsync();
                     }
@@ -200,7 +204,11 @@ internal sealed class W365CliApp
                     await ShowCommandPaletteAsync();
                     break;
                 default:
-                    if (key.KeyChar is 'p' or 'P')
+                    if (IsActionHistoryHotkey(key))
+                    {
+                        ShowActionHistory();
+                    }
+                    else if (key.KeyChar is 'p' or 'P')
                     {
                         await ShowCommandPaletteAsync();
                     }
@@ -302,7 +310,11 @@ internal sealed class W365CliApp
                     await ShowCommandPaletteAsync();
                     break;
                 default:
-                    if (key.KeyChar is '/' or 'f' or 'F')
+                    if (IsActionHistoryHotkey(key))
+                    {
+                        ShowActionHistory();
+                    }
+                    else if (key.KeyChar is '/' or 'f' or 'F')
                     {
                         filter = PromptFilter();
                         selectedIndex = 0;
@@ -491,7 +503,11 @@ internal sealed class W365CliApp
                     await ShowCommandPaletteAsync();
                     break;
                 default:
-                    if (key.KeyChar is '/' or 'f' or 'F')
+                    if (IsActionHistoryHotkey(key))
+                    {
+                        ShowActionHistory();
+                    }
+                    else if (key.KeyChar is '/' or 'f' or 'F')
                     {
                         filter = PromptFilter();
                         selectedIndex = 0;
@@ -926,100 +942,51 @@ internal sealed class W365CliApp
     private static void RenderActionHistory(int selectedIndex)
     {
         RenderBreadcrumb("Action history");
-        AnsiConsole.Write(CreateActionHistorySummaryPanel());
+        var submitted = ActionHistory.Count(item => item.Status.Equals("Submitted", StringComparison.OrdinalIgnoreCase));
+        var failed = ActionHistory.Count(item => item.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase));
+        AnsiConsole.MarkupLine("[#4091f2]Action history[/]");
+        AnsiConsole.MarkupLine($"[grey]Total: {ActionHistory.Count} | Submitted: {submitted} | Failed: {failed}[/]");
+        AnsiConsole.WriteLine();
 
         if (ActionHistory.Count == 0)
         {
-            AnsiConsole.Write(
-                new Panel("[grey]Actions submitted from this session will appear here.[/]")
-                    .Header("Recent actions")
-                    .Border(BoxBorder.Rounded));
-        }
-        else if (Console.WindowWidth >= 120)
-        {
-            var grid = new Grid();
-            grid.AddColumn();
-            grid.AddColumn();
-            grid.AddRow(CreateActionHistoryListPanel(selectedIndex), CreateActionHistoryDetailPanel(ActionHistory[selectedIndex]));
-            AnsiConsole.Write(grid);
-        }
-        else
-        {
-            AnsiConsole.Write(CreateActionHistoryListPanel(selectedIndex));
-            AnsiConsole.Write(CreateActionHistoryDetailPanel(ActionHistory[selectedIndex]));
+            AnsiConsole.MarkupLine("[grey]No actions have been submitted in this session.[/]");
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]H opens this log from other screens. Esc/B/Q back.[/]");
+            return;
         }
 
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | C clear | Esc/B/Q back[/]");
-    }
+        var header = Row("Time", 9, "Result", 10, "Action", 24, "Cloud PC", 34, "Target", 42);
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
 
-    private static Panel CreateActionHistorySummaryPanel()
-    {
-        var submitted = ActionHistory.Count(item => item.Status.Equals("Submitted", StringComparison.OrdinalIgnoreCase));
-        var failed = ActionHistory.Count(item => item.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase));
-        var latest = ActionHistory.FirstOrDefault();
-        var content = new Rows(
-            new Markup($"[white]Total:[/] [grey]{ActionHistory.Count}[/]   [white]Submitted:[/] [green]{submitted}[/]   [white]Failed:[/] [red]{failed}[/]"),
-            new Markup($"[white]Latest:[/] [grey]{Markup.Escape(latest is null ? "none" : $"{latest.Action} for {Fit(latest.Target, 70)}")}[/]"));
-
-        return new Panel(content)
-            .Header("Action history")
-            .Border(BoxBorder.Rounded);
-    }
-
-    private static Panel CreateActionHistoryListPanel(int selectedIndex)
-    {
-        var rows = new List<Markup>();
-        var pageSize = Math.Max(6, Math.Min(14, Console.WindowHeight - 16));
+        var pageSize = Math.Max(8, Console.WindowHeight - 10);
         var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, ActionHistory.Count - pageSize));
         var visible = ActionHistory.Skip(start).Take(pageSize).ToArray();
-
         foreach (var item in visible.Select((value, index) => new { value, index }))
         {
             var absoluteIndex = start + item.index;
             var row = Row(
                 item.value.RequestedAt.ToLocalTime().ToString("t"), 8,
                 item.value.Status, 10,
-                item.value.Action, 22,
-                item.value.Target, 36);
+                item.value.Action, 24,
+                item.value.CloudPcName ?? "-", 34,
+                item.value.Target, 42);
             var escaped = Markup.Escape(row);
-            rows.Add(new Markup(absoluteIndex == selectedIndex
+            AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
                 ? $"[black on #4091f2]> {escaped}[/]"
-                : $"  {escaped}"));
+                : $"  {escaped}");
         }
 
-        return new Panel(new Rows(rows))
-            .Header("Recent actions")
-            .Border(BoxBorder.Rounded);
-    }
-
-    private static Panel CreateActionHistoryDetailPanel(ActionHistoryItem item)
-    {
-        var detailRows = new List<Markup>
+        var selected = ActionHistory[Math.Min(selectedIndex, ActionHistory.Count - 1)];
+        if (!string.IsNullOrWhiteSpace(selected.Detail))
         {
-            new Markup(PropertyInline("Status", ActionHistoryStatusMarkup(item.Status), valueIsMarkup: true)),
-            new Markup(PropertyInline("Action", item.Action)),
-            new Markup(PropertyBlock("Target", item.Target)),
-            new Markup(PropertyInline("Requested", item.RequestedAt.ToLocalTime().ToString("g")))
-        };
-
-        if (!string.IsNullOrWhiteSpace(item.Detail))
-        {
-            detailRows.Add(new Markup(PropertyBlock("Detail", item.Detail)));
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"[grey]Selected detail: {Markup.Escape(Fit(selected.Detail, Math.Max(40, Console.WindowWidth - 20)))}[/]");
         }
 
-        return new Panel(new Rows(detailRows))
-            .Header("Selected action")
-            .Border(BoxBorder.Rounded);
-    }
-
-    private static string ActionHistoryStatusMarkup(string status)
-    {
-        var color = status.Equals("Failed", StringComparison.OrdinalIgnoreCase)
-            ? "red"
-            : status.Equals("Submitted", StringComparison.OrdinalIgnoreCase)
-                ? "green"
-                : "grey";
-        return $"[{color}]{Markup.Escape(status)}[/]";
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | C clear | Esc/B/Q back[/]");
     }
 
     private async Task ShowReportsAsync()
@@ -1480,7 +1447,11 @@ internal sealed class W365CliApp
                     await ShowCommandPaletteAsync();
                     break;
                 default:
-                    if (key.KeyChar is '/' or 'f' or 'F')
+                    if (IsActionHistoryHotkey(key))
+                    {
+                        ShowActionHistory();
+                    }
+                    else if (key.KeyChar is '/' or 'f' or 'F')
                     {
                         filter = PromptFilter();
                         selectedIndex = 0;
@@ -2143,7 +2114,11 @@ internal sealed class W365CliApp
                     await ShowCommandPaletteAsync();
                     break;
                 default:
-                    if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
+                    if (IsActionHistoryHotkey(key))
+                    {
+                        ShowActionHistory();
+                    }
+                    else if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
                     {
                         filter = PromptFilter();
                         selectedIndex = 0;
@@ -2787,13 +2762,29 @@ internal sealed class W365CliApp
         AnsiConsole.MarkupLine($"[grey]Status:[/] {statusMessage}{age}");
     }
 
+    private static bool IsActionHistoryHotkey(ConsoleKeyInfo key)
+    {
+        return key.KeyChar is 'h' or 'H';
+    }
+
     private static void AddActionHistory(string action, string target, string status, string? detail = null)
     {
-        ActionHistory.Insert(0, new ActionHistoryItem(action, target, status, DateTimeOffset.Now, detail));
+        ActionHistory.Insert(0, new ActionHistoryItem(action, target, InferCloudPcName(target), status, DateTimeOffset.Now, detail));
         if (ActionHistory.Count > 100)
         {
             ActionHistory.RemoveRange(100, ActionHistory.Count - 100);
         }
+    }
+
+    private static string? InferCloudPcName(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return null;
+        }
+
+        var markerIndex = target.IndexOf(" to ", StringComparison.OrdinalIgnoreCase);
+        return markerIndex > 0 ? target[..markerIndex] : target;
     }
 
     private static Style SelectionHighlightStyle()
@@ -3559,7 +3550,7 @@ internal sealed class W365CliApp
 
     private sealed record MenuChoice(string Key, string Title, string Description);
 
-    private sealed record ActionHistoryItem(string Action, string Target, string Status, DateTimeOffset RequestedAt, string? Detail);
+    private sealed record ActionHistoryItem(string Action, string Target, string? CloudPcName, string Status, DateTimeOffset RequestedAt, string? Detail);
 
     private enum GraphRowSortMode
     {
