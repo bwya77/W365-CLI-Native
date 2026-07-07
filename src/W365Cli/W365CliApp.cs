@@ -12,6 +12,9 @@ internal sealed class W365CliApp
     private static readonly List<ActionHistoryItem> ActionHistory = [];
     private static string? statusMessage;
     private static DateTimeOffset? statusMessageAt;
+    private GitHubReleaseInfo? latestRelease;
+    private bool updateCheckComplete;
+    private string? updateCheckError;
 
     public async Task<int> RunAsync(string[] args)
     {
@@ -19,6 +22,7 @@ internal sealed class W365CliApp
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .StartAsync("Checking cached sign-in...", async _ => await _session.TryRestoreAsync());
+        await CheckForUpdatesOnStartupAsync();
 
         var selectedIndex = 0;
         while (true)
@@ -676,18 +680,21 @@ internal sealed class W365CliApp
     {
         var connectionText = _session.IsConnected ? "Connected" : "Not connected";
         var connectionColor = _session.IsConnected ? "green" : "yellow";
-        var connectionLight = _session.IsConnected ? "[green1]●[/]" : "[yellow]●[/]";
         var tenantName = _session.TenantName ?? "No tenant selected";
         var tenantId = _session.TenantId ?? "-";
+        var updateText = GetUpdateStatusText();
+        var updateColor = IsUpdateAvailable() ? "yellow" : updateCheckError is not null ? "red" : "grey";
 
         var dashboard = new Grid();
         dashboard.AddColumn();
         dashboard.AddColumn();
         dashboard.AddColumn();
+        dashboard.AddColumn();
         dashboard.AddRow(
-            new Panel(new Markup($"{connectionLight} [bold {connectionColor}]{connectionText}[/]\n[grey]Status[/]")).Border(BoxBorder.Rounded),
+            new Panel(new Markup($"[bold {connectionColor}]{connectionText}[/]\n[grey]Status[/]")).Border(BoxBorder.Rounded),
             new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantId, 36))}[/]\n[grey]Tenant ID[/]")).Border(BoxBorder.Rounded),
-            new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantName, 30))}[/]\n[grey]Tenant name[/]")).Border(BoxBorder.Rounded));
+            new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantName, 30))}[/]\n[grey]Tenant name[/]")).Border(BoxBorder.Rounded),
+            new Panel(new Markup($"[bold {updateColor}]{Markup.Escape(Fit(updateText, 24))}[/]\n[grey]Updates[/]")).Border(BoxBorder.Rounded));
 
         AnsiConsole.Write(dashboard);
         AnsiConsole.WriteLine();
@@ -809,7 +816,7 @@ internal sealed class W365CliApp
 
     private static string FormatMainMenuChoice(MenuChoice choice)
     {
-        return $"[white]{Markup.Escape(Fit(choice.Title, 22))}[/] [grey]{Markup.Escape(choice.Description)}[/]";
+        return $"[white]{Markup.Escape(Fit(choice.Title, 22))}[/] [#b8b8b8]{Markup.Escape(choice.Description)}[/]";
     }
 
     private static void RenderBreadcrumb(params string[] parts)
@@ -906,7 +913,7 @@ internal sealed class W365CliApp
         Pause();
     }
 
-    private static async Task ShowUpdateCheckAsync()
+    private async Task ShowUpdateCheckAsync()
     {
         AnsiConsole.Clear();
         RenderBreadcrumb("Updates");
@@ -918,6 +925,9 @@ internal sealed class W365CliApp
             var latest = await AnsiConsole.Status()
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync("Checking GitHub Releases...", async _ => await GetLatestReleaseAsync());
+            latestRelease = latest;
+            updateCheckComplete = true;
+            updateCheckError = null;
 
             var currentVersion = GetCurrentVersion();
             var current = ParseVersion(currentVersion);
@@ -947,9 +957,61 @@ internal sealed class W365CliApp
         WaitForBack();
     }
 
+    private async Task CheckForUpdatesOnStartupAsync()
+    {
+        try
+        {
+            latestRelease = await GetLatestReleaseAsync();
+            updateCheckComplete = true;
+            updateCheckError = null;
+        }
+        catch (Exception ex)
+        {
+            updateCheckComplete = true;
+            updateCheckError = ex.Message;
+        }
+    }
+
+    private bool IsUpdateAvailable()
+    {
+        if (latestRelease is null)
+        {
+            return false;
+        }
+
+        var current = ParseVersion(GetCurrentVersion());
+        var latest = ParseVersion(latestRelease.TagName);
+        return latest is not null && current is not null && latest > current;
+    }
+
+    private string GetUpdateStatusText()
+    {
+        if (!updateCheckComplete)
+        {
+            return "Checking";
+        }
+
+        if (updateCheckError is not null)
+        {
+            return "Check failed";
+        }
+
+        if (latestRelease is null)
+        {
+            return "Unknown";
+        }
+
+        return IsUpdateAvailable()
+            ? $"Update {latestRelease.TagName}"
+            : "Up to date";
+    }
+
     private static async Task<GitHubReleaseInfo> GetLatestReleaseAsync()
     {
-        using var http = new HttpClient();
+        using var http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(5)
+        };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("W365CliNative");
         await using var stream = await http.GetStreamAsync(GitHubLatestReleaseApiUrl);
         using var document = await JsonDocument.ParseAsync(stream);
@@ -4321,9 +4383,11 @@ internal sealed class W365CliApp
 
     private static string GetCurrentVersion()
     {
-        return typeof(W365CliApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        var version = typeof(W365CliApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?? typeof(W365CliApp).Assembly.GetName().Version?.ToString(3)
             ?? "0.0.0";
+        var metadataIndex = version.IndexOf('+', StringComparison.Ordinal);
+        return metadataIndex >= 0 ? version[..metadataIndex] : version;
     }
 
     private static Version? ParseVersion(string value)
