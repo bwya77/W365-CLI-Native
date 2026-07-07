@@ -32,7 +32,7 @@ internal sealed class W365CliApp
                     await ShowConnectionAsync();
                     break;
                 case "CloudPcs":
-                    await ShowCloudPcsAsync();
+                    await ShowCloudPcAreaAsync();
                     break;
                 case "CloudApps":
                     await ShowCloudAppsAsync();
@@ -57,6 +57,74 @@ internal sealed class W365CliApp
             }
     }
 
+    }
+
+    private async Task ShowCloudPcAreaAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        var choices = new[] { "Browse Cloud PCs", "Disk space", "Snapshots", "Back" };
+        var selectedIndex = 0;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            AnsiConsole.MarkupLine("[cyan]Cloud PCs[/]");
+            AnsiConsole.WriteLine();
+            for (var index = 0; index < choices.Length; index++)
+            {
+                var escaped = Markup.Escape(choices[index]);
+                AnsiConsole.MarkupLine(index == selectedIndex
+                    ? $"[white on blue]> {escaped}[/]"
+                    : $"  {escaped}");
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | Esc/B/Q back[/]");
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(choices.Length - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = choices.Length - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    switch (choices[selectedIndex])
+                    {
+                        case "Browse Cloud PCs":
+                            await ShowCloudPcsAsync();
+                            break;
+                        case "Disk space":
+                            await ShowDiskSpaceAsync();
+                            break;
+                        case "Snapshots":
+                            await ShowAllSnapshotsAsync();
+                            break;
+                        case "Back":
+                            return;
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
     }
 
     private async Task ShowDiskSpaceAsync(CloudPcSummary? cloudPc = null)
@@ -109,6 +177,144 @@ internal sealed class W365CliApp
 
             ShowDiskSpaceDetails(item);
         }
+    }
+
+    private async Task ShowAllSnapshotsAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        var items = await LoadAllSnapshotsAsync();
+        if (items.Count == 0)
+        {
+            TimedMessage("[yellow]No snapshots were returned.[/]");
+            return;
+        }
+
+        var selectedIndex = 0;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderAllSnapshotsTable(items, selectedIndex);
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(items.Count - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(items.Count - 1, selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = items.Count - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    await ShowSnapshotActionMenuAsync(items[selectedIndex].CloudPc, items[selectedIndex].Snapshot);
+                    items = await LoadAllSnapshotsAsync();
+                    selectedIndex = Math.Min(selectedIndex, Math.Max(0, items.Count - 1));
+                    if (items.Count == 0)
+                    {
+                        TimedMessage("[yellow]No snapshots were returned.[/]");
+                        return;
+                    }
+                    break;
+                case ConsoleKey.R:
+                    items = await LoadAllSnapshotsAsync();
+                    selectedIndex = 0;
+                    if (items.Count == 0)
+                    {
+                        TimedMessage("[yellow]No snapshots were returned.[/]");
+                        return;
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<SnapshotListItem>> LoadAllSnapshotsAsync()
+    {
+        return await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading snapshots...", async _ =>
+            {
+                var cloudPcs = await _session.Graph.GetCloudPcsAsync();
+                var results = new List<SnapshotListItem>();
+                foreach (var cloudPc in cloudPcs)
+                {
+                    var snapshots = await _session.Graph.GetCloudPcSnapshotsAsync(cloudPc);
+                    results.AddRange(snapshots.Select(snapshot => new SnapshotListItem(cloudPc, snapshot)));
+                }
+
+                return results
+                    .OrderByDescending(item => item.Snapshot.CreatedDateTime)
+                    .ThenBy(item => item.CloudPc.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            });
+    }
+
+    private static void RenderAllSnapshotsTable(IReadOnlyList<SnapshotListItem> items, int selectedIndex)
+    {
+        AnsiConsole.MarkupLine("[cyan]Windows 365 Cloud PC snapshots[/]");
+        AnsiConsole.MarkupLine($"[grey]Rows: {items.Count}[/]");
+        AnsiConsole.WriteLine();
+
+        var widths = GetAllSnapshotWidths();
+        var header = Row("Cloud PC", widths.CloudPc, "Status", widths.Status, "Type", widths.Type, "Created", widths.Created, "Expires", widths.Expires);
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
+
+        var pageSize = Math.Max(8, Console.WindowHeight - 10);
+        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, items.Count - pageSize));
+        var visible = items.Skip(start).Take(pageSize).ToArray();
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var item = visible[index];
+            var absoluteIndex = start + index;
+            var row = Row(
+                item.CloudPc.Name, widths.CloudPc,
+                item.Snapshot.Status ?? "-", widths.Status,
+                item.Snapshot.SnapshotType ?? "-", widths.Type,
+                item.Snapshot.CreatedDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Created,
+                item.Snapshot.ExpirationDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Expires);
+            var escaped = Markup.Escape(row);
+            AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
+                ? $"[white on blue]> {escaped}[/]"
+                : $"  {escaped}");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter actions | R refresh | Esc/B/Q back[/]");
+    }
+
+    private static (int CloudPc, int Status, int Type, int Created, int Expires) GetAllSnapshotWidths()
+    {
+        var available = Math.Max(90, Console.WindowWidth - 4);
+        const int status = 14;
+        const int type = 14;
+        const int created = 18;
+        const int expires = 18;
+        var cloudPc = Math.Max(28, available - status - type - created - expires - 4);
+        return (cloudPc, status, type, created, expires);
     }
 
     private static void ShowDiskSpaceDetails(CloudPcDiskSpace disk)
@@ -2282,6 +2488,8 @@ internal sealed class W365CliApp
     }
 
     private sealed record TableChoice<T>(string Label, T? Item, bool IsBack);
+
+    private sealed record SnapshotListItem(CloudPcSummary CloudPc, CloudPcSnapshot Snapshot);
 
     private sealed record MenuChoice(string Key, string Title, string Description);
 
