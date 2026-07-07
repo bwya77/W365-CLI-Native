@@ -3418,7 +3418,6 @@ internal sealed class W365CliApp
 
         if (confirm != "Confirm")
         {
-            SetStatus($"[yellow]Cancelled {Markup.Escape(action)}.[/]");
             return;
         }
 
@@ -3428,12 +3427,10 @@ internal sealed class W365CliApp
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync($"Submitting {action}...", async _ => await operation());
             AddActionHistory(action, target, "Submitted");
-            SetStatus($"[green]Submitted {Markup.Escape(action)} for {Markup.Escape(Fit(target, 70))}.[/]");
         }
         catch (Exception ex)
         {
             AddActionHistory(action, target, "Failed", ex.Message);
-            SetStatus($"[red]{Markup.Escape(action)} failed for {Markup.Escape(Fit(target, 70))}.[/]");
         }
     }
 
