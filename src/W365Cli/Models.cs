@@ -6,6 +6,8 @@ internal sealed record GraphPage<T>(
     [property: JsonPropertyName("value")] IReadOnlyList<T> Value,
     [property: JsonPropertyName("@odata.nextLink")] string? NextLink);
 
+internal sealed record GraphTableRow(string Title, string Summary, IReadOnlyDictionary<string, string> Fields);
+
 internal sealed record CloudPcSummary
 {
     [JsonPropertyName("id")]

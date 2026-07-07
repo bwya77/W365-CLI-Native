@@ -264,6 +264,158 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<GraphTableRow>> GetOrganizationSettingsAsync()
+    {
+        return await GetJsonRowsAsync("deviceManagement/virtualEndpoint/organizationSettings", "id", "osVersion", "userAccountType", "windowsLanguage");
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetSettingProfilesAsync()
+    {
+        return await GetJsonRowsAsync("deviceManagement/virtualEndpoint/settingProfiles?$expand=assignments", "displayName", "profileType", "isAssigned", "lastModifiedDateTime");
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetUserSettingsAsync()
+    {
+        return await GetJsonRowsAsync("deviceManagement/virtualEndpoint/userSettings?$expand=assignments", "displayName", "selfServiceEnabled", "localAdminEnabled", "resetEnabled");
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetUsageRowsAsync()
+    {
+        var cloudPcs = await GetCloudPcsAsync();
+        return cloudPcs
+            .Select(pc => new GraphTableRow(
+                pc.Name,
+                JoinSummary(pc.Status, pc.PowerState, pc.ServicePlanName),
+                new Dictionary<string, string>
+                {
+                    ["Cloud PC"] = pc.Name,
+                    ["Status"] = pc.Status ?? "-",
+                    ["Power state"] = pc.PowerState ?? "-",
+                    ["Provisioning type"] = pc.ProvisioningType ?? "-",
+                    ["User"] = pc.UserPrincipalName ?? "-",
+                    ["Service plan"] = pc.ServicePlanName ?? "-",
+                    ["Managed device"] = pc.ManagedDeviceName ?? "-",
+                    ["Cloud PC ID"] = pc.Id,
+                    ["Managed device ID"] = pc.ManagedDeviceId ?? "-"
+                }))
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetConnectivityHistoryAsync(CloudPcSummary cloudPc)
+    {
+        var rows = await GetJsonRowsAsync(
+            $"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPc.Id)}/getCloudPcConnectivityHistory",
+            "eventDateTime",
+            "eventType",
+            "eventName",
+            "eventResult");
+
+        return rows
+            .Select(row =>
+            {
+                var fields = new Dictionary<string, string>(row.Fields)
+                {
+                    ["Cloud PC"] = cloudPc.Name
+                };
+                return row with { Fields = fields };
+            })
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetLaunchDetailRowsAsync()
+    {
+        var cloudPcs = await GetCloudPcsAsync();
+        var rows = new List<GraphTableRow>();
+        foreach (var cloudPc in cloudPcs)
+        {
+            if (string.IsNullOrWhiteSpace(cloudPc.UserPrincipalName))
+            {
+                rows.Add(new GraphTableRow(
+                    cloudPc.Name,
+                    "No user principal name",
+                    new Dictionary<string, string>
+                    {
+                        ["Cloud PC"] = cloudPc.Name,
+                        ["Status"] = "Skipped",
+                        ["Reason"] = "No user principal name"
+                    }));
+                continue;
+            }
+
+            try
+            {
+                var uri = $"https://graph.microsoft.com/v1.0/users/{Uri.EscapeDataString(cloudPc.UserPrincipalName)}/cloudPCs/{Uri.EscapeDataString(cloudPc.Id)}/retrieveCloudPcLaunchDetail";
+                var item = await GetAsync<JsonElement>(uri);
+                if (item.ValueKind == JsonValueKind.Object)
+                {
+                    var fields = FlattenJsonObject(item);
+                    fields["Cloud PC"] = cloudPc.Name;
+                    fields["User"] = cloudPc.UserPrincipalName;
+                    rows.Add(ToTableRow(fields, "Cloud PC", "launchDetailStatus", "windows365SwitchCompatible"));
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                rows.Add(new GraphTableRow(
+                    cloudPc.Name,
+                    "Launch details unavailable",
+                    new Dictionary<string, string>
+                    {
+                        ["Cloud PC"] = cloudPc.Name,
+                        ["User"] = cloudPc.UserPrincipalName,
+                        ["Status"] = "Unavailable",
+                        ["Error"] = ex.Message
+                    }));
+            }
+        }
+
+        return rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetCloudPcReportRowsAsync(string reportName, int top)
+    {
+        var definition = ResolveReportDefinition(reportName);
+        var body = new Dictionary<string, object>
+        {
+            ["top"] = top
+        };
+        if (definition.IncludeReportName)
+        {
+            body["reportName"] = reportName;
+        }
+
+        var json = await PostJsonForStringAsync($"deviceManagement/virtualEndpoint/reports/{definition.Action}", body);
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("Schema", out var schema) ||
+            !document.RootElement.TryGetProperty("Values", out var values) ||
+            schema.ValueKind != JsonValueKind.Array ||
+            values.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var columns = schema.EnumerateArray().Select(item => item.GetString() ?? "-").ToArray();
+        var rows = new List<GraphTableRow>();
+        foreach (var valueRow in values.EnumerateArray())
+        {
+            if (valueRow.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var valuesArray = valueRow.EnumerateArray().ToArray();
+            for (var index = 0; index < Math.Min(columns.Length, valuesArray.Length); index++)
+            {
+                fields[columns[index]] = JsonToString(valuesArray[index]);
+            }
+
+            rows.Add(ToTableRow(fields, "CloudPcName", "ManagedDeviceName", "DisplayName", "SignInStatus", "Status", "Timestamp", "LastActiveTime"));
+        }
+
+        return rows;
+    }
+
     private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
     {
         if (_accessTokenProvider is null)
@@ -314,6 +466,15 @@ internal sealed class W365GraphClient
         return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions);
     }
 
+    private async Task<IReadOnlyList<GraphTableRow>> GetJsonRowsAsync(string relativeUri, params string[] summaryFields)
+    {
+        var items = await GetPagedAsync<JsonElement>(relativeUri);
+        return items
+            .Where(item => item.ValueKind == JsonValueKind.Object)
+            .Select(item => ToTableRow(FlattenJsonObject(item), summaryFields))
+            .ToArray();
+    }
+
     private async Task PostJsonAsync(string relativeUri, object body)
     {
         if (_accessTokenProvider is null)
@@ -330,6 +491,24 @@ internal sealed class W365GraphClient
         response.EnsureSuccessStatusCode();
     }
 
+    private async Task<string> PostJsonForStringAsync(string relativeUri, object body)
+    {
+        if (_accessTokenProvider is null)
+        {
+            throw new InvalidOperationException("Not connected to Microsoft Graph.");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), System.Text.Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Prefer", "include-unknown-enum-members");
+        await AuthorizeAsync(request);
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync();
+    }
+
     private async Task AuthorizeAsync(HttpRequestMessage request)
     {
         var token = await _accessTokenProvider!();
@@ -339,5 +518,76 @@ internal sealed class W365GraphClient
     private static double? ToGb(long? bytes)
     {
         return bytes is null ? null : Math.Round(bytes.Value / 1024d / 1024d / 1024d, 2);
+    }
+
+    private static Dictionary<string, string> FlattenJsonObject(JsonElement item)
+    {
+        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in item.EnumerateObject())
+        {
+            fields[property.Name] = JsonToString(property.Value);
+        }
+
+        return fields;
+    }
+
+    private static GraphTableRow ToTableRow(IReadOnlyDictionary<string, string> fields, params string[] summaryFields)
+    {
+        var title = GetFirst(fields, "displayName", "DisplayName", "Cloud PC", "CloudPcName", "ManagedDeviceName", "id") ?? "-";
+        var summary = JoinSummary(summaryFields.Select(field => GetFirst(fields, field)).Where(value => !string.IsNullOrWhiteSpace(value)).ToArray());
+        return new GraphTableRow(title, string.IsNullOrWhiteSpace(summary) ? "-" : summary, fields);
+    }
+
+    private static string? GetFirst(IReadOnlyDictionary<string, string> fields, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (fields.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static string JoinSummary(params string?[] values)
+    {
+        var parts = values.Where(value => !string.IsNullOrWhiteSpace(value) && value != "-").ToArray();
+        return parts.Length == 0 ? "-" : string.Join(" | ", parts);
+    }
+
+    private static string JsonToString(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? "-",
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            JsonValueKind.Null => "-",
+            JsonValueKind.Undefined => "-",
+            _ => value.GetRawText()
+        };
+    }
+
+    private static (string Action, bool IncludeReportName) ResolveReportDefinition(string reportName)
+    {
+        return reportName switch
+        {
+            "remoteConnectionHistoricalReports" => ("getRemoteConnectionHistoricalReports", false),
+            "dailyAggregatedRemoteConnectionReports" => ("getDailyAggregatedRemoteConnectionReports", false),
+            "totalAggregatedRemoteConnectionReports" => ("getTotalAggregatedRemoteConnectionReports", false),
+            "frontlineLicenseUsageReport" => ("getFrontlineReport", true),
+            "frontlineLicenseUsageRealTimeReport" => ("getFrontlineReport", true),
+            "frontlineLicenseHourlyUsageReport" => ("getFrontlineReport", true),
+            "frontlineRealtimeUserConnectionsReport" => ("getFrontlineReport", true),
+            "inaccessibleCloudPcReports" => ("getInaccessibleCloudPcReports", true),
+            "actionStatusReport" => ("getActionStatusReports", false),
+            "performanceTrendReport" => ("retrieveCloudPcTenantMetricsReport", true),
+            "regionalConnectionQualityTrendReport" => ("retrieveConnectionQualityReports", true),
+            "cloudPcUsageCategoryReport" => ("retrieveCloudPcRecommendationReports", true),
+            _ => throw new ArgumentOutOfRangeException(nameof(reportName), reportName, "Unknown Cloud PC report.")
+        };
     }
 }

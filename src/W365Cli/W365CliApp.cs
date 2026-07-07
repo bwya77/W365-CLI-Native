@@ -41,13 +41,13 @@ internal sealed class W365CliApp
                     ShowPlaceholderArea("Provisioning", "Provisioning policies and maintenance windows will be wired next.");
                     break;
                 case "Reports":
-                    ShowPlaceholderArea("Reports", "Usage, connectivity, launch details, and report streams will be wired next.");
+                    await ShowReportsAsync();
                     break;
                 case "Catalog":
                     ShowPlaceholderArea("Catalog", "Service plans, images, supported regions, and licensing will be wired next.");
                     break;
                 case "Tenant":
-                    ShowPlaceholderArea("Tenant settings", "Organization settings, setting profiles, and user settings will be wired next.");
+                    await ShowTenantSettingsAsync();
                     break;
                 case "About":
                     ShowAbout();
@@ -237,6 +237,209 @@ internal sealed class W365CliApp
 
         AnsiConsole.Write(panel);
         Pause();
+    }
+
+    private async Task ShowReportsAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            var choice = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[cyan]Reports[/]")
+                    .AddChoices(
+                        "Usage",
+                        "Connectivity history",
+                        "Launch details",
+                        "Cloud PC reports",
+                        "Back"));
+
+            switch (choice)
+            {
+                case "Usage":
+                    await ShowGraphRowsAsync(
+                        "Windows 365 Cloud PC usage",
+                        async () => await _session.Graph.GetUsageRowsAsync());
+                    break;
+                case "Connectivity history":
+                    await ShowConnectivityHistoryAsync();
+                    break;
+                case "Launch details":
+                    await ShowGraphRowsAsync(
+                        "Windows 365 launch details",
+                        async () => await _session.Graph.GetLaunchDetailRowsAsync());
+                    break;
+                case "Cloud PC reports":
+                    await ShowCloudPcReportsAsync();
+                    break;
+                case "Back":
+                    return;
+            }
+        }
+    }
+
+    private async Task ShowTenantSettingsAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            var choice = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[cyan]Tenant settings[/]")
+                    .AddChoices(
+                        "Organization settings",
+                        "Setting profiles",
+                        "User settings",
+                        "Back"));
+
+            switch (choice)
+            {
+                case "Organization settings":
+                    await ShowGraphRowsAsync(
+                        "Windows 365 organization settings",
+                        async () => await _session.Graph.GetOrganizationSettingsAsync());
+                    break;
+                case "Setting profiles":
+                    await ShowGraphRowsAsync(
+                        "Windows 365 setting profiles",
+                        async () => await _session.Graph.GetSettingProfilesAsync());
+                    break;
+                case "User settings":
+                    await ShowGraphRowsAsync(
+                        "Windows 365 user settings",
+                        async () => await _session.Graph.GetUserSettingsAsync());
+                    break;
+                case "Back":
+                    return;
+            }
+        }
+    }
+
+    private async Task ShowConnectivityHistoryAsync()
+    {
+        var cloudPcs = await LoadCloudPcsAsync();
+        if (cloudPcs.Count == 0)
+        {
+            TimedMessage("[yellow]No Cloud PCs returned.[/]");
+            return;
+        }
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            var cloudPc = SelectFromTable(
+                "Select Cloud PC for connectivity history",
+                Row("Name", 34, "Status", 14, "User", 34, "Service plan", 28),
+                cloudPcs,
+                pc => Row(pc.Name, 34, pc.Status ?? "-", 14, pc.UserPrincipalName ?? "-", 34, pc.ServicePlanName ?? "-", 28));
+
+            if (cloudPc is null)
+            {
+                return;
+            }
+
+            await ShowGraphRowsAsync(
+                $"Connectivity history for {cloudPc.Name}",
+                async () => await _session.Graph.GetConnectivityHistoryAsync(cloudPc));
+        }
+    }
+
+    private async Task ShowCloudPcReportsAsync()
+    {
+        var reportNames = new[]
+        {
+            "dailyAggregatedRemoteConnectionReports",
+            "totalAggregatedRemoteConnectionReports",
+            "frontlineLicenseUsageReport",
+            "frontlineLicenseUsageRealTimeReport",
+            "frontlineLicenseHourlyUsageReport",
+            "frontlineRealtimeUserConnectionsReport",
+            "inaccessibleCloudPcReports",
+            "actionStatusReport",
+            "performanceTrendReport",
+            "regionalConnectionQualityTrendReport",
+            "cloudPcUsageCategoryReport",
+            "Back"
+        };
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            var reportName = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[cyan]Cloud PC report[/]")
+                    .PageSize(12)
+                    .AddChoices(reportNames));
+
+            if (reportName == "Back")
+            {
+                return;
+            }
+
+            var top = AnsiConsole.Prompt(
+                new TextPrompt<int>("Top rows:")
+                    .DefaultValue(50)
+                    .Validate(value => value > 0 ? ValidationResult.Success() : ValidationResult.Error("Enter a positive row count.")));
+
+            await ShowGraphRowsAsync(
+                $"Report: {reportName}",
+                async () => await _session.Graph.GetCloudPcReportRowsAsync(reportName, top));
+        }
+    }
+
+    private async Task ShowGraphRowsAsync(string title, Func<Task<IReadOnlyList<GraphTableRow>>> loader)
+    {
+        var rows = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync($"Loading {title}...", async _ => await loader());
+
+        if (rows.Count == 0)
+        {
+            TimedMessage("[yellow]No rows returned.[/]");
+            return;
+        }
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            var row = SelectFromTable(
+                title,
+                Row("Name", 42, "Summary", 90),
+                rows,
+                item => Row(item.Title, 42, item.Summary, 90));
+
+            if (row is null)
+            {
+                return;
+            }
+
+            ShowGraphRowDetails(title, row);
+        }
+    }
+
+    private static void ShowGraphRowDetails(string title, GraphTableRow row)
+    {
+        AnsiConsole.Clear();
+        var lines = row.Fields
+            .OrderBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(field => new Markup(PropertyBlock(field.Key, field.Value)));
+
+        var panel = new Panel(new Rows(lines))
+            .Header(title)
+            .Border(BoxBorder.Rounded);
+
+        AnsiConsole.Write(panel);
+        WaitForBack();
     }
 
     private async Task ShowCloudPcsAsync()
