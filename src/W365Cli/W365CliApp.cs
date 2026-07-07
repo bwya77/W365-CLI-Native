@@ -155,29 +155,94 @@ internal sealed class W365CliApp
             return;
         }
 
+        var selectedIndex = 0;
         while (true)
         {
             AnsiConsole.Clear();
             RenderCompactHeader();
-            var item = SelectFromTable(
-                cloudPc is null ? "Windows 365 Cloud PC disk space" : $"Disk space for {cloudPc.Name}",
-                Row("Cloud PC", 34, "Free", 10, "Used", 10, "Total", 10, "Free %", 8, "Last sync", 20),
-                items,
-                disk => Row(
+            RenderDiskSpaceTable(items, selectedIndex);
+            var key = Console.ReadKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(items.Count, selectedIndex + 1);
+                    break;
+                case ConsoleKey.PageUp:
+                    selectedIndex = Math.Max(0, selectedIndex - 10);
+                    break;
+                case ConsoleKey.PageDown:
+                    selectedIndex = Math.Min(items.Count, selectedIndex + 10);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = items.Count;
+                    break;
+                case ConsoleKey.Enter:
+                    if (selectedIndex == items.Count)
+                    {
+                        return;
+                    }
+
+                    await OpenCloudPcFromDiskSpaceAsync(items[selectedIndex]);
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void RenderDiskSpaceTable(IReadOnlyList<CloudPcDiskSpace> items, int selectedIndex)
+    {
+        AnsiConsole.MarkupLine("[cyan]Windows 365 Cloud PC disk space[/]");
+        var header = Row("Cloud PC", 34, "Free", 10, "Used", 10, "Total", 10, "Free %", 8, "Last sync", 20);
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
+        AnsiConsole.WriteLine();
+
+        var pageSize = Math.Max(8, Console.WindowHeight - 12);
+        var totalRows = items.Count + 1;
+        var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, totalRows - pageSize));
+        var end = Math.Min(totalRows - 1, start + pageSize - 1);
+
+        for (var index = start; index <= end; index++)
+        {
+            string label;
+            if (index == items.Count)
+            {
+                label = "Back";
+            }
+            else
+            {
+                var disk = items[index];
+                label = Row(
                     disk.CloudPcName, 34,
                     FormatGb(disk.FreeStorageGb), 10,
                     FormatGb(disk.UsedStorageGb), 10,
                     FormatGb(disk.TotalStorageGb), 10,
                     disk.PercentFree is null ? "-" : $"{disk.PercentFree}%", 8,
-                    disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-", 20));
-
-            if (item is null)
-            {
-                return;
+                    disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-", 20);
             }
 
-            await OpenCloudPcFromDiskSpaceAsync(item);
+            var escaped = Markup.Escape(label);
+            AnsiConsole.MarkupLine(index == selectedIndex
+                ? $"[white on blue]> {escaped}[/]"
+                : $"  {escaped}");
         }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | Esc/B/Q back[/]");
     }
 
     private async Task OpenCloudPcFromDiskSpaceAsync(CloudPcDiskSpace disk)
