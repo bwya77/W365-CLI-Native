@@ -12,6 +12,8 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      HAS_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,6 +45,33 @@ jobs:
             -p:AssemblyVersion=${{ steps.version.outputs.assemblyVersion }} `
             -p:FileVersion=${{ steps.version.outputs.assemblyVersion }} `
             --output .\artifacts\w365-win-x64
+
+      - name: Sign executable
+        if: env.HAS_SIGNING == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\artifacts\w365-win-x64
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify signature
+        if: env.HAS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature .\artifacts\w365-win-x64\W365Cli.exe
+          $signature | Format-List
+          if ($signature.Status -ne 'Valid') {
+            throw "W365Cli.exe signature status was $($signature.Status)"
+          }
 
       - name: Package
         shell: pwsh

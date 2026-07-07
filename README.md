@@ -104,7 +104,23 @@ dotnet publish .\src\W365Cli\W365Cli.csproj -c Release -r win-x64 --self-contain
 
 ## Releases and updates
 
-Tagged releases use GitHub Actions to publish `w365-win-x64.zip` and a SHA256 checksum to GitHub Releases.
+Tagged releases use GitHub Actions to publish `w365-win-x64.zip` and a SHA256 checksum to GitHub Releases. The release workflow signs `W365Cli.exe` with Azure Trusted Signing before packaging when these repository settings are present:
+
+Secrets:
+
+```text
+AZURE_TENANT_ID
+AZURE_CLIENT_ID
+AZURE_CLIENT_SECRET
+```
+
+Variables:
+
+```text
+TRUSTED_SIGNING_ENDPOINT
+TRUSTED_SIGNING_ACCOUNT
+TRUSTED_SIGNING_PROFILE
+```
 
 Use semantic version tags:
 
