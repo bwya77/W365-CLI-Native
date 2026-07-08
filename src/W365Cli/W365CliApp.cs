@@ -1242,10 +1242,10 @@ internal sealed class W365CliApp
                 var family = info.Family;
                 var purchased = group.Sum(item => item.Sku.PrepaidUnits?.Enabled ?? 0);
                 var assigned = group.Sum(item => item.Sku.ConsumedUnits ?? 0);
-                var matchingCloudPcs = GetCloudPcsForLicense(cloudPcs, info);
-                var dedicated = matchingCloudPcs.Count(pc => GetFlexCloudPcMode(pc) == "Dedicated");
-                var shared = matchingCloudPcs.Count - dedicated;
                 var isFlex = family.Equals("Flex", StringComparison.OrdinalIgnoreCase);
+                var matchingCloudPcs = GetCloudPcsForLicense(cloudPcs, info);
+                var dedicated = isFlex ? matchingCloudPcs.Count(pc => GetFlexCloudPcMode(pc) == "Dedicated") : 0;
+                var shared = isFlex ? matchingCloudPcs.Count - dedicated : 0;
                 var dedicatedUnitsUsed = isFlex ? (int)Math.Ceiling(dedicated / 3d) : 0;
                 var sharedUnitsUsed = isFlex ? shared : 0;
                 var licenseUnitsUsed = isFlex ? sharedUnitsUsed + dedicatedUnitsUsed : matchingCloudPcs.Count;
@@ -1295,14 +1295,15 @@ internal sealed class W365CliApp
             }
 
             if (text.Contains("DISASTER", StringComparison.OrdinalIgnoreCase) ||
-                text.Contains("RESERVE", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains("ADD_ON", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains("ADDON", StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
 
-            var family = text.Contains("FLEX", StringComparison.OrdinalIgnoreCase) ||
+            var family = IsReserveText(text)
+                ? "Reserve"
+                : text.Contains("FLEX", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains("FRONTLINE", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains("CPC_F_", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains("CPC_S_", StringComparison.OrdinalIgnoreCase) ||
@@ -1322,11 +1323,34 @@ internal sealed class W365CliApp
         {
             return cloudPcs
                 .Where(pc =>
-                    string.Equals(GetPlanKey(pc.ServicePlanName ?? string.Empty), license.PlanKey, StringComparison.OrdinalIgnoreCase) &&
-                    (license.Family.Equals("Flex", StringComparison.OrdinalIgnoreCase)
-                        ? Contains(pc.ServicePlanName, "Frontline") || Contains(pc.ServicePlanName, "Flex") || Contains(pc.ProvisioningPolicyName, "Flex")
-                        : Contains(pc.ServicePlanName, license.Family)))
+                    (license.PlanKey.Equals("unknown", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(GetPlanKey(pc.ServicePlanName ?? string.Empty), license.PlanKey, StringComparison.OrdinalIgnoreCase)) &&
+                    IsCloudPcInLicenseFamily(pc, license.Family))
                 .ToArray();
+        }
+
+        private static bool IsCloudPcInLicenseFamily(CloudPcSummary pc, string family)
+        {
+            if (family.Equals("Flex", StringComparison.OrdinalIgnoreCase))
+            {
+                return Contains(pc.ServicePlanName, "Frontline") ||
+                    Contains(pc.ServicePlanName, "Flex") ||
+                    Contains(pc.ProvisioningPolicyName, "Flex");
+            }
+
+            if (family.Equals("Reserve", StringComparison.OrdinalIgnoreCase))
+            {
+                return IsReserveText($"{pc.ServicePlanName} {pc.ProvisioningType} {pc.ProvisioningPolicyName}");
+            }
+
+            return Contains(pc.ServicePlanName, family);
+        }
+
+        private static bool IsReserveText(string? value)
+        {
+            return Contains(value, "Reserve") ||
+                Contains(value, "CPC_R_") ||
+                Contains(value, "WINDOWS_365_R_");
         }
 
         private static string? GetPlanKey(string value)
@@ -1441,6 +1465,15 @@ internal sealed class W365CliApp
                     new Markup(PropertyInline("Flex Cloud PCs that can have a user connected at once", item.ActiveSessionLimit.ToString()))
                 ]);
             }
+            else if (IsReserveLicense(item))
+            {
+                detailRows.AddRange(
+                [
+                    new Markup(PropertyInline("Reserve Cloud PCs you can create", item.ProvisionableCloudPcCount.ToString())),
+                    new Markup(PropertyInline("Reserve Cloud PCs already created", item.CloudPcCount.ToString())),
+                    new Markup(PropertyInline("More Reserve Cloud PCs you can create", item.AvailableCloudPcCount.ToString()))
+                ]);
+            }
             else
             {
                 detailRows.AddRange(
@@ -1482,10 +1515,17 @@ internal sealed class W365CliApp
             return item.Family.StartsWith("Flex", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsReserveLicense(LicenseOverviewItem item)
+        {
+            return item.Family.StartsWith("Reserve", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static Panel CreateLicensePlainEnglishPanel(LicenseOverviewItem item)
         {
-            var lines = IsFlexLicense(item)
-                ? new[]
+            string[] lines;
+            if (IsFlexLicense(item))
+            {
+                lines = new[]
                 {
                     $"You bought {item.Purchased} Flex licenses for this size.",
                     $"{item.SharedCloudPcCount} shared pool or Cloud Apps Cloud PCs use {item.SharedUnitsUsed} license units.",
@@ -1493,13 +1533,27 @@ internal sealed class W365CliApp
                     $"That uses {item.LicenseUnitsUsed} of {item.Purchased} license units, leaving {item.LicenseUnitsLeft}.",
                     $"You can create {item.AvailableCloudPcCount} more dedicated Cloud PCs. You can create {item.LicenseUnitsLeft} more shared pool Cloud PCs.",
                     $"Concurrency means {item.ActiveSessionLimit} total Flex Cloud PCs can have a user connected at the same time. It does not mean multiple users can connect to one Cloud PC."
-                }
-                : new[]
+                };
+            }
+            else if (IsReserveLicense(item))
+            {
+                lines =
+                [
+                    $"You bought {item.Purchased} Reserve licenses for this size.",
+                    $"{item.CloudPcCount} Reserve Cloud PCs currently match this license size.",
+                    $"{item.AvailableCloudPcCount} more Reserve Cloud PCs can be created before this license capacity is used.",
+                    "The Cloud PC table below shows which user is assigned to each detected Reserve Cloud PC."
+                ];
+            }
+            else
+            {
+                lines = new[]
                 {
                     $"You bought {item.Purchased} licenses for this size.",
                     $"{item.CloudPcCount} Cloud PCs currently match this license size.",
                     $"{item.AvailableCloudPcCount} more Cloud PCs can be created before this license capacity is used."
                 };
+            }
 
             return new Panel(new Rows(lines.Select(line => new Markup($"[grey]{Markup.Escape(line)}[/]"))))
                 .Header("What this means")

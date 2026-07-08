@@ -163,8 +163,8 @@ Where possible, selecting a Cloud PC row opens that Cloud PC's detail page.
 ### Licensing
 
 Licensing summarizes Windows 365 subscribed SKU capacity against the current Cloud PC inventory.
-It shows purchased licenses, assigned licenses, provisioned Cloud PCs, estimated availability, and
-Windows 365 Flex dedicated/shared utilization.
+It shows purchased licenses, assigned licenses, provisioned Cloud PCs, estimated availability,
+Reserve Cloud PC usage, and Windows 365 Flex dedicated/shared utilization.
 
 For Flex, the CLI shows the 3:1 dedicated provisioning model and the active-session limit. It also
 shows provisioning policies and groups that grant access where Graph exposes assignment data.
