@@ -67,6 +67,12 @@ internal sealed class W365GraphClient
         return await GetPagedAsync<SubscribedSku>($"https://graph.microsoft.com/v1.0/subscribedSkus?$select={select}");
     }
 
+    public async Task<IReadOnlyList<GroupMemberSummary>> GetGroupMembersAsync(string groupId)
+    {
+        var select = Uri.EscapeDataString("id,displayName,userPrincipalName");
+        return await GetPagedAsync<GroupMemberSummary>($"https://graph.microsoft.com/v1.0/groups/{Uri.EscapeDataString(groupId)}/members/microsoft.graph.user?$select={select}");
+    }
+
     public async Task PublishCloudAppAsync(string cloudAppId)
     {
         await PostJsonAsync("deviceManagement/virtualEndpoint/cloudApps/publish", new

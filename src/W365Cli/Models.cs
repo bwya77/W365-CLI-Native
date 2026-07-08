@@ -48,6 +48,23 @@ internal sealed record SubscribedSkuServicePlan
     public string? ProvisioningStatus { get; init; }
 }
 
+internal sealed record GroupMemberSummary
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; init; }
+
+    [JsonPropertyName("userPrincipalName")]
+    public string? UserPrincipalName { get; init; }
+
+    [JsonIgnore]
+    public string Name => !string.IsNullOrWhiteSpace(DisplayName)
+        ? DisplayName!
+        : UserPrincipalName ?? Id;
+}
+
 internal sealed record CloudPcSummary
 {
     [JsonPropertyName("id")]
