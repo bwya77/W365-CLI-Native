@@ -61,6 +61,12 @@ internal sealed class W365GraphClient
         return items.FirstOrDefault();
     }
 
+    public async Task<IReadOnlyList<SubscribedSku>> GetSubscribedSkusAsync()
+    {
+        var select = Uri.EscapeDataString("skuId,skuPartNumber,prepaidUnits,consumedUnits,servicePlans");
+        return await GetPagedAsync<SubscribedSku>($"https://graph.microsoft.com/v1.0/subscribedSkus?$select={select}");
+    }
+
     public async Task PublishCloudAppAsync(string cloudAppId)
     {
         await PostJsonAsync("deviceManagement/virtualEndpoint/cloudApps/publish", new

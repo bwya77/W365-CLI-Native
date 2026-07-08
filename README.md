@@ -24,6 +24,7 @@ It is separate from the PowerShell-based `W365CLI` module and does not require t
 - Create, restore, and delete snapshots.
 - Browse provisioning policies and view the Cloud PCs assigned to a policy.
 - Export, copy, reprovision, and delete provisioning policies.
+- Understand Windows 365 license capacity, availability, and Flex utilization.
 - Browse reports for usage, connectivity history, launch details, and Graph report streams.
 - Browse Cloud Apps and publish or unpublish them.
 - Browse service plans, gallery images, custom images, and supported regions.
@@ -92,6 +93,7 @@ DeviceManagementManagedDevices.Read.All
 DeviceManagementManagedDevices.PrivilegedOperations.All
 User.Read.All
 Group.Read.All
+Organization.Read.All
 offline_access
 openid
 profile
@@ -157,6 +159,15 @@ Reports include:
 - Cloud PC report streams
 
 Where possible, selecting a Cloud PC row opens that Cloud PC's detail page.
+
+### Licensing
+
+Licensing summarizes Windows 365 subscribed SKU capacity against the current Cloud PC inventory.
+It shows purchased licenses, assigned licenses, provisioned Cloud PCs, estimated availability, and
+Windows 365 Flex dedicated/shared utilization.
+
+For Flex, the CLI shows the 3:1 dedicated provisioning model and the active-session limit. It also
+shows provisioning policies and groups that grant access where Graph exposes assignment data.
 
 ### Catalog
 

@@ -131,6 +131,9 @@ internal sealed class W365CliApp
             case "Reports":
                 await ShowReportsAsync();
                 break;
+            case "Licensing":
+                await ShowLicensingAsync();
+                break;
             case "Catalog":
                 await ShowCatalogAsync();
                 break;
@@ -665,6 +668,7 @@ internal sealed class W365CliApp
             new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs"),
             new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows"),
             new("Reports", "Reports", "Usage, connectivity, launch details, report streams"),
+            new("Licensing", "Licensing", "Capacity, availability, and Flex utilization"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
             new("Catalog", "Catalog", "Service plans, images, regions"),
             new("Tenant", "Tenant settings", "Organization settings, profiles, user settings"),
@@ -837,6 +841,7 @@ internal sealed class W365CliApp
             new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots"),
             new("Provisioning", "Provisioning policies", "Open provisioning policy browser"),
             new("Reports", "Usage report", "Open Cloud PC usage"),
+            new("Licensing", "Licensing", "Open licensing capacity view"),
             new("Reports", "Launch details", "Open Cloud PC launch details"),
             new("Catalog", "Service plans", "Open service plan catalog"),
             new("Catalog", "Gallery images", "Open gallery images"),
@@ -1123,6 +1128,273 @@ internal sealed class W365CliApp
             }
         }
     }
+
+        private async Task ShowLicensingAsync()
+        {
+            if (!await EnsureConnectedAsync())
+            {
+                return;
+            }
+
+            IReadOnlyList<SubscribedSku> skus;
+            IReadOnlyList<CloudPcSummary> cloudPcs;
+            IReadOnlyList<ProvisioningPolicySummary> policies;
+            try
+            {
+                skus = await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Loading license data...", async _ => await _session.Graph.GetSubscribedSkusAsync());
+                cloudPcs = await LoadCloudPcsAsync();
+                policies = await LoadProvisioningPoliciesAsync();
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.Clear();
+                RenderBreadcrumb("Licensing");
+                AnsiConsole.MarkupLine("[red]Failed to load licensing data.[/]");
+                AnsiConsole.MarkupLine("[grey]The Licensing view requires access to subscribedSkUs, usually via Organization.Read.All or equivalent directory licensing permissions.[/]");
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine($"[grey]{Markup.Escape(ex.Message)}[/]");
+                WaitForBack();
+                return;
+            }
+
+            var items = BuildLicenseOverview(skus, cloudPcs, policies);
+            if (items.Count == 0)
+            {
+                TimedMessage("[yellow]No Windows 365 license SKUs were detected from subscribedSkUs.[/]");
+                return;
+            }
+
+            var selectedIndex = 0;
+            while (true)
+            {
+                AnsiConsole.Clear();
+                RenderLicensingOverview(items, selectedIndex);
+                var key = Console.ReadKey(intercept: true);
+                switch (key.Key)
+                {
+                    case ConsoleKey.UpArrow:
+                        selectedIndex = Math.Max(0, selectedIndex - 1);
+                        break;
+                    case ConsoleKey.DownArrow:
+                        selectedIndex = Math.Min(items.Count - 1, selectedIndex + 1);
+                        break;
+                    case ConsoleKey.PageUp:
+                        selectedIndex = Math.Max(0, selectedIndex - 10);
+                        break;
+                    case ConsoleKey.PageDown:
+                        selectedIndex = Math.Min(items.Count - 1, selectedIndex + 10);
+                        break;
+                    case ConsoleKey.Home:
+                        selectedIndex = 0;
+                        break;
+                    case ConsoleKey.End:
+                        selectedIndex = items.Count - 1;
+                        break;
+                    case ConsoleKey.Enter:
+                        ShowLicenseDetails(items[selectedIndex]);
+                        break;
+                    case ConsoleKey.Escape:
+                    case ConsoleKey.LeftArrow:
+                        return;
+                    default:
+                        if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                        {
+                            return;
+                        }
+                        break;
+                }
+            }
+        }
+
+        private static IReadOnlyList<LicenseOverviewItem> BuildLicenseOverview(
+            IReadOnlyList<SubscribedSku> skus,
+            IReadOnlyList<CloudPcSummary> cloudPcs,
+            IReadOnlyList<ProvisioningPolicySummary> policies)
+        {
+            var windows365Skus = skus.Where(IsWindows365Sku).ToArray();
+            var output = new List<LicenseOverviewItem>();
+            foreach (var group in windows365Skus.GroupBy(GetLicenseFamily, StringComparer.OrdinalIgnoreCase).OrderBy(group => group.Key))
+            {
+                var family = group.Key;
+                var purchased = group.Sum(sku => sku.PrepaidUnits?.Enabled ?? 0);
+                var assigned = group.Sum(sku => sku.ConsumedUnits ?? 0);
+                var matchingCloudPcs = GetCloudPcsForLicenseFamily(cloudPcs, family);
+                var dedicated = matchingCloudPcs.Count(pc => IsDedicatedCloudPc(pc));
+                var shared = matchingCloudPcs.Count - dedicated;
+                var isFlex = family.Equals("Flex", StringComparison.OrdinalIgnoreCase);
+                var provisionable = isFlex ? purchased * 3 : purchased;
+                var activeLimit = isFlex ? purchased : purchased;
+                var available = Math.Max(0, provisionable - matchingCloudPcs.Count);
+                var flexPolicies = policies
+                    .Where(policy => isFlex && IsFlexPolicy(policy))
+                    .ToArray();
+
+                output.Add(new LicenseOverviewItem(
+                    family,
+                    string.Join(", ", group.Select(sku => sku.SkuPartNumber).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase)),
+                    purchased,
+                    assigned,
+                    matchingCloudPcs.Count,
+                    dedicated,
+                    shared,
+                    provisionable,
+                    available,
+                    activeLimit,
+                    matchingCloudPcs,
+                    flexPolicies));
+            }
+
+            return output;
+        }
+
+        private static bool IsWindows365Sku(SubscribedSku sku)
+        {
+            var values = new[] { sku.SkuPartNumber }
+                .Concat(sku.ServicePlans?.Select(plan => plan.ServicePlanName) ?? [])
+                .Where(value => !string.IsNullOrWhiteSpace(value));
+            return values.Any(value =>
+                value!.Contains("W365", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("WINDOWS_365", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("WINDOWS365", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("CLOUD_PC", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("CLOUDPC", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string GetLicenseFamily(SubscribedSku sku)
+        {
+            var text = $"{sku.SkuPartNumber} {string.Join(' ', sku.ServicePlans?.Select(plan => plan.ServicePlanName) ?? [])}";
+            if (text.Contains("FLEX", StringComparison.OrdinalIgnoreCase)) { return "Flex"; }
+            if (text.Contains("FRONTLINE", StringComparison.OrdinalIgnoreCase)) { return "Frontline"; }
+            if (text.Contains("BUSINESS", StringComparison.OrdinalIgnoreCase)) { return "Business"; }
+            if (text.Contains("ENTERPRISE", StringComparison.OrdinalIgnoreCase)) { return "Enterprise"; }
+            return "Windows 365";
+        }
+
+        private static IReadOnlyList<CloudPcSummary> GetCloudPcsForLicenseFamily(IReadOnlyList<CloudPcSummary> cloudPcs, string family)
+        {
+            if (family.Equals("Flex", StringComparison.OrdinalIgnoreCase))
+            {
+                return cloudPcs
+                    .Where(pc => Contains(pc.ServicePlanName, "Flex") || IsSharedCloudPc(pc))
+                    .ToArray();
+            }
+
+            return cloudPcs
+                .Where(pc => Contains(pc.ServicePlanName, family))
+                .ToArray();
+        }
+
+        private static bool IsDedicatedCloudPc(CloudPcSummary cloudPc)
+        {
+            return cloudPc.ProvisioningType?.Contains("dedicated", StringComparison.OrdinalIgnoreCase) == true;
+        }
+
+        private static bool IsSharedCloudPc(CloudPcSummary cloudPc)
+        {
+            return cloudPc.ProvisioningType?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true;
+        }
+
+        private static bool IsFlexPolicy(ProvisioningPolicySummary policy)
+        {
+            return policy.ProvisioningType?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true ||
+                policy.DisplayName.Contains("Flex", StringComparison.OrdinalIgnoreCase) ||
+                policy.Description?.Contains("Flex", StringComparison.OrdinalIgnoreCase) == true;
+        }
+
+        private static void RenderLicensingOverview(IReadOnlyList<LicenseOverviewItem> items, int selectedIndex)
+        {
+            RenderBreadcrumb("Licensing");
+            AnsiConsole.MarkupLine("[#4091f2]Windows 365 licensing[/]");
+            AnsiConsole.MarkupLine("[grey]Capacity estimates use Microsoft Graph subscribedSkUs plus current Cloud PC inventory.[/]");
+            AnsiConsole.WriteLine();
+            var table = new Table()
+                .Border(TableBorder.Rounded)
+                .AddColumn(" ")
+                .AddColumn("Family")
+                .AddColumn("Purchased")
+                .AddColumn("Assigned")
+                .AddColumn("Cloud PCs")
+                .AddColumn("Dedicated")
+                .AddColumn("Shared")
+                .AddColumn("Provisionable")
+                .AddColumn("Available")
+                .AddColumn("Active limit");
+
+            for (var index = 0; index < items.Count; index++)
+            {
+                var item = items[index];
+                table.AddRow(
+                    index == selectedIndex ? "[black on #4091f2]>[/]" : " ",
+                    Markup.Escape(item.Family),
+                    item.Purchased.ToString(),
+                    item.Assigned.ToString(),
+                    item.CloudPcCount.ToString(),
+                    item.DedicatedCloudPcCount.ToString(),
+                    item.SharedCloudPcCount.ToString(),
+                    item.ProvisionableCloudPcCount.ToString(),
+                    item.AvailableCloudPcCount.ToString(),
+                    item.ActiveSessionLimit.ToString());
+            }
+
+            AnsiConsole.Write(table);
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Enter details | Esc/B/Q back[/]");
+        }
+
+        private static void ShowLicenseDetails(LicenseOverviewItem item)
+        {
+            AnsiConsole.Clear();
+            RenderBreadcrumb("Licensing", item.Family);
+            var details = new Rows(
+                new Markup(PropertyInline("Family", item.Family)),
+                new Markup(PropertyBlock("SKUs", item.SkuPartNumbers)),
+                new Markup(PropertyInline("Purchased licenses", item.Purchased.ToString())),
+                new Markup(PropertyInline("Assigned licenses", item.Assigned.ToString())),
+                new Markup(PropertyInline("Provisionable Cloud PCs", item.ProvisionableCloudPcCount.ToString())),
+                new Markup(PropertyInline("Provisioned Cloud PCs", item.CloudPcCount.ToString())),
+                new Markup(PropertyInline("Available Cloud PCs", item.AvailableCloudPcCount.ToString())),
+                new Markup(PropertyInline("Dedicated Cloud PCs", item.DedicatedCloudPcCount.ToString())),
+                new Markup(PropertyInline("Shared Cloud PCs", item.SharedCloudPcCount.ToString())),
+                new Markup(PropertyInline("Max active Flex sessions", item.ActiveSessionLimit.ToString())));
+            AnsiConsole.Write(new Panel(details).Header("License capacity").Border(BoxBorder.Rounded));
+
+            if (item.Family.Equals("Flex", StringComparison.OrdinalIgnoreCase))
+            {
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine("[#4091f2]Flex capacity model[/]");
+                AnsiConsole.MarkupLine($"[grey]Dedicated mode: {item.Purchased} licenses x 3 non-concurrent Cloud PCs = {item.ProvisionableCloudPcCount} provisionable Cloud PCs.[/]");
+                AnsiConsole.MarkupLine($"[grey]Concurrency: at most {item.ActiveSessionLimit} Flex Cloud PC sessions can be active at the same time.[/]");
+                AnsiConsole.WriteLine();
+                AnsiConsole.Write(BuildFlexAccessTable(item));
+            }
+
+            WaitForBack();
+        }
+
+        private static Table BuildFlexAccessTable(LicenseOverviewItem item)
+        {
+            var table = new Table()
+                .Border(TableBorder.Rounded)
+                .AddColumn("Policy")
+                .AddColumn("Type")
+                .AddColumn("Groups with access");
+            foreach (var policy in item.FlexPolicies)
+            {
+                table.AddRow(
+                    Markup.Escape(policy.DisplayName),
+                    Markup.Escape(policy.ProvisioningType ?? "-"),
+                    Markup.Escape(string.Join(", ", policy.AssignedGroupNames)));
+            }
+
+            if (item.FlexPolicies.Count == 0)
+            {
+                table.AddRow("[grey]-[/]", "[grey]-[/]", "[grey]No Flex policy access mappings detected.[/]");
+            }
+
+            return table;
+        }
 
     private async Task<IReadOnlyList<ProvisioningPolicySummary>> LoadProvisioningPoliciesAsync()
     {
@@ -4308,6 +4580,20 @@ internal sealed class W365CliApp
     private sealed record ActionHistoryItem(string Action, string Target, string ResourceType, string? ResourceName, string Status, DateTimeOffset RequestedAt, string? Detail);
 
     private sealed record GitHubReleaseInfo(string TagName, string HtmlUrl, DateTimeOffset? PublishedAt);
+
+    private sealed record LicenseOverviewItem(
+        string Family,
+        string SkuPartNumbers,
+        int Purchased,
+        int Assigned,
+        int CloudPcCount,
+        int DedicatedCloudPcCount,
+        int SharedCloudPcCount,
+        int ProvisionableCloudPcCount,
+        int AvailableCloudPcCount,
+        int ActiveSessionLimit,
+        IReadOnlyList<CloudPcSummary> CloudPcs,
+        IReadOnlyList<ProvisioningPolicySummary> FlexPolicies);
 
     private enum GraphRowSortMode
     {

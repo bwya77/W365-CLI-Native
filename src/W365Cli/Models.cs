@@ -9,6 +9,45 @@ internal sealed record GraphPage<T>(
 
 internal sealed record GraphTableRow(string Title, string Summary, IReadOnlyDictionary<string, string> Fields);
 
+internal sealed record SubscribedSku
+{
+    [JsonPropertyName("skuId")]
+    public string? SkuId { get; init; }
+
+    [JsonPropertyName("skuPartNumber")]
+    public string? SkuPartNumber { get; init; }
+
+    [JsonPropertyName("prepaidUnits")]
+    public SubscribedSkuPrepaidUnits? PrepaidUnits { get; init; }
+
+    [JsonPropertyName("consumedUnits")]
+    public int? ConsumedUnits { get; init; }
+
+    [JsonPropertyName("servicePlans")]
+    public IReadOnlyList<SubscribedSkuServicePlan>? ServicePlans { get; init; }
+}
+
+internal sealed record SubscribedSkuPrepaidUnits
+{
+    [JsonPropertyName("enabled")]
+    public int? Enabled { get; init; }
+
+    [JsonPropertyName("suspended")]
+    public int? Suspended { get; init; }
+
+    [JsonPropertyName("warning")]
+    public int? Warning { get; init; }
+}
+
+internal sealed record SubscribedSkuServicePlan
+{
+    [JsonPropertyName("servicePlanName")]
+    public string? ServicePlanName { get; init; }
+
+    [JsonPropertyName("provisioningStatus")]
+    public string? ProvisioningStatus { get; init; }
+}
+
 internal sealed record CloudPcSummary
 {
     [JsonPropertyName("id")]
