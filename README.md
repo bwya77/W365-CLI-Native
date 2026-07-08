@@ -6,10 +6,14 @@
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Platform](https://img.shields.io/badge/platform-Windows-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
 
+![mainUI](docs/images/mainUI.png)
+
 W365 CLI Native is a keyboard-first Windows 365 Cloud PC management experience built as a native
 .NET command-line app.
 
 It is separate from the PowerShell-based `W365CLI` module and does not require the PowerShell module at runtime.
+
+![cloudPCs](docs/images/cloudPCs.png)
 
 ## What it does
 
