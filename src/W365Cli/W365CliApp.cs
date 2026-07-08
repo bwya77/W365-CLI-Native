@@ -1213,14 +1213,21 @@ internal sealed class W365CliApp
             IReadOnlyList<CloudPcSummary> cloudPcs,
             IReadOnlyList<ProvisioningPolicySummary> policies)
         {
-            var windows365Skus = skus.Where(IsWindows365Sku).ToArray();
+            var windows365Skus = skus
+                .Select(sku => new { Sku = sku, Info = GetWindows365LicenseInfo(sku) })
+                .Where(item => item.Info is not null)
+                .ToArray();
             var output = new List<LicenseOverviewItem>();
-            foreach (var group in windows365Skus.GroupBy(GetLicenseFamily, StringComparer.OrdinalIgnoreCase).OrderBy(group => group.Key))
+            foreach (var group in windows365Skus
+                .GroupBy(item => $"{item.Info!.Family}|{item.Info.PlanKey}", StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.First().Info!.Family, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(group => group.First().Info!.PlanKey, StringComparer.OrdinalIgnoreCase))
             {
-                var family = group.Key;
-                var purchased = group.Sum(sku => sku.PrepaidUnits?.Enabled ?? 0);
-                var assigned = group.Sum(sku => sku.ConsumedUnits ?? 0);
-                var matchingCloudPcs = GetCloudPcsForLicenseFamily(cloudPcs, family);
+                var info = group.First().Info!;
+                var family = info.Family;
+                var purchased = group.Sum(item => item.Sku.PrepaidUnits?.Enabled ?? 0);
+                var assigned = group.Sum(item => item.Sku.ConsumedUnits ?? 0);
+                var matchingCloudPcs = GetCloudPcsForLicense(cloudPcs, info);
                 var dedicated = matchingCloudPcs.Count(pc => IsDedicatedCloudPc(pc));
                 var shared = matchingCloudPcs.Count - dedicated;
                 var isFlex = family.Equals("Flex", StringComparison.OrdinalIgnoreCase);
@@ -1232,8 +1239,8 @@ internal sealed class W365CliApp
                     .ToArray();
 
                 output.Add(new LicenseOverviewItem(
-                    family,
-                    string.Join(", ", group.Select(sku => sku.SkuPartNumber).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase)),
+                    info.DisplayName,
+                    string.Join(", ", group.Select(item => item.Sku.SkuPartNumber).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase)),
                     purchased,
                     assigned,
                     matchingCloudPcs.Count,
@@ -1249,51 +1256,76 @@ internal sealed class W365CliApp
             return output;
         }
 
-        private static bool IsWindows365Sku(SubscribedSku sku)
-        {
-            var values = new[] { sku.SkuPartNumber }
-                .Concat(sku.ServicePlans?.Select(plan => plan.ServicePlanName) ?? [])
-                .Where(value => !string.IsNullOrWhiteSpace(value));
-            return values.Any(value =>
-                value!.Contains("W365", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("WINDOWS_365", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("WINDOWS365", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("CLOUD_PC", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("CLOUDPC", StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static string GetLicenseFamily(SubscribedSku sku)
+        private static Windows365LicenseInfo? GetWindows365LicenseInfo(SubscribedSku sku)
         {
             var text = $"{sku.SkuPartNumber} {string.Join(' ', sku.ServicePlans?.Select(plan => plan.ServicePlanName) ?? [])}";
-            if (text.Contains("FLEX", StringComparison.OrdinalIgnoreCase)) { return "Flex"; }
-            if (text.Contains("FRONTLINE", StringComparison.OrdinalIgnoreCase)) { return "Frontline"; }
-            if (text.Contains("BUSINESS", StringComparison.OrdinalIgnoreCase)) { return "Business"; }
-            if (text.Contains("ENTERPRISE", StringComparison.OrdinalIgnoreCase)) { return "Enterprise"; }
-            return "Windows 365";
-        }
-
-        private static IReadOnlyList<CloudPcSummary> GetCloudPcsForLicenseFamily(IReadOnlyList<CloudPcSummary> cloudPcs, string family)
-        {
-            if (family.Equals("Flex", StringComparison.OrdinalIgnoreCase))
+            if (!text.Contains("W365", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("WINDOWS_365", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("WINDOWS365", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("CLOUD_PC", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("CLOUDPC", StringComparison.OrdinalIgnoreCase))
             {
-                return cloudPcs
-                    .Where(pc => Contains(pc.ServicePlanName, "Flex") || IsSharedCloudPc(pc))
-                    .ToArray();
+                return null;
             }
 
+            if (text.Contains("DISASTER", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("RESERVE", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("ADD_ON", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("ADDON", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var family = text.Contains("FLEX", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("FRONTLINE", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("WINDOWS_365_S_", StringComparison.OrdinalIgnoreCase)
+                    ? "Flex"
+                    : text.Contains("BUSINESS", StringComparison.OrdinalIgnoreCase) || text.Contains("WINDOWS_365_B_", StringComparison.OrdinalIgnoreCase)
+                        ? "Business"
+                        : "Enterprise";
+            var planKey = GetPlanKey(text) ?? "unknown";
+            var planLabel = planKey == "unknown" ? "unknown size" : FormatPlanKey(planKey);
+            return new Windows365LicenseInfo(family, planKey, $"{family} {planLabel}");
+        }
+
+        private static IReadOnlyList<CloudPcSummary> GetCloudPcsForLicense(IReadOnlyList<CloudPcSummary> cloudPcs, Windows365LicenseInfo license)
+        {
             return cloudPcs
-                .Where(pc => Contains(pc.ServicePlanName, family))
+                .Where(pc =>
+                    string.Equals(GetPlanKey(pc.ServicePlanName ?? string.Empty), license.PlanKey, StringComparison.OrdinalIgnoreCase) &&
+                    (license.Family.Equals("Flex", StringComparison.OrdinalIgnoreCase)
+                        ? Contains(pc.ServicePlanName, "Frontline") || Contains(pc.ServicePlanName, "Flex") || Contains(pc.ProvisioningPolicyName, "Flex")
+                        : Contains(pc.ServicePlanName, license.Family)))
                 .ToArray();
+        }
+
+        private static string? GetPlanKey(string value)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                value,
+                @"(?<cpu>\d+)\s*vCPU[^\d]+(?<ram>\d+)\s*GB[^\d]+(?<storage>\d+)\s*GB",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return match.Success
+                ? $"{match.Groups["cpu"].Value}/{match.Groups["ram"].Value}/{match.Groups["storage"].Value}"
+                : null;
+        }
+
+        private static string FormatPlanKey(string planKey)
+        {
+            var parts = planKey.Split('/');
+            return parts.Length == 3 ? $"{parts[0]}vCPU/{parts[1]}GB/{parts[2]}GB" : planKey;
         }
 
         private static bool IsDedicatedCloudPc(CloudPcSummary cloudPc)
         {
-            return cloudPc.ProvisioningType?.Contains("dedicated", StringComparison.OrdinalIgnoreCase) == true;
+            return cloudPc.ProvisioningType?.Contains("dedicated", StringComparison.OrdinalIgnoreCase) == true ||
+                cloudPc.ProvisioningPolicyName?.Contains("dedicated", StringComparison.OrdinalIgnoreCase) == true;
         }
 
         private static bool IsSharedCloudPc(CloudPcSummary cloudPc)
         {
-            return cloudPc.ProvisioningType?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true;
+            return cloudPc.ProvisioningType?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true ||
+                cloudPc.ProvisioningPolicyName?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true;
         }
 
         private static bool IsFlexPolicy(ProvisioningPolicySummary policy)
@@ -4594,6 +4626,8 @@ internal sealed class W365CliApp
         int ActiveSessionLimit,
         IReadOnlyList<CloudPcSummary> CloudPcs,
         IReadOnlyList<ProvisioningPolicySummary> FlexPolicies);
+
+    private sealed record Windows365LicenseInfo(string Family, string PlanKey, string DisplayName);
 
     private enum GraphRowSortMode
     {
