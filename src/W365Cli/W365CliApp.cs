@@ -275,7 +275,6 @@ internal sealed class W365CliApp
             }
 
             AnsiConsole.Clear();
-            RenderCompactHeader();
             RenderBreadcrumb("Cloud PCs", "Disk space");
             RenderDiskSpaceTable(items, visibleItems, selectedIndex, filter);
             var key = Console.ReadKey(intercept: true);
@@ -1139,7 +1138,6 @@ internal sealed class W365CliApp
         string filter,
         ProvisioningPolicySortMode sortMode)
     {
-        RenderCompactHeader();
         RenderBreadcrumb("Provisioning", "Provisioning policies");
         AnsiConsole.Write(CreateProvisioningPolicySummaryPanel(allPolicies, visiblePolicies, filter));
         AnsiConsole.Write(CreateProvisioningPolicyTable(visiblePolicies, selectedIndex));
@@ -2997,7 +2995,6 @@ internal sealed class W365CliApp
         grid.AddColumn();
         grid.AddRow(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter), CreateCloudPcSidePanel(selectedCloudPc));
 
-        RenderCompactHeader();
         RenderBreadcrumb("Cloud PCs", "Browse");
         AnsiConsole.Write(CreateCloudPcSummaryPanel(allCloudPcs, visibleCloudPcs, filter));
         if (Console.WindowWidth >= 125)
@@ -3011,22 +3008,6 @@ internal sealed class W365CliApp
         }
         AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Up/Down move | PgUp/PgDn page | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc back[/]");
         RenderStatusBar();
-    }
-
-    private void RenderCompactHeader()
-    {
-        if (_session.IsConnected)
-        {
-            var tenantText = _session.TenantName is not null
-                ? $"{_session.TenantName} ({_session.TenantId})"
-                : _session.TenantId ?? "unknown";
-            AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native[/] [grey]v{GetCurrentVersion()} | Bradley Wyatt[/]   [green]Connected[/] [grey]{Markup.Escape(tenantText)}[/]");
-        }
-        else
-        {
-            AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native[/] [grey]v{GetCurrentVersion()} | Bradley Wyatt[/]   [yellow]Not connected[/]");
-        }
-        AnsiConsole.WriteLine();
     }
 
     private static Panel CreateCloudPcSummaryPanel(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, string filter)
@@ -3156,7 +3137,7 @@ internal sealed class W365CliApp
         grid.AddColumn();
         grid.AddRow(CreateCloudAppTable(allApps, visibleApps, selectedIndex, filter), CreateCloudAppSidePanel(selectedApp));
 
-        RenderCompactHeader();
+        RenderBreadcrumb("Cloud Apps", "Browse");
         AnsiConsole.Write(CreateCloudAppSummaryPanel(allApps, visibleApps, filter));
         if (Console.WindowWidth >= 125)
         {
