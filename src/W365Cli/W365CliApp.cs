@@ -8,8 +8,23 @@ internal sealed class W365CliApp
 {
     private const string GitHubRepositoryUrl = "https://github.com/bwya77/W365-CLI-Native";
     private const string GitHubLatestReleaseApiUrl = "https://api.github.com/repos/bwya77/W365-CLI-Native/releases/latest";
+    private const string AccentColor = "#58a6ff";
+    private const string AccentSoftColor = "#79c0ff";
+    private const string MutedColor = "#8b949e";
+    private const string TextColor = "#f0f6fc";
+    private const string SurfaceColor = "#161b22";
+    private const string PurpleColor = "#bc8cff";
+    private const string GreenColor = "#3fb950";
     private readonly W365Session _session = new();
     private static readonly List<ActionHistoryItem> ActionHistory = [];
+    private static readonly Tip[] Tips =
+    [
+        new("/palette", "Use P or Ctrl+K to open the command palette from anywhere on the main screen."),
+        new("/tabs", "Use Tab, Shift+Tab, Left, or Right to move across the top areas."),
+        new("/refresh", "Press R on data-heavy screens to refresh without leaving your current view."),
+        new("/history", "Press H to open hidden action history for submitted Cloud PC actions."),
+        new("/resize", "Resize uses an interactive service plan picker so you can compare sizes before submitting.")
+    ];
     private static string? statusMessage;
     private static DateTimeOffset? statusMessageAt;
     private GitHubReleaseInfo? latestRelease;
@@ -19,6 +34,7 @@ internal sealed class W365CliApp
     public async Task<int> RunAsync(string[] args)
     {
         Console.Title = "W365 CLI Native";
+        Console.CursorVisible = false;
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .StartAsync("Checking cached sign-in...", async _ => await _session.TryRestoreAsync());
@@ -42,6 +58,14 @@ internal sealed class W365CliApp
                     break;
                 case ConsoleKey.DownArrow:
                     selectedIndex = Math.Min(menuChoices.Count - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.Tab when key.Modifiers.HasFlag(ConsoleModifiers.Shift):
+                case ConsoleKey.LeftArrow:
+                    selectedIndex = selectedIndex <= 0 ? menuChoices.Count - 1 : selectedIndex - 1;
+                    break;
+                case ConsoleKey.Tab:
+                case ConsoleKey.RightArrow:
+                    selectedIndex = selectedIndex >= menuChoices.Count - 1 ? 0 : selectedIndex + 1;
                     break;
                 case ConsoleKey.Home:
                     selectedIndex = 0;
@@ -148,6 +172,7 @@ internal sealed class W365CliApp
                 break;
             case "Exit":
                 AnsiConsole.Clear();
+                Console.CursorVisible = true;
                 return true;
         }
 
@@ -682,7 +707,7 @@ internal sealed class W365CliApp
     private void RenderMainMenuDashboard(IReadOnlyList<MenuChoice> choices)
     {
         var connectionText = _session.IsConnected ? "Connected" : "Not connected";
-        var connectionColor = _session.IsConnected ? "green" : "yellow";
+        var connectionColor = _session.IsConnected ? GreenColor : "yellow";
         var tenantName = _session.TenantName ?? "No tenant selected";
         var tenantId = _session.TenantId ?? "-";
         var updateText = GetUpdateStatusText();
@@ -695,8 +720,8 @@ internal sealed class W365CliApp
         dashboard.AddColumn();
         dashboard.AddRow(
             new Panel(new Markup($"[bold {connectionColor}]{connectionText}[/]\n[grey]Status[/]")).Border(BoxBorder.Rounded),
-            new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantId, 36))}[/]\n[grey]Tenant ID[/]")).Border(BoxBorder.Rounded),
-            new Panel(new Markup($"[bold white]{Markup.Escape(Fit(tenantName, 30))}[/]\n[grey]Tenant name[/]")).Border(BoxBorder.Rounded),
+            new Panel(new Markup($"[bold {TextColor}]{Markup.Escape(Fit(tenantId, 36))}[/]\n[grey]Tenant ID[/]")).Border(BoxBorder.Rounded),
+            new Panel(new Markup($"[bold {TextColor}]{Markup.Escape(Fit(tenantName, 30))}[/]\n[grey]Tenant name[/]")).Border(BoxBorder.Rounded),
             new Panel(new Markup($"[bold {updateColor}]{Markup.Escape(Fit(updateText, 24))}[/]\n[grey]Updates[/]")).Border(BoxBorder.Rounded));
 
         AnsiConsole.Write(dashboard);
@@ -708,21 +733,58 @@ internal sealed class W365CliApp
     private void RenderMainMenu(IReadOnlyList<MenuChoice> choices, int selectedIndex)
     {
         RenderHeader();
+        RenderTopTabs(choices, selectedIndex);
+        AnsiConsole.WriteLine();
         RenderMainMenuDashboard(choices);
         RenderBreadcrumb("Main menu");
 
-        AnsiConsole.MarkupLine("[#4091f2]Select an area[/]");
+        AnsiConsole.MarkupLine($"[{AccentColor}]Select an area[/]");
         for (var index = 0; index < choices.Count; index++)
         {
             var label = FormatMainMenuChoice(choices[index]);
             AnsiConsole.MarkupLine(index == selectedIndex
-                ? $"[black on #4091f2]> {label}[/]"
+                ? $"[black on {AccentColor}]> {label}[/]"
                 : $"  {label}");
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | P or Ctrl+K command palette[/]");
+        RenderTip(choices[selectedIndex], selectedIndex);
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Tab/Left/Right areas | Up/Down list | Enter open | P or Ctrl+K command palette[/]");
         RenderStatusBar();
+    }
+
+    private static void RenderTopTabs(IReadOnlyList<MenuChoice> choices, int selectedIndex)
+    {
+        var tabs = choices
+            .Take(8)
+            .Select((choice, index) =>
+            {
+                var title = Markup.Escape(choice.Title.Replace(" settings", string.Empty, StringComparison.OrdinalIgnoreCase));
+                return index == selectedIndex
+                    ? $"[black on {AccentColor}] {title} [/]"
+                    : $"[{MutedColor}] {title} [/]";
+            });
+        AnsiConsole.MarkupLine(string.Join($"[{MutedColor}]  |  [/]", tabs));
+    }
+
+    private static void RenderTip(MenuChoice choice, int selectedIndex)
+    {
+        var tip = Tips[selectedIndex % Tips.Length];
+        var context = choice.Key switch
+        {
+            "Licensing" => new Tip("/licensing", "Open Licensing to see Flex, Reserve, shared pool, Cloud Apps, and dedicated capacity in one place."),
+            "CloudPcs" => new Tip("/cloudpcs", "Open Cloud PCs for browse, filter, resize, restart, reprovision, snapshots, and action history."),
+            "Provisioning" => new Tip("/policies", "Provisioning includes policy export, copy, Cloud PC reprovision, and policy cleanup workflows."),
+            "CloudApps" => new Tip("/apps", "Cloud Apps lets you browse, publish, and unpublish Windows 365 Cloud Apps."),
+            _ => tip
+        };
+
+        var body = $"[bold {PurpleColor}]Tip: {Markup.Escape(context.Command)}[/]\n" +
+            $"[{MutedColor}]L {Markup.Escape(context.Text)}[/]";
+        AnsiConsole.Write(new Panel(new Markup(body))
+            .Border(BoxBorder.None)
+            .Padding(0, 0, 0, 0));
     }
 
     private async Task ShowCommandPaletteAsync()
@@ -819,7 +881,7 @@ internal sealed class W365CliApp
 
     private static string FormatMainMenuChoice(MenuChoice choice)
     {
-        return $"[white]{Markup.Escape(Fit(choice.Title, 22))}[/] [#b8b8b8]{Markup.Escape(choice.Description)}[/]";
+        return $"[{TextColor}]{Markup.Escape(Fit(choice.Title, 22))}[/] [{MutedColor}]{Markup.Escape(choice.Description)}[/]";
     }
 
     private static void RenderBreadcrumb(params string[] parts)
@@ -865,13 +927,8 @@ internal sealed class W365CliApp
     private void RenderHeader()
     {
         AnsiConsole.Clear();
-        AnsiConsole.MarkupLine("[#4091f2]██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗[/]");
-        AnsiConsole.MarkupLine("[#4091f2]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]");
-        AnsiConsole.MarkupLine("[#4091f2]██║ █╗ ██║ █████╔╝███████╗ ███████╗    ██║     ██║     ██║[/]");
-        AnsiConsole.MarkupLine("[#4091f2]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]");
-        AnsiConsole.MarkupLine("[#4091f2]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]");
-        AnsiConsole.MarkupLine("[#4091f2] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]");
-        AnsiConsole.MarkupLine($"[grey]W365 CLI Native v{GetCurrentVersion()} | Bradley Wyatt[/]");
+        AnsiConsole.MarkupLine($"[bold {AccentColor}]W365 CLI Native[/] [{MutedColor}]v{GetCurrentVersion()}[/]");
+        AnsiConsole.MarkupLine($"[{MutedColor}]Keyboard-first Windows 365 Cloud PC workflows[/]");
         AnsiConsole.WriteLine();
     }
 
@@ -4140,7 +4197,7 @@ internal sealed class W365CliApp
 
     private static string Selected(string escapedText)
     {
-        return $"[black on #4091f2]{escapedText}[/]";
+        return $"[black on {AccentColor}]{escapedText}[/]";
     }
 
     private static void SetStatus(string markup)
@@ -4181,7 +4238,7 @@ internal sealed class W365CliApp
 
     private static Style SelectionHighlightStyle()
     {
-        return new Style(Color.Black, Color.FromHex("#4091f2"));
+        return new Style(Color.Black, Color.FromHex(AccentColor));
     }
 
     private static string Row(params object[] valuesAndWidths)
@@ -4970,6 +5027,8 @@ internal sealed class W365CliApp
     private sealed record SnapshotListItem(CloudPcSummary CloudPc, CloudPcSnapshot Snapshot);
 
     private sealed record MenuChoice(string Key, string Title, string Description);
+
+    private sealed record Tip(string Command, string Text);
 
     private sealed record ActionHistoryItem(string Action, string Target, string ResourceType, string? ResourceName, string Status, DateTimeOffset RequestedAt, string? Detail);
 
