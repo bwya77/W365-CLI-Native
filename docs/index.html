@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W365 CLI Native — Manage Windows 365 Without Leaving Your Keyboard</title>
+<meta name="description" content="A keyboard-first, native command-line app for managing your entire Windows 365 Cloud PC fleet. Free, open source, signed builds for Windows and macOS.">
+
+<meta property="og:title" content="W365 CLI Native">
+<meta property="og:description" content="Manage your entire Windows 365 fleet without leaving the keyboard.">
+<meta property="og:image" content="images/mainUI.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%230b0d13'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle' fill='%234091f2' font-family='monospace' font-weight='bold'%3E%3E_%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="container">
+    <a class="brand" href="#top">
+      <span>W365 CLI</span><span class="chip">Native</span>
+    </a>
+    <div class="nav-links">
+      <a href="#problem">Why</a>
+      <a href="#plan">How it works</a>
+      <a href="#download">Download</a>
+      <a href="https://github.com/bwya77/W365-CLI-Native" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-coffee btn-sm" href="https://www.buymeacoffee.com/bwya77" target="_blank" rel="noopener">☕ Buy me a coffee</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="container">
+    <div class="eyebrow"><span class="dot"></span> Free &amp; open source · <span data-version-pill>v0.1.5</span></div>
+    <h1>Manage your entire Windows 365 fleet <span class="accent">without leaving the keyboard.</span></h1>
+    <p class="subhead">
+      W365 CLI Native is a fast, keyboard-first command-line app for admins who are tired of
+      clicking through the Windows 365 admin center just to restart, resize, or check on a Cloud PC.
+      One binary. No browser tabs. No waiting on portal load spinners.
+    </p>
+
+    <div class="cta-row">
+      <a id="primary-download" class="btn btn-primary" href="https://github.com/bwya77/W365-CLI-Native/releases/latest">
+        <span id="primary-download-label">Download for your platform</span>
+      </a>
+      <a class="btn btn-secondary" href="#plan">See how it works ↓</a>
+    </div>
+    <div class="cta-note" id="platform-note">Detecting your platform…</div>
+
+    <div class="platform-links">
+      <a href="#" data-asset="w365-win-x64.zip">Windows x64</a>
+      <a href="#" data-asset="w365-win-arm64.zip">Windows ARM64</a>
+      <a href="#" data-asset="w365-osx-x64.zip">macOS Intel</a>
+      <a href="#" data-asset="w365-osx-arm64.zip">macOS Apple Silicon</a>
+      <a href="https://github.com/bwya77/W365-CLI-Native/releases/latest" id="latest-release-link">All releases &amp; checksums →</a>
+    </div>
+
+    <div class="window">
+      <div class="window-bar">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <div class="title">W365 CLI Native</div>
+      </div>
+      <img src="images/mainUI.png" alt="W365 CLI Native main menu showing tenant status, connection info, and update check">
+    </div>
+  </div>
+</header>
+
+<section id="problem">
+  <div class="container">
+    <div class="kicker">The problem</div>
+    <h2>The Windows 365 admin center wasn't built for people who live in a terminal.</h2>
+    <p class="lede">
+      You manage a fleet of Cloud PCs. Every restart, resize, or reprovision means opening a browser,
+      finding the right blade, waiting for a page to load, and clicking through the same flow again.
+      It adds up — and it pulls you out of flow every single time.
+    </p>
+    <div class="grid-3">
+      <div class="card">
+        <div class="tag">External</div>
+        <h3>Too many clicks, too much waiting</h3>
+        <p>The admin center is a web app. Every action is a page load, a blade, a confirmation dialog —
+        multiplied across dozens or hundreds of Cloud PCs.</p>
+      </div>
+      <div class="card">
+        <div class="tag">Internal</div>
+        <h3>It shouldn't feel this slow</h3>
+        <p>You know your fleet. You shouldn't need six clicks and three tabs to do something you could
+        type in two seconds if you had the right tool.</p>
+      </div>
+      <div class="card">
+        <div class="tag">Philosophical</div>
+        <h3>Admin tools should respect your time</h3>
+        <p>If a CLI can manage servers, containers, and cloud infrastructure at speed, Cloud PC
+        management deserves the same treatment.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-alt">
+  <div class="container">
+    <div class="guide">
+      <div>
+        <div class="kicker">The guide</div>
+        <blockquote class="quote">
+          We built W365 CLI Native because we manage Windows 365 fleets too, and we wanted the same
+          keyboard-first speed we get from every other admin tool we rely on.
+        </blockquote>
+        <div class="badge-row">
+          <img src="https://github.com/bwya77/W365-CLI-Native/actions/workflows/ci.yml/badge.svg" alt="CI status">
+          <img src="https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml/badge.svg" alt="Release status">
+          <img src="https://img.shields.io/github/v/release/bwya77/W365-CLI-Native?label=release" alt="Latest release">
+          <img src="https://img.shields.io/badge/.NET-8.0-512BD4" alt=".NET 8">
+        </div>
+        <ul class="authority-list">
+          <li>Open source on GitHub — inspect every line before you trust it with your tenant</li>
+          <li>Windows binaries signed with Azure Trusted Signing; macOS builds signed &amp; notarized by Apple</li>
+          <li>Every release ships with SHA256 checksums for Windows and macOS assets</li>
+          <li>Built on Microsoft Graph delegated permissions — no standing admin credentials stored</li>
+          <li>Built-in "Check for updates" compares your binary against the latest GitHub Release</li>
+        </ul>
+      </div>
+      <div class="window">
+        <div class="window-bar">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="title">Cloud PCs · Browse</div>
+        </div>
+        <img src="images/cloudPCs.png" alt="W365 CLI Native browsing a Cloud PC fleet with filters, sorting, and a detail panel">
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="plan">
+  <div class="container">
+    <div class="kicker">The plan</div>
+    <h2>Three steps from download to managing your fleet.</h2>
+    <p class="lede">No installers, no PowerShell modules to import, no portal bookmarks to hunt for. Just a binary.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h3>Download &amp; extract</h3>
+        <p>Grab the zip for your OS and architecture, extract it, and put it wherever you keep your tools —
+        we recommend <code>%LOCALAPPDATA%\Programs\W365CLI</code> on Windows.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h3>Sign in once</h3>
+        <p>Run the binary and connect with your Microsoft Graph account. MSAL caches your session so you
+        won't need to sign in again on every launch.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h3>Manage your fleet</h3>
+        <p>Browse, filter, restart, resize, snapshot, and reprovision Cloud PCs — all from the keyboard,
+        all without a browser tab.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-alt">
+  <div class="container">
+    <div class="kicker">What's at stake</div>
+    <h2>Every clunky click is time you don't get back.</h2>
+    <div class="stakes">
+      <div class="stakes-col bad">
+        <h4>Without W365 CLI Native</h4>
+        <ul>
+          <li>Minutes lost per action, multiplied across every Cloud PC you manage</li>
+          <li>Context-switching between browser tabs, tickets, and terminals</li>
+          <li>Waiting on portal page loads just to check a status</li>
+          <li>Digging through nested blades to find one setting</li>
+        </ul>
+      </div>
+      <div class="stakes-col good">
+        <h4>With W365 CLI Native</h4>
+        <ul>
+          <li>Restart, resize, and reprovision in seconds, right from your terminal</li>
+          <li>One keyboard-driven view of Cloud PCs, provisioning, reports, and licensing</li>
+          <li>Instant filtering, sorting, and searching across your whole fleet</li>
+          <li>A command palette that puts every action a keystroke away</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="final-cta" id="download">
+  <div class="container">
+    <div class="kicker" style="text-align:center;">The transformation</div>
+    <h2>Stop managing your fleet through a browser. Start managing it at the speed of thought.</h2>
+    <p class="subhead">Free, open source, and built for the people who'd rather type than click.</p>
+    <div class="cta-row">
+      <a id="primary-download-2" class="btn btn-primary" href="https://github.com/bwya77/W365-CLI-Native/releases/latest">
+        <span id="primary-download-label-2">Download for your platform</span>
+      </a>
+      <a class="btn btn-secondary" href="https://github.com/bwya77/W365-CLI-Native" target="_blank" rel="noopener">Star it on GitHub</a>
+      <a class="btn btn-coffee" href="https://www.buymeacoffee.com/bwya77" target="_blank" rel="noopener">☕ Buy me a coffee</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div>© <span id="year"></span> Bradley Wyatt · W365 CLI Native</div>
+    <div class="foot-links">
+      <span class="version-pill" data-version-pill>v0.1.5</span>
+      <a href="https://github.com/bwya77/W365-CLI-Native" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/bwya77/W365-CLI-Native/releases" target="_blank" rel="noopener">Releases</a>
+      <a href="https://github.com/bwya77/W365-CLI-Native/issues" target="_blank" rel="noopener">Report an issue</a>
+      <a href="https://www.buymeacoffee.com/bwya77" target="_blank" rel="noopener">Buy me a coffee</a>
+    </div>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
