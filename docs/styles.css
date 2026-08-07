@@ -74,6 +74,10 @@ a { color: var(--blue-bright); }
 }
 .nav-links a { color: var(--muted); text-decoration: none; }
 .nav-links a:hover { color: var(--text); }
+.nav-links a.btn-primary,
+.nav-links a.btn-primary:hover { color: #05070c; }
+.nav-links a.btn-coffee,
+.nav-links a.btn-coffee:hover { color: #111; }
 
 /* Buttons */
 .btn {
