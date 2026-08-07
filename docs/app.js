@@ -75,6 +75,8 @@
     const primaryLabel = document.getElementById("primary-download-label");
     const primaryBtn2 = document.getElementById("primary-download-2");
     const primaryLabel2 = document.getElementById("primary-download-label-2");
+    const navBtn = document.getElementById("nav-download");
+    const navLabel = document.getElementById("nav-download-label");
     const platformNote = document.getElementById("platform-note");
     const versionPills = document.querySelectorAll("[data-version-pill]");
     const platformLinks = document.querySelectorAll("[data-asset]");
@@ -105,12 +107,16 @@
       primaryLabel.textContent = `Download for ${ASSET_LABELS[key]}`;
       if (primaryBtn2) primaryBtn2.href = resolve(key);
       if (primaryLabel2) primaryLabel2.textContent = `Download for ${ASSET_LABELS[key]}`;
+      if (navBtn) navBtn.href = resolve(key);
+      if (navLabel) navLabel.textContent = "Download";
       platformNote.textContent = `Detected ${detected.label}. Not right? Pick a build below.`;
     } else {
       primaryBtn.href = `https://github.com/${REPO}/releases/latest`;
       primaryLabel.textContent = "See all downloads";
       if (primaryBtn2) primaryBtn2.href = `https://github.com/${REPO}/releases/latest`;
       if (primaryLabel2) primaryLabel2.textContent = "See all downloads";
+      if (navBtn) navBtn.href = `https://github.com/${REPO}/releases/latest`;
+      if (navLabel) navLabel.textContent = "Download";
       platformNote.textContent = "Choose your platform below.";
     }
 
