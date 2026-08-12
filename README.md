@@ -6,7 +6,7 @@
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
 
-![mainUI](docs/images/mainUI.png)
+![demo](docs/videos/gif.gif)
 
 W365 CLI is a keyboard-first Windows 365 Cloud PC management experience built as a .NET
 command-line app.
