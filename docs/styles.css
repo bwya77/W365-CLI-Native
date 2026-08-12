@@ -116,6 +116,7 @@ a { color: var(--blue-bright); }
 /* Hero */
 .hero {
   padding: 96px 0 64px;
+  text-align: center;
   background:
     radial-gradient(1200px 500px at 50% -10%, rgba(64,145,242,.18), transparent 60%),
     var(--bg);
@@ -129,6 +130,7 @@ a { color: var(--blue-bright); }
   margin-bottom: 18px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
 }
 .eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
@@ -136,7 +138,7 @@ a { color: var(--blue-bright); }
 h1 {
   font-size: 46px;
   line-height: 1.12;
-  margin: 0 0 20px;
+  margin: 0 auto 20px;
   max-width: 760px;
   letter-spacing: -0.01em;
 }
@@ -146,7 +148,7 @@ h1 .accent { color: var(--blue-bright); }
   font-size: 19px;
   color: var(--muted);
   max-width: 620px;
-  margin: 0 0 34px;
+  margin: 0 auto 34px;
 }
 
 .cta-row {
@@ -154,6 +156,7 @@ h1 .accent { color: var(--blue-bright); }
   flex-wrap: wrap;
   gap: 14px;
   align-items: center;
+  justify-content: center;
   margin-bottom: 14px;
 }
 .cta-note {
@@ -164,9 +167,11 @@ h1 .accent { color: var(--blue-bright); }
 .cta-note code { color: var(--blue-bright); background: var(--panel); padding: 2px 6px; border-radius: 4px; }
 
 .platform-links {
-  margin-top: 22px;
+  margin: 22px auto 0;
+  max-width: 760px;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
   font-size: 13px;
 }
@@ -183,11 +188,13 @@ h1 .accent { color: var(--blue-bright); }
 
 /* Install command box */
 .cmd-box {
-  margin: 28px 0 18px;
+  margin: 28px auto 18px;
   max-width: 620px;
+  text-align: left;
 }
 .cmd-tabs {
   display: flex;
+  justify-content: center;
   gap: 4px;
   margin-bottom: 10px;
 }
