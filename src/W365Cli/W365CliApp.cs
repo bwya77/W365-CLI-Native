@@ -1391,7 +1391,7 @@ internal sealed class W365CliApp
         {
             AnsiConsole.MarkupLine($"[yellow]Couldn't find a Windows installer for this release ({Markup.Escape(GetCurrentOsArch())}). Opening the release page instead.[/]");
             OpenUrl(release.HtmlUrl);
-            TimedMessage("[green]Opened latest release.[/]", 1500);
+            WaitForAnyKey();
             return;
         }
 
@@ -1405,9 +1405,16 @@ internal sealed class W365CliApp
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[red]Download failed:[/] [grey]{Markup.Escape(ex.Message)}[/]");
+            var retry = AskYesNo("This is often a transient network hiccup. Try downloading again?");
+            if (retry)
+            {
+                await DownloadAndInstallWindowsUpdateAsync(release);
+                return;
+            }
+
             AnsiConsole.MarkupLine("[grey]Opening the release page so you can download it manually.[/]");
             OpenUrl(release.HtmlUrl);
-            TimedMessage("[green]Opened latest release.[/]", 1500);
+            WaitForAnyKey();
             return;
         }
 
@@ -1424,7 +1431,7 @@ internal sealed class W365CliApp
                 try { Process.Start("explorer.exe", $"/select,\"{tempPath}\""); } catch { /* best effort */ }
             }
 
-            TimedMessage("[grey]You can update whenever you're ready.[/]", 1200);
+            WaitForAnyKey("[grey]Press any key to continue — you can update whenever you're ready.[/]");
             return;
         }
 
@@ -1439,7 +1446,7 @@ internal sealed class W365CliApp
         {
             AnsiConsole.MarkupLine($"[red]Couldn't launch the installer:[/] [grey]{Markup.Escape(ex.Message)}[/]");
             AnsiConsole.MarkupLine($"[grey]You can run it manually from:[/] [white]{Markup.Escape(tempPath)}[/]");
-            TimedMessage("[yellow]Update not applied.[/]", 1500);
+            WaitForAnyKey();
             return;
         }
 
@@ -1456,7 +1463,7 @@ internal sealed class W365CliApp
         {
             AnsiConsole.MarkupLine($"[yellow]Couldn't find a macOS build for this release ({Markup.Escape(GetCurrentOsArch())}). Opening the release page instead.[/]");
             OpenUrl(release.HtmlUrl);
-            TimedMessage("[green]Opened latest release.[/]", 1500);
+            WaitForAnyKey();
             return;
         }
 
@@ -1485,7 +1492,7 @@ internal sealed class W365CliApp
                 AnsiConsole.MarkupLine("[red]Couldn't find the W365Cli binary inside the downloaded archive.[/]");
                 AnsiConsole.MarkupLine("[grey]Opening the release page so you can update manually.[/]");
                 OpenUrl(release.HtmlUrl);
-                TimedMessage("[green]Opened latest release.[/]", 1500);
+                WaitForAnyKey();
                 return;
             }
 
@@ -1514,7 +1521,7 @@ internal sealed class W365CliApp
                 AnsiConsole.MarkupLine("[yellow]Downloaded the update, but couldn't determine where W365 CLI is installed to replace it automatically.[/]");
                 AnsiConsole.MarkupLine($"[grey]New binary saved to:[/] [white]{Markup.Escape(newBinary)}[/]");
                 AnsiConsole.MarkupLine("[grey]Copy it over your installed w365cli binary (commonly ~/.local/bin/w365cli) to finish updating.[/]");
-                TimedMessage("[yellow]Manual step required to finish updating.[/]", 2000);
+                WaitForAnyKey();
                 return;
             }
 
@@ -1533,7 +1540,7 @@ internal sealed class W365CliApp
             if (!restartNow)
             {
                 AnsiConsole.MarkupLine("[grey]Run 'w365cli' again whenever you like to use the new version.[/]");
-                TimedMessage("[grey]Update installed.[/]", 1200);
+                WaitForAnyKey("[grey]Press any key to continue.[/]");
                 return;
             }
 
@@ -1545,7 +1552,7 @@ internal sealed class W365CliApp
             {
                 AnsiConsole.MarkupLine($"[yellow]Couldn't relaunch automatically:[/] [grey]{Markup.Escape(ex.Message)}[/]");
                 AnsiConsole.MarkupLine("[grey]Run 'w365cli' again to use the new version.[/]");
-                TimedMessage("[grey]Please restart manually.[/]", 1500);
+                WaitForAnyKey();
                 return;
             }
 
@@ -1556,9 +1563,22 @@ internal sealed class W365CliApp
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[red]Update failed:[/] [grey]{Markup.Escape(ex.Message)}[/]");
+            var retry = AskYesNo("This is often a transient network hiccup. Try again?");
+            if (retry)
+            {
+                if (cleanUpTempDir)
+                {
+                    try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort cleanup */ }
+                    cleanUpTempDir = false;
+                }
+
+                await DownloadAndInstallMacUpdateAsync(release);
+                return;
+            }
+
             AnsiConsole.MarkupLine("[grey]Opening the release page so you can update manually.[/]");
             OpenUrl(release.HtmlUrl);
-            TimedMessage("[green]Opened latest release.[/]", 1500);
+            WaitForAnyKey();
         }
         finally
         {
@@ -7653,6 +7673,18 @@ internal sealed class W365CliApp
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// Use this instead of TimedMessage for anything the user needs to actually be able to read
+    /// (errors, manual next-steps) right before returning to a screen that will clear/redraw —
+    /// a fixed-duration sleep isn't enough time for a multi-line error message.
+    /// </summary>
+    private static void WaitForAnyKey(string message = "[grey]Press any key to continue...[/]")
+    {
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine(message);
+        ReadNavigationKey(intercept: true);
     }
 
     private static ConsoleKeyInfo ReadNavigationKey(bool intercept, bool handleTopNavTab = true)
