@@ -240,26 +240,35 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
+          # GitHub's default bash shell runs with `set -eo pipefail`. A bare `cmd || true` right
+          # after a failing command substitution has proven unreliable at suppressing errexit for
+          # notarytool specifically (observed in practice: the step still aborted immediately on a
+          # 403 from Apple). Disable errexit explicitly for this whole block instead of relying on
+          # `||`, so a lapsed membership (or any other notarization failure) never fails the build.
+          set +e
           for zip in ./artifacts/release/w365-osx-*.zip; do
             output=$(xcrun notarytool submit "$zip" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_ID_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
-              --wait 2>&1) || true
+              --wait 2>&1)
+            submit_exit=$?
             echo "$output"
             submission_id=$(echo "$output" | grep "id:" | head -1 | awk '{print $2}')
-            if echo "$output" | grep -q "status: Accepted"; then
+            if [ "$submit_exit" -eq 0 ] && echo "$output" | grep -q "status: Accepted"; then
               echo "Notarization succeeded for $zip"
             else
-              echo "::warning::Notarization did not succeed for $zip (this is expected if the Apple Developer Program membership has lapsed — signing still applies, the zip will just ship unnotarized). See the log above for details."
+              echo "::warning::Notarization did not succeed for $zip (this is expected if the Apple Developer Program membership has lapsed; signing still applies, the zip will just ship unnotarized). See the log above for details."
               if [ -n "$submission_id" ]; then
                 xcrun notarytool log "$submission_id" \
                   --apple-id "$APPLE_ID" \
                   --password "$APPLE_ID_PASSWORD" \
-                  --team-id "$APPLE_TEAM_ID" || true
+                  --team-id "$APPLE_TEAM_ID"
               fi
             fi
           done
+          set -e
+          exit 0
 
       - name: Clean up keychain
         if: always() && env.HAS_APPLE_SIGNING == 'true'
