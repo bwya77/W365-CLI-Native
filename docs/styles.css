@@ -166,20 +166,49 @@ h1 .accent { color: var(--blue-bright); }
 }
 .cta-note code { color: var(--blue-bright); background: var(--panel); padding: 2px 6px; border-radius: 4px; }
 
-.platform-links-inline {
-  margin: 18px auto 0;
-  max-width: 760px;
-  font-size: 12.5px;
-  font-family: var(--mono);
-  color: var(--muted);
-  line-height: 2;
+/* Split download button with variant dropdown */
+.split-btn {
+  position: relative;
+  display: inline-flex;
 }
-.platform-links-inline a {
-  color: var(--muted);
+.split-btn-main {
+  border-radius: 8px 0 0 8px;
+}
+.split-btn-toggle {
+  border-radius: 0 8px 8px 0;
+  border-left: 1px solid rgba(5, 7, 12, 0.25);
+  padding: 13px 14px;
+}
+.split-btn-toggle .chev { font-size: 12px; transition: transform .15s ease; display: inline-block; }
+.split-btn-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+.download-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  min-width: 240px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.45);
+  z-index: 10;
+  text-align: left;
+}
+.download-menu a {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--text);
   text-decoration: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
 }
-.platform-links-inline a:hover { color: var(--blue-bright); }
-.platform-links-inline a.current { color: var(--blue-bright); }
+.download-menu a:hover { background: rgba(64, 145, 242, 0.12); color: var(--blue-bright); }
+.download-menu a.current { color: var(--blue-bright); }
+.download-menu-divider { height: 1px; background: var(--border); margin: 6px 4px; }
 
 /* Command-line toggle */
 .cmd-toggle {

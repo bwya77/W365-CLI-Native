@@ -134,6 +134,31 @@
     return setOpen;
   }
 
+  function setupDownloadMenu() {
+    const toggle = document.getElementById("download-menu-toggle");
+    const menu = document.getElementById("download-menu");
+    if (!toggle || !menu) return;
+
+    function setOpen(open) {
+      menu.hidden = !open;
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    toggle.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      setOpen(menu.hidden);
+    });
+
+    // Close the menu on outside click, Escape, or after picking an item.
+    document.addEventListener("click", (evt) => {
+      if (!menu.hidden && !menu.contains(evt.target) && evt.target !== toggle) setOpen(false);
+    });
+    document.addEventListener("keydown", (evt) => {
+      if (evt.key === "Escape" && !menu.hidden) setOpen(false);
+    });
+    menu.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => setOpen(false)));
+  }
+
   async function init() {
     setYear();
     setupCopyButtons();
@@ -151,6 +176,7 @@
 
     setupCmdTabs(detected.os);
     const setCmdBoxOpen = setupCmdToggle();
+    setupDownloadMenu();
 
     const primaryBtn = document.getElementById("primary-download");
     const primaryLabel = document.getElementById("primary-download-label");
@@ -192,7 +218,7 @@
     // of downloading a file directly.
     if (detected.os === "windows") {
       const url = resolveInstaller(detected.arch);
-      const label = `Download installer for ${detected.label}`;
+      const label = `Download (${detected.arch === "arm64" ? "ARM64" : "x64"})`;
       [[primaryBtn, primaryLabel], [primaryBtn2, primaryLabel2]].forEach(([btn, lbl]) => {
         if (!btn) return;
         btn.href = url;
@@ -201,7 +227,7 @@
       });
       if (navBtn) { navBtn.href = url; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Download";
-      platformNote.textContent = `Detected ${detected.label}. Need the command line instead? Use the toggle below.`;
+      platformNote.textContent = `Detected ${detected.label}. Need a different variant? Use the arrow next to the download button.`;
     } else if (detected.os === "macos") {
       const copyCommand = (evt) => {
         evt.preventDefault();

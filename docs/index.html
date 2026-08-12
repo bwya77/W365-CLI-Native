@@ -44,9 +44,25 @@
     </p>
 
     <div class="cta-row">
-      <a id="primary-download" class="btn btn-primary" href="https://github.com/bwya77/W365-CLI-Native/releases/latest">
-        <span id="primary-download-label">Download for your platform</span>
-      </a>
+      <div class="split-btn" id="download-split">
+        <a id="primary-download" class="btn btn-primary split-btn-main" href="https://github.com/bwya77/W365-CLI-Native/releases/latest">
+          <span id="primary-download-label">Download</span>
+        </a>
+        <button type="button" class="btn btn-primary split-btn-toggle" id="download-menu-toggle" aria-haspopup="true" aria-expanded="false" aria-label="Other download options">
+          <span class="chev">⌄</span>
+        </button>
+        <div class="download-menu" id="download-menu" hidden>
+          <a href="#" data-asset-pattern="installer-x64">Windows installer (x64)</a>
+          <a href="#" data-asset-pattern="installer-arm64">Windows installer (ARM64)</a>
+          <a href="#" data-asset="w365-win-x64.zip">Windows portable (x64)</a>
+          <a href="#" data-asset="w365-win-arm64.zip">Windows portable (ARM64)</a>
+          <div class="download-menu-divider"></div>
+          <a href="#" data-asset="w365-osx-x64.zip">macOS Intel (zip)</a>
+          <a href="#" data-asset="w365-osx-arm64.zip">macOS Apple Silicon (zip)</a>
+          <div class="download-menu-divider"></div>
+          <a href="https://github.com/bwya77/W365-CLI-Native/releases/latest" id="latest-release-link">All releases and checksums →</a>
+        </div>
+      </div>
       <a class="btn btn-secondary" href="#plan">See how it works ↓</a>
     </div>
     <div class="cta-note" id="platform-note">Detecting your platform…</div>
@@ -67,16 +83,6 @@
       </div>
       <p class="cmd-note">No admin rights or <code>sudo</code> required. Installs to your user
       profile and adds <code>w365cli</code> to your PATH automatically.</p>
-    </div>
-
-    <div class="platform-links-inline">
-      <a href="#" data-asset-pattern="installer-x64">Windows installer (x64)</a> ·
-      <a href="#" data-asset-pattern="installer-arm64">Windows installer (ARM64)</a> ·
-      <a href="#" data-asset="w365-win-x64.zip">Windows portable (x64)</a> ·
-      <a href="#" data-asset="w365-win-arm64.zip">Windows portable (ARM64)</a> ·
-      <a href="#" data-asset="w365-osx-x64.zip">macOS Intel</a> ·
-      <a href="#" data-asset="w365-osx-arm64.zip">macOS Apple Silicon</a> ·
-      <a href="https://github.com/bwya77/W365-CLI-Native/releases/latest" id="latest-release-link">All releases and checksums →</a>
     </div>
 
     <div class="window">
