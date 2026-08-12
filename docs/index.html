@@ -8,7 +8,7 @@
 
 <meta property="og:title" content="W365 CLI">
 <meta property="og:description" content="A keyboard-first companion for managing your Windows 365 Cloud PC fleet.">
-<meta property="og:image" content="images/mainUI.png">
+<meta property="og:image" content="images/MainUI.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 
@@ -83,12 +83,23 @@
       profile and adds <code>w365cli</code> to your PATH automatically.</p>
     </div>
 
-    <div class="window">
+    <div class="window slideshow" id="hero-slideshow">
       <div class="window-bar">
         <div class="dots"><span></span><span></span><span></span></div>
-        <div class="title">W365 CLI</div>
+        <div class="title" id="slide-title">W365 CLI</div>
       </div>
-      <img src="videos/gif.gif" alt="W365 CLI demo showing the main menu, tenant status, and Cloud PC browsing">
+      <div class="slide-viewport">
+        <img class="slide is-active" src="images/MainUI.png" alt="W365 CLI main menu showing tenant status, connection info, and update check" data-title="W365 CLI · Main menu">
+        <img class="slide" src="images/CloudPCs.png" alt="Browsing a Cloud PC fleet with filters, sorting, and a detail panel" data-title="Cloud PCs · Browse">
+        <img class="slide" src="images/CloudPCDiskSpace.png" alt="Viewing Cloud PC disk space and snapshot details" data-title="Cloud PCs · Disk space">
+        <img class="slide" src="images/ProvisioningPolicies.png" alt="Browsing provisioning policies" data-title="Provisioning Policies · Browse">
+        <img class="slide" src="images/ProvisioningPoliciesCloudPCs.png" alt="Viewing the Cloud PCs assigned to a provisioning policy" data-title="Provisioning Policies · Cloud PCs">
+        <img class="slide" src="images/CloudApps.png" alt="Browsing and publishing Cloud Apps" data-title="Cloud Apps · Browse">
+        <img class="slide" src="images/UserExperienceSync.png" alt="Managing user experience sync storage and profiles" data-title="User Experience Sync">
+        <button type="button" class="slide-nav prev" id="slide-prev" aria-label="Previous screenshot">‹</button>
+        <button type="button" class="slide-nav next" id="slide-next" aria-label="Next screenshot">›</button>
+      </div>
+      <div class="slide-dots" id="slide-dots"></div>
     </div>
   </div>
 </header>
@@ -154,7 +165,7 @@
           <div class="dots"><span></span><span></span><span></span></div>
           <div class="title">Cloud PCs · Browse</div>
         </div>
-        <img src="images/cloudPCs.png" alt="W365 CLI browsing a Cloud PC fleet with filters, sorting, and a detail panel">
+        <img src="images/CloudPCs.png" alt="W365 CLI browsing a Cloud PC fleet with filters, sorting, and a detail panel">
       </div>
     </div>
   </div>

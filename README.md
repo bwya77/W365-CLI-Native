@@ -6,14 +6,30 @@
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
 
-![demo](docs/videos/gif.gif)
+<p align="center">
+  <img src="docs/images/MainUI.png" width="820" alt="W365 CLI main menu">
+</p>
+
+<details>
+<summary><strong>More screenshots</strong></summary>
+<br>
+
+| | |
+|---|---|
+| ![Cloud PCs](docs/images/CloudPCs.png) | ![Disk space](docs/images/CloudPCDiskSpace.png) |
+| Browse and filter your Cloud PC fleet | Inspect disk space and snapshots |
+| ![Provisioning policies](docs/images/ProvisioningPolicies.png) | ![Policy Cloud PCs](docs/images/ProvisioningPoliciesCloudPCs.png) |
+| Browse provisioning policies | View the Cloud PCs assigned to a policy |
+| ![Cloud Apps](docs/images/CloudApps.png) | ![User experience sync](docs/images/UserExperienceSync.png) |
+| Browse and publish Cloud Apps | Manage user experience sync storage and profiles |
+
+</details>
+
 
 W365 CLI is a keyboard-first Windows 365 Cloud PC management experience built as a .NET
 command-line app.
 
 It is separate from the PowerShell-based `W365CLI` module and does not require the PowerShell module at runtime.
-
-![cloudPCs](docs/images/cloudPCs.png)
 
 ## What it does
 

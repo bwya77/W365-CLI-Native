@@ -169,9 +169,58 @@
     menu.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => setOpen(false)));
   }
 
+  function setupHeroSlideshow() {
+    const root = document.getElementById("hero-slideshow");
+    if (!root) return;
+
+    const slides = Array.from(root.querySelectorAll(".slide"));
+    const dotsWrap = document.getElementById("slide-dots");
+    const titleEl = document.getElementById("slide-title");
+    const prevBtn = document.getElementById("slide-prev");
+    const nextBtn = document.getElementById("slide-next");
+    if (!slides.length) return;
+
+    let index = Math.max(0, slides.findIndex((s) => s.classList.contains("is-active")));
+    if (index < 0) index = 0;
+    let timer = null;
+    const AUTO_MS = 4500;
+
+    const dots = slides.map((_, i) => {
+      const d = document.createElement("button");
+      d.type = "button";
+      d.className = "slide-dot";
+      d.setAttribute("aria-label", "Show screenshot " + (i + 1));
+      d.addEventListener("click", () => show(i, true));
+      dotsWrap.appendChild(d);
+      return d;
+    });
+
+    function show(next, userTriggered) {
+      index = ((next % slides.length) + slides.length) % slides.length;
+      slides.forEach((s, i) => s.classList.toggle("is-active", i === index));
+      dots.forEach((d, i) => d.classList.toggle("is-active", i === index));
+      if (titleEl) titleEl.textContent = slides[index].getAttribute("data-title") || "W365 CLI";
+      if (userTriggered) restart();
+    }
+
+    function restart() {
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => show(index + 1, false), AUTO_MS);
+    }
+
+    if (prevBtn) prevBtn.addEventListener("click", () => show(index - 1, true));
+    if (nextBtn) nextBtn.addEventListener("click", () => show(index + 1, true));
+    root.addEventListener("mouseenter", () => { if (timer) clearInterval(timer); });
+    root.addEventListener("mouseleave", restart);
+
+    show(index, false);
+    restart();
+  }
+
   async function init() {
     setYear();
     setupCopyButtons();
+    setupHeroSlideshow();
 
     const detected = detectPlatform();
     const highEntropyArch = await getHighEntropyArch();
