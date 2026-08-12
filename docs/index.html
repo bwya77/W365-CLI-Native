@@ -44,12 +44,10 @@
     </p>
 
     <div class="cta-row">
-      <div class="split-btn" id="download-split">
-        <a id="primary-download" class="btn btn-primary split-btn-main" href="https://github.com/bwya77/W365-CLI-Native/releases/latest">
+      <div class="download-btn-wrap" id="download-split">
+        <button type="button" id="primary-download" class="btn btn-primary download-btn">
           <span id="primary-download-label">Download</span>
-        </a>
-        <button type="button" class="btn btn-primary split-btn-toggle" id="download-menu-toggle" aria-haspopup="true" aria-expanded="false" aria-label="Other download options">
-          <span class="chev">⌄</span>
+          <span class="download-btn-caret" id="download-menu-toggle" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" aria-label="Show other download options">⌄</span>
         </button>
         <div class="download-menu" id="download-menu" hidden>
           <a href="#" data-asset-pattern="installer-x64">Windows installer (x64)</a>

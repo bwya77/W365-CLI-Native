@@ -166,21 +166,30 @@ h1 .accent { color: var(--blue-bright); }
 }
 .cta-note code { color: var(--blue-bright); background: var(--panel); padding: 2px 6px; border-radius: 4px; }
 
-/* Split download button with variant dropdown */
-.split-btn {
+/* Single download button with an embedded caret hot-zone for the variant dropdown.
+   Clicking anywhere on the button downloads; clicking the caret (a distinct sub-area with its
+   own click handler + stopPropagation) opens the menu instead, without navigating. */
+.download-btn-wrap {
   position: relative;
   display: inline-flex;
 }
-.split-btn-main {
-  border-radius: 8px 0 0 8px;
+.download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
 }
-.split-btn-toggle {
-  border-radius: 0 8px 8px 0;
-  border-left: 1px solid rgba(5, 7, 12, 0.25);
-  padding: 13px 14px;
+.download-btn-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px 2px 10px;
+  margin-left: 2px;
+  border-left: 1px solid rgba(5, 7, 12, 0.3);
+  font-size: 12px;
+  line-height: 1;
+  transition: transform .15s ease;
 }
-.split-btn-toggle .chev { font-size: 12px; transition: transform .15s ease; display: inline-block; }
-.split-btn-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.download-btn-caret[aria-expanded="true"] { transform: rotate(180deg); }
 
 .download-menu {
   position: absolute;

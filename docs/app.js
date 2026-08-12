@@ -144,9 +144,19 @@
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
     }
 
+    // stopPropagation here is what keeps a caret click from also triggering the parent button's
+    // own click handler (which downloads/copies) — the caret is nested inside that button so its
+    // clicks bubble up to it by default.
     toggle.addEventListener("click", (evt) => {
       evt.stopPropagation();
       setOpen(menu.hidden);
+    });
+    toggle.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        evt.stopPropagation();
+        setOpen(menu.hidden);
+      }
     });
 
     // Close the menu on outside click, Escape, or after picking an item.
@@ -213,57 +223,89 @@
     // Update version pills
     versionPills.forEach((el) => { el.textContent = tag; });
 
+    // primary-download (hero) is a real <button>, not a link, because it embeds the caret
+    // hot-zone as a child element — the button's own click handler (attached once, below) reads
+    // these data attributes at click time to decide what to do. primary-download-2 (final CTA)
+    // has no caret, so it stays a plain anchor/onclick as before.
+    function copyMacCommandAndReveal() {
+      const codeEl = document.getElementById("cmd-macos");
+      const text = codeEl ? codeEl.textContent : "";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+      if (setCmdBoxOpen) setCmdBoxOpen(true);
+      document.querySelector('[data-os-tab="macos"]')?.click();
+      if (primaryLabel) {
+        const original = primaryLabel.textContent;
+        primaryLabel.textContent = "Copied! Paste into Terminal";
+        setTimeout(() => { primaryLabel.textContent = original; }, 2200);
+      }
+    }
+
     // Windows defaults to the installer (easiest, one click, no terminal needed); macOS has no
     // double-click installer, so the primary action there is copying the install command instead
     // of downloading a file directly.
     if (detected.os === "windows") {
       const url = resolveInstaller(detected.arch);
       const label = `Download (${detected.arch === "arm64" ? "ARM64" : "x64"})`;
-      [[primaryBtn, primaryLabel], [primaryBtn2, primaryLabel2]].forEach(([btn, lbl]) => {
-        if (!btn) return;
-        btn.href = url;
-        btn.onclick = null;
-        if (lbl) lbl.textContent = label;
-      });
+      if (primaryBtn) {
+        primaryBtn.dataset.action = "";
+        primaryBtn.dataset.href = url;
+      }
+      if (primaryLabel) primaryLabel.textContent = label;
+      if (primaryBtn2) {
+        primaryBtn2.href = url;
+        primaryBtn2.onclick = null;
+        if (primaryLabel2) primaryLabel2.textContent = label;
+      }
       if (navBtn) { navBtn.href = url; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Download";
-      platformNote.textContent = `Detected ${detected.label}. Need a different variant? Use the arrow next to the download button.`;
+      platformNote.textContent = `Detected ${detected.label}. Need a different variant? Use the arrow on the button.`;
     } else if (detected.os === "macos") {
-      const copyCommand = (evt) => {
-        evt.preventDefault();
-        const codeEl = document.getElementById("cmd-macos");
-        const text = codeEl ? codeEl.textContent : "";
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).catch(() => {});
-        }
-        if (setCmdBoxOpen) setCmdBoxOpen(true);
-        document.querySelector('[data-os-tab="macos"]')?.click();
-        const btn = evt.currentTarget;
-        const labelEl = btn.querySelector("span");
-        const originalText = labelEl ? labelEl.textContent : btn.textContent;
-        if (labelEl) labelEl.textContent = "Copied! Paste into Terminal";
-        setTimeout(() => { if (labelEl) labelEl.textContent = originalText; }, 2200);
-      };
-      [primaryBtn, primaryBtn2].forEach((btn) => {
-        if (!btn) return;
-        btn.href = "#top";
-        btn.onclick = copyCommand;
-      });
+      if (primaryBtn) {
+        primaryBtn.dataset.action = "copy-mac-command";
+        primaryBtn.dataset.href = "";
+      }
       if (primaryLabel) primaryLabel.textContent = "Copy install command";
-      if (primaryLabel2) primaryLabel2.textContent = "Copy install command";
+      const copyCommandForLink = (evt) => {
+        evt.preventDefault();
+        copyMacCommandAndReveal();
+      };
+      if (primaryBtn2) {
+        primaryBtn2.href = "#top";
+        primaryBtn2.onclick = copyCommandForLink;
+        if (primaryLabel2) primaryLabel2.textContent = "Copy install command";
+      }
       if (navBtn) { navBtn.href = "#top"; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Get started";
       platformNote.textContent = `Detected ${detected.label}. Paste the command below into Terminal.`;
     } else {
-      [[primaryBtn, primaryLabel], [primaryBtn2, primaryLabel2]].forEach(([btn, lbl]) => {
-        if (!btn) return;
-        btn.href = `https://github.com/${REPO}/releases/latest`;
-        btn.onclick = null;
-        if (lbl) lbl.textContent = "See all downloads";
-      });
-      if (navBtn) { navBtn.href = `https://github.com/${REPO}/releases/latest`; navBtn.onclick = null; }
+      const releasePage = `https://github.com/${REPO}/releases/latest`;
+      if (primaryBtn) {
+        primaryBtn.dataset.action = "";
+        primaryBtn.dataset.href = releasePage;
+      }
+      if (primaryLabel) primaryLabel.textContent = "See all downloads";
+      if (primaryBtn2) {
+        primaryBtn2.href = releasePage;
+        primaryBtn2.onclick = null;
+        if (primaryLabel2) primaryLabel2.textContent = "See all downloads";
+      }
+      if (navBtn) { navBtn.href = releasePage; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Download";
       platformNote.textContent = "Choose your platform below.";
+    }
+
+    // Single click handler for the hero button itself. Clicks that originated on the caret never
+    // reach here (it calls stopPropagation), so this only fires for genuine "download" clicks.
+    if (primaryBtn) {
+      primaryBtn.addEventListener("click", () => {
+        if (primaryBtn.dataset.action === "copy-mac-command") {
+          copyMacCommandAndReveal();
+        } else if (primaryBtn.dataset.href) {
+          window.location.href = primaryBtn.dataset.href;
+        }
+      });
     }
 
     // Direct asset link list (installers + portable zips)
