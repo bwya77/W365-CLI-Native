@@ -23,7 +23,7 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsAsync()
     {
         var items = await GetPagedAsync<CloudPcSummary>(
-            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName");
+            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,sharedDeviceDetail");
 
         return items
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -32,10 +32,12 @@ internal sealed class W365GraphClient
 
     public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsByProvisioningPolicyAsync(string provisioningPolicyId)
     {
-        var filter = Uri.EscapeDataString($"servicePlanType eq 'enterprise' and provisioningPolicyId eq '{provisioningPolicyId}'");
-        var select = Uri.EscapeDataString("id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName");
+        var filter = Uri.EscapeDataString($"provisioningPolicyId eq '{provisioningPolicyId}' and servicePlanType eq 'enterprise'");
+        var select = Uri.EscapeDataString("id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,sharedDeviceDetail,connectivityResult");
         var items = await GetPagedAsync<CloudPcSummary>(
-            $"deviceManagement/virtualEndpoint/cloudPCs?$filter={filter}&$select={select}");
+            $"deviceManagement/virtualEndpoint/cloudPCs?$filter={filter}&$select={select}&$orderBy=lastModifiedDateTime desc&$count=true",
+            includeConsistencyLevel: true,
+            includeUnknownEnumMembers: true);
 
         return items
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -71,6 +73,52 @@ internal sealed class W365GraphClient
     {
         var select = Uri.EscapeDataString("id,displayName,userPrincipalName");
         return await GetPagedAsync<GroupMemberSummary>($"https://graph.microsoft.com/v1.0/groups/{Uri.EscapeDataString(groupId)}/members/microsoft.graph.user?$select={select}");
+    }
+
+    /// <summary>
+    /// Searches directory users by display name or UPN prefix, for picking someone to add to a
+    /// provisioning policy's assigned Entra group. Uses advanced query ($count + ConsistencyLevel
+    /// eventual) since the filter combines startswith() across two properties with "or".
+    /// </summary>
+    public async Task<IReadOnlyList<GroupMemberSummary>> SearchUsersAsync(string query)
+    {
+        var escaped = query.Replace("'", "''", StringComparison.Ordinal);
+        var filter = Uri.EscapeDataString($"startswith(displayName,'{escaped}') or startswith(userPrincipalName,'{escaped}') or startswith(mail,'{escaped}')");
+        var select = Uri.EscapeDataString("id,displayName,userPrincipalName");
+        return await GetPagedAsync<GroupMemberSummary>(
+            $"https://graph.microsoft.com/v1.0/users?$filter={filter}&$select={select}&$top=25&$count=true",
+            includeConsistencyLevel: true);
+    }
+
+    /// <summary>
+    /// Adds a user to an Entra group (e.g. a provisioning policy's assigned group) via the
+    /// $ref navigation-property POST.
+    /// </summary>
+    public async Task AddGroupMemberAsync(string groupId, string userId)
+    {
+        await PostJsonAsync(
+            $"https://graph.microsoft.com/v1.0/groups/{Uri.EscapeDataString(groupId)}/members/$ref",
+            new Dictionary<string, object>
+            {
+                ["@odata.id"] = $"https://graph.microsoft.com/v1.0/directoryObjects/{userId}"
+            });
+    }
+
+    /// <summary>
+    /// Removes a user from an Entra group via the $ref navigation-property DELETE.
+    /// </summary>
+    public async Task RemoveGroupMemberAsync(string groupId, string userId)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"https://graph.microsoft.com/v1.0/groups/{Uri.EscapeDataString(groupId)}/members/{Uri.EscapeDataString(userId)}/$ref");
+        await AuthorizeAsync(request);
+        using var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"{(int)response.StatusCode} {response.ReasonPhrase}: {ExtractGraphErrorMessage(errorBody)}");
+        }
     }
 
     public async Task PublishCloudAppAsync(string cloudAppId)
@@ -139,6 +187,47 @@ internal sealed class W365GraphClient
         await PostJsonAsync($"deviceManagement/managedDevices/{Uri.EscapeDataString(managedDeviceId)}/syncDevice", new { });
     }
 
+    /// <summary>
+    /// Fetches a Cloud PC's <c>statusDetail</c> (why it's provisionedWithWarnings/
+    /// provisionedWithErrors/failed) — the same data the Intune portal's "View more information"
+    /// panel is built from. Returns null if the Cloud PC has no status detail (e.g. healthy).
+    /// </summary>
+    public async Task<CloudPcStatusDetail?> GetCloudPcStatusDetailAsync(string cloudPcId)
+    {
+        var select = Uri.EscapeDataString("id,statusDetail");
+        var cloudPc = await GetAsync<JsonElement>(
+            $"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}?$select={select}");
+
+        if (!cloudPc.TryGetProperty("statusDetail", out var detail) || detail.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var code = GetString(detail, "code");
+        var message = GetString(detail, "message");
+
+        var additionalInfo = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (detail.TryGetProperty("additionalInformation", out var info) && info.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var entry in info.EnumerateArray())
+            {
+                var name = GetString(entry, "name");
+                var value = GetString(entry, "value");
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    additionalInfo[name] = value ?? string.Empty;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(code) && string.IsNullOrWhiteSpace(message) && additionalInfo.Count == 0)
+        {
+            return null;
+        }
+
+        return new CloudPcStatusDetail(code, message, additionalInfo);
+    }
+
     public async Task<IReadOnlyList<CloudPcDiskSpace>> GetCloudPcDiskSpacesAsync(IReadOnlyList<CloudPcSummary>? cloudPcs = null)
     {
         cloudPcs ??= await GetCloudPcsAsync();
@@ -147,11 +236,19 @@ internal sealed class W365GraphClient
         foreach (var cloudPc in cloudPcs)
         {
             ManagedDeviceDiskInfo? managedDevice = null;
+            string? error = null;
             if (!string.IsNullOrWhiteSpace(cloudPc.ManagedDeviceId))
             {
                 var escapedManagedDeviceId = Uri.EscapeDataString(cloudPc.ManagedDeviceId);
-                managedDevice = await GetAsync<ManagedDeviceDiskInfo>(
-                    $"deviceManagement/managedDevices/{escapedManagedDeviceId}?$select=id,deviceName,totalStorageSpaceInBytes,freeStorageSpaceInBytes,lastSyncDateTime");
+                try
+                {
+                    managedDevice = await GetAsync<ManagedDeviceDiskInfo>(
+                        $"deviceManagement/managedDevices/{escapedManagedDeviceId}?$select=id,deviceName,totalStorageSpaceInBytes,freeStorageSpaceInBytes,lastSyncDateTime");
+                }
+                catch (HttpRequestException ex)
+                {
+                    error = $"Managed device disk data unavailable: {ex.Message}";
+                }
             }
 
             var totalGb = ToGb(managedDevice?.TotalStorageSpaceInBytes);
@@ -174,7 +271,8 @@ internal sealed class W365GraphClient
                 FreeStorageGb = freeGb,
                 UsedStorageGb = usedGb,
                 PercentFree = percentFree,
-                LastSyncDateTime = managedDevice?.LastSyncDateTime
+                LastSyncDateTime = managedDevice?.LastSyncDateTime,
+                Error = error
             });
         }
 
@@ -282,7 +380,137 @@ internal sealed class W365GraphClient
         using var request = new HttpRequestMessage(HttpMethod.Delete, $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}");
         await AuthorizeAsync(request);
         using var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"{(int)response.StatusCode} {response.ReasonPhrase}: {ExtractGraphErrorMessage(errorBody)}");
+        }
+    }
+
+    public async Task UnassignProvisioningPolicyAsync(string policyId)
+    {
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}/assign", new
+        {
+            assignments = Array.Empty<object>()
+        });
+    }
+
+    public async Task ApplyProvisioningPolicyAsync(string policyId, int reservePercentage, bool isForceUserLogoffEnabled = false)
+    {
+        var body = new Dictionary<string, object>
+        {
+            ["reservePercentage"] = reservePercentage,
+            ["isForceUserLogoffEnabled"] = isForceUserLogoffEnabled
+        };
+
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}/apply", body);
+    }
+
+    public async Task<CloudPcPolicyApplyActionResult?> GetProvisioningPolicyApplyActionResultAsync(string policyId)
+    {
+        return await GetAsync<CloudPcPolicyApplyActionResult>(
+            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}/retrievePolicyApplyActionResult");
+    }
+
+    /// <summary>
+    /// Resolves the assignment ID and user-settings-persistence configuration ID needed to query
+    /// "user experience sync" storage usage/profiles for a shared provisioning policy. Returns
+    /// null if the policy has no assignment with user settings persistence configured.
+    ///
+    /// Note: <c>userSettingsPersistenceDetail</c> is a navigation property on
+    /// <c>cloudPcProvisioningPolicyAssignment</c> that does not support <c>$expand</c> (Graph
+    /// returns "The query specified in the URI is not valid" if you try) — it must be fetched with
+    /// a separate GET per assignment.
+    /// </summary>
+    public async Task<ProvisioningPolicyUserSettingsPersistenceContext?> GetUserSettingsPersistenceContextAsync(string policyId)
+    {
+        var select = Uri.EscapeDataString("id,userSettingsPersistenceConfiguration");
+        var policyElement = await GetAsync<JsonElement>(
+            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}?$select={select}&$expand=assignments");
+
+        var enabled = policyElement.TryGetProperty("userSettingsPersistenceConfiguration", out var configuration) &&
+            configuration.ValueKind == JsonValueKind.Object &&
+            GetBool(configuration, "userSettingsPersistenceEnabled") == true;
+
+        double? storageSizeGb = configuration.ValueKind == JsonValueKind.Object
+            ? GetString(configuration, "userSettingsPersistenceStorageSizeCategory") switch
+            {
+                "fourGB" => 4,
+                "eightGB" => 8,
+                "sixteenGB" => 16,
+                "thirtyTwoGB" => 32,
+                "sixtyFourGB" => 64,
+                _ => null
+            }
+            : null;
+
+        if (!policyElement.TryGetProperty("assignments", out var assignments) || assignments.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var assignment in assignments.EnumerateArray())
+        {
+            var assignmentId = GetString(assignment, "id");
+            if (string.IsNullOrWhiteSpace(assignmentId))
+            {
+                continue;
+            }
+
+            JsonElement detail;
+            try
+            {
+                detail = await GetAsync<JsonElement>(
+                    $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}/assignments/{Uri.EscapeDataString(assignmentId)}/userSettingsPersistenceDetail");
+            }
+            catch (Exception)
+            {
+                // Not every assignment has user settings persistence configured — Graph returns
+                // a 404/400 for those; treat as "not configured" for this assignment and continue.
+                continue;
+            }
+
+            var configurationId = GetString(detail, "id");
+            if (string.IsNullOrWhiteSpace(configurationId))
+            {
+                continue;
+            }
+
+            return new ProvisioningPolicyUserSettingsPersistenceContext(policyId, assignmentId, configurationId, storageSizeGb, enabled);
+        }
+
+        return null;
+    }
+
+    public async Task<CloudPcUserSettingsPersistenceUsageResult?> GetUserSettingsPersistenceUsageAsync(ProvisioningPolicyUserSettingsPersistenceContext context)
+    {
+        var configurationId = context.ConfigurationId.Replace("'", "''", StringComparison.Ordinal);
+        return await GetAsync<CloudPcUserSettingsPersistenceUsageResult>(
+            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(context.PolicyId)}/assignments/{Uri.EscapeDataString(context.AssignmentId)}/userSettingsPersistenceDetail/retrieveUserSettingsPersistenceProfileUsage(configurationId='{configurationId}')");
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetUserSettingsPersistenceProfilesAsync(ProvisioningPolicyUserSettingsPersistenceContext context)
+    {
+        var configurationId = context.ConfigurationId.Replace("'", "''", StringComparison.Ordinal);
+        return await GetJsonRowsAsync(
+            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(context.PolicyId)}/assignments/{Uri.EscapeDataString(context.AssignmentId)}/userSettingsPersistenceDetail/retrieveUserSettingsPersistenceProfiles(configurationId='{configurationId}')?$top=100",
+            "userPrincipalName", "profileSizeInGB", "status", "lastProfileAttachedDateTime");
+    }
+
+    /// <summary>
+    /// Deletes ("cleans up") a user's user settings persistence (UES) cloud profile/disk. Matches
+    /// the Intune portal's delete action for a profile row on a shared policy's user experience
+    /// sync screen. The Graph function accepts a batch of profile IDs but the CLI always sends one.
+    /// </summary>
+    public async Task BatchCleanupUserSettingsPersistenceProfileAsync(ProvisioningPolicyUserSettingsPersistenceContext context, string profileId)
+    {
+        await PostJsonAsync(
+            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(context.PolicyId)}/assignments/{Uri.EscapeDataString(context.AssignmentId)}/userSettingsPersistenceDetail/batchCleanupUserSettingsPersistenceProfile",
+            new
+            {
+                cloudProfileIds = new[] { profileId },
+                configurationId = context.ConfigurationId
+            });
     }
 
     public string ExportProvisioningPolicyJson(ProvisioningPolicySummary policy)
@@ -328,6 +556,79 @@ internal sealed class W365GraphClient
         {
             assignments
         });
+    }
+
+    public async Task<string> CreateProvisioningPolicyAsync(
+        string displayName,
+        string? description,
+        string provisioningType,
+        string imageId,
+        string imageDisplayName,
+        string imageType,
+        string domainJoinType,
+        string? regionName,
+        string cloudPcNamingTemplate,
+        bool enableSingleSignOn,
+        bool localAdminEnabled,
+        string? assignGroupId)
+    {
+        var domainJoinConfiguration = new Dictionary<string, object?>
+        {
+            ["domainJoinType"] = domainJoinType
+        };
+
+        if (!string.IsNullOrWhiteSpace(regionName))
+        {
+            domainJoinConfiguration["regionName"] = regionName;
+        }
+
+        var body = new Dictionary<string, object?>
+        {
+            ["@odata.type"] = "#microsoft.graph.cloudPcProvisioningPolicy",
+            ["displayName"] = displayName,
+            ["description"] = description ?? string.Empty,
+            ["provisioningType"] = provisioningType,
+            ["imageId"] = imageId,
+            ["imageDisplayName"] = imageDisplayName,
+            ["imageType"] = imageType,
+            ["domainJoinConfigurations"] = new[] { domainJoinConfiguration },
+            ["cloudPcNamingTemplate"] = cloudPcNamingTemplate,
+            ["enableSingleSignOn"] = enableSingleSignOn,
+            ["localAdminEnabled"] = localAdminEnabled
+        };
+
+        var created = await PostJsonForElementAsync("deviceManagement/virtualEndpoint/provisioningPolicies", body);
+        var createdId = GetString(created, "id");
+        if (string.IsNullOrWhiteSpace(createdId))
+        {
+            throw new InvalidOperationException("Graph did not return the new provisioning policy id.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(assignGroupId))
+        {
+            var assignmentTarget = new Dictionary<string, object?>
+            {
+                ["@odata.type"] = "#microsoft.graph.cloudPcManagementGroupAssignmentTarget",
+                ["groupId"] = assignGroupId
+            };
+
+            var assignment = new Dictionary<string, object?>
+            {
+                ["target"] = assignmentTarget
+            };
+
+            if (string.Equals(provisioningType, "dedicated", StringComparison.OrdinalIgnoreCase))
+            {
+                assignment["id"] = $"{createdId}_{assignGroupId}";
+            }
+
+            await PostJsonAsync($"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(createdId)}/assign", new
+            {
+                assignments = new[] { assignment }
+            });
+        }
+
+        return createdId;
     }
 
     public async Task ReprovisionCloudPcsByPolicyAsync(string policyId, string? osVersion, string? userAccountType, IReadOnlyList<string> exclusions)
@@ -467,6 +768,48 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<GraphTableRow>> GetSignInStatusRowsAsync()
+    {
+        var cloudPcs = await GetCloudPcsAsync();
+        var rows = new List<GraphTableRow>();
+        foreach (var cloudPc in cloudPcs)
+        {
+            rows.Add(await GetSignInStatusRowAsync(cloudPc));
+        }
+
+        return rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task<GraphTableRow> GetSignInStatusRowAsync(CloudPcSummary cloudPc)
+    {
+        try
+        {
+            var cloudPcId = cloudPc.Id.Replace("'", "''", StringComparison.Ordinal);
+            var report = await GetAsync<JsonElement>(
+                $"deviceManagement/virtualEndpoint/reports/getRealTimeRemoteConnectionStatus(cloudPcId='{cloudPcId}')");
+            var reportRows = ParseReportRows(report, "ManagedDeviceName", "CloudPcId", "SignInStatus", "LastActiveTime");
+            var row = reportRows.FirstOrDefault();
+            if (row is not null)
+            {
+                var fields = new Dictionary<string, string>(row.Fields, StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Cloud PC"] = cloudPc.Name,
+                    ["Cloud PC ID"] = cloudPc.Id,
+                    ["User"] = cloudPc.UserPrincipalName ?? "-",
+                    ["Service plan"] = cloudPc.ServicePlanName ?? "-",
+                    ["Provisioning type"] = cloudPc.ProvisioningType ?? "-"
+                };
+                return ToTableRow(fields, "SignInStatus", "DaysSinceLastSignIn", "LastActiveTime");
+            }
+
+            return CreateUnavailableSignInRow(cloudPc, "Real-time status returned no rows");
+        }
+        catch (HttpRequestException ex)
+        {
+            return CreateUnavailableSignInRow(cloudPc, ex.Message);
+        }
+    }
+
     public async Task<IReadOnlyList<GraphTableRow>> GetConnectivityHistoryAsync(CloudPcSummary cloudPc)
     {
         var rows = await GetJsonRowsAsync(
@@ -480,6 +823,55 @@ internal sealed class W365GraphClient
             .Select(row =>
             {
                 var fields = new Dictionary<string, string>(row.Fields)
+                {
+                    ["Cloud PC"] = cloudPc.Name
+                };
+                return row with { Fields = fields };
+            })
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<GraphTableRow>> GetConnectionHistoryReportAsync(CloudPcSummary cloudPc, int top, int skip = 0)
+    {
+        var cloudPcId = cloudPc.Id.Replace("'", "''", StringComparison.Ordinal);
+        var filter =
+            "(TimeRange eq 'Last 7 days') and (PolicyNameParam eq '') and (RegionParam eq '') and " +
+            "(UserSettingNameParam eq '') and (ServicePlanTypeParam eq '') and (ServicePlanNameParam eq '') and " +
+            "(OSBuildVersionParam eq '') and (AADJoinTypeParam eq '') and (ImageNameParam eq '') and " +
+            "(GatewayRegionParam eq '') and (ClientOSParam eq '') and (ClientTypeParam eq '') and " +
+            "(ClientFriendlyNameParam eq '') and (TransportTypeParam eq '') and (CloudPCEndpointCountryRegionParam eq '') and " +
+            "(CloudPCEndpointStateParam eq '') and (CloudPCEndpointCityParam eq '') and (CloudPCStatusParam eq '') and " +
+            "(OSVersionParam eq '') and (ClientVersionParam eq '') and " +
+            $"(CloudPCIdParam eq '{cloudPcId}') and " +
+            "(UPNParam eq '') and (MMRVersionParam eq '') and (TeamsAppV2VersionParam eq '')";
+
+        var body = new Dictionary<string, object>
+        {
+            ["reportName"] = "troubleshootConnectionConfigurationOfViewDataTableV1Report",
+            ["top"] = top,
+            ["skip"] = skip,
+            ["search"] = "",
+            ["filter"] = filter,
+            ["select"] = new[]
+            {
+                "ActivityId", "SessionBeginTime", "SessionEndTime", "UPN", "UserId", "ManagedDeviceName",
+                "CloudPCId", "CloudPCHostGeography", "Region", "SessionHostAgentVersion", "SessionHostSxSStackVersion",
+                "GatewayRegion", "PolicyName", "UserSettingName", "ServicePlanType", "ServicePlanName", "AADJoinType",
+                "ImageName", "TransportType", "PlatformName", "ClientOS", "ClientType", "ClientVersion",
+                "SessionHostIPAddress", "CallerIPAddress", "CloudPCEndpointCountry", "CloudPCEndpointState",
+                "CloudPCEndpointCity", "TeamsAppV2Version", "MMRVersion"
+            },
+            ["orderBy"] = new[] { "SessionBeginTime desc" }
+        };
+
+        var json = await PostJsonForStringAsync("deviceManagement/virtualEndpoint/reports/retrieveCloudPcTroubleshootReports", body);
+        using var document = JsonDocument.Parse(json);
+        var rows = ParseReportRows(document.RootElement, "UPN", "SessionBeginTime", "SessionEndTime");
+
+        return rows
+            .Select(row =>
+            {
+                var fields = new Dictionary<string, string>(row.Fields, StringComparer.OrdinalIgnoreCase)
                 {
                     ["Cloud PC"] = cloudPc.Name
                 };
@@ -570,6 +962,19 @@ internal sealed class W365GraphClient
             return [];
         }
 
+        return ParseReportRows(document.RootElement, "CloudPcName", "ManagedDeviceName", "DisplayName", "SignInStatus", "Status", "Timestamp", "LastActiveTime");
+    }
+
+    private static IReadOnlyList<GraphTableRow> ParseReportRows(JsonElement report, params string[] summaryFields)
+    {
+        if (!report.TryGetProperty("Schema", out var schema) ||
+            !report.TryGetProperty("Values", out var values) ||
+            schema.ValueKind != JsonValueKind.Array ||
+            values.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
         var columns = schema.EnumerateArray().Select(GetReportColumnName).ToArray();
         var rows = new List<GraphTableRow>();
         foreach (var valueRow in values.EnumerateArray())
@@ -586,13 +991,32 @@ internal sealed class W365GraphClient
                 fields[columns[index]] = JsonToString(valuesArray[index]);
             }
 
-            rows.Add(ToTableRow(fields, "CloudPcName", "ManagedDeviceName", "DisplayName", "SignInStatus", "Status", "Timestamp", "LastActiveTime"));
+            rows.Add(ToTableRow(fields, summaryFields));
         }
 
         return rows;
     }
 
-    private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false)
+    private static GraphTableRow CreateUnavailableSignInRow(CloudPcSummary cloudPc, string reason)
+    {
+        return new GraphTableRow(
+            cloudPc.Name,
+            JoinSummary("Status unavailable", reason),
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Cloud PC"] = cloudPc.Name,
+                ["Cloud PC ID"] = cloudPc.Id,
+                ["ManagedDeviceName"] = cloudPc.ManagedDeviceName ?? "-",
+                ["User"] = cloudPc.UserPrincipalName ?? "-",
+                ["Service plan"] = cloudPc.ServicePlanName ?? "-",
+                ["SignInStatus"] = "Unavailable",
+                ["DaysSinceLastSignIn"] = "-",
+                ["LastActiveTime"] = "-",
+                ["Reason"] = reason
+            });
+    }
+
+    private async Task<List<T>> GetPagedAsync<T>(string relativeUri, bool includeConsistencyLevel = false, bool includeUnknownEnumMembers = false)
     {
         if (_accessTokenProvider is null)
         {
@@ -610,9 +1034,18 @@ internal sealed class W365GraphClient
                 request.Headers.Add("ConsistencyLevel", "eventual");
             }
 
+            if (includeUnknownEnumMembers)
+            {
+                request.Headers.Add("Prefer", "include-unknown-enum-members");
+            }
+
             await AuthorizeAsync(request);
             using var response = await _httpClient.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                throw new HttpRequestException($"{(int)response.StatusCode} {response.ReasonPhrase}: {ExtractGraphErrorMessage(errorBody)}");
+            }
 
             await using var stream = await response.Content.ReadAsStreamAsync();
             var page = await JsonSerializer.DeserializeAsync<GraphPage<T>>(stream, JsonOptions);
@@ -637,9 +1070,21 @@ internal sealed class W365GraphClient
         using var request = new HttpRequestMessage(HttpMethod.Get, relativeUri);
         await AuthorizeAsync(request);
         using var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"{(int)response.StatusCode} {response.ReasonPhrase}: {ExtractGraphErrorMessage(errorBody)}");
+        }
+
+        var content = await response.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            // Some Graph GET endpoints (e.g. retrievePolicyApplyActionResult before any apply
+            // operation has ever run) return a 200/204 with no body at all.
+            return default;
+        }
+
+        return JsonSerializer.Deserialize<T>(content, JsonOptions);
     }
 
     private async Task<IReadOnlyList<GraphTableRow>> GetJsonRowsAsync(string relativeUri, params string[] summaryFields)
@@ -664,7 +1109,11 @@ internal sealed class W365GraphClient
         };
         await AuthorizeAsync(request);
         using var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"{(int)response.StatusCode} {response.ReasonPhrase}: {ExtractGraphErrorMessage(errorBody)}");
+        }
     }
 
     private async Task<string> PostJsonForStringAsync(string relativeUri, object body)
@@ -674,14 +1123,21 @@ internal sealed class W365GraphClient
             throw new InvalidOperationException("Not connected to Microsoft Graph.");
         }
 
+        var requestJson = JsonSerializer.Serialize(body, JsonOptions);
         using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri)
         {
-            Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), System.Text.Encoding.UTF8, "application/json")
+            Content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json")
         };
         request.Headers.Add("Prefer", "include-unknown-enum-members");
         await AuthorizeAsync(request);
         using var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException(
+                $"{(int)response.StatusCode} {response.ReasonPhrase}: {ExtractGraphErrorMessage(errorBody)}\nRequest body: {requestJson}");
+        }
+
         return await response.Content.ReadAsStringAsync();
     }
 
@@ -965,6 +1421,34 @@ internal sealed class W365GraphClient
     {
         var parts = values.Where(value => !string.IsNullOrWhiteSpace(value) && value != "-").ToArray();
         return parts.Length == 0 ? "-" : string.Join(" | ", parts);
+    }
+
+    private static string ExtractGraphErrorMessage(string errorBody)
+    {
+        if (string.IsNullOrWhiteSpace(errorBody))
+        {
+            return "No additional error details were returned.";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(errorBody);
+            if (document.RootElement.TryGetProperty("error", out var error))
+            {
+                var code = error.TryGetProperty("code", out var codeElement) ? codeElement.GetString() : null;
+                var message = error.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(code) || !string.IsNullOrWhiteSpace(message))
+                {
+                    return string.Join(": ", new[] { code, message }.Where(value => !string.IsNullOrWhiteSpace(value)));
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall through to returning the raw body below.
+        }
+
+        return errorBody;
     }
 
     private static string JsonToString(JsonElement value)

@@ -1,5 +1,7 @@
 using Spectre.Console;
+using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace W365Cli;
@@ -8,6 +10,9 @@ internal sealed class W365CliApp
 {
     private const string GitHubRepositoryUrl = "https://github.com/bwya77/W365-CLI-Native";
     private const string GitHubLatestReleaseApiUrl = "https://api.github.com/repos/bwya77/W365-CLI-Native/releases/latest";
+    private const string ProjectWebsiteUrl = "https://www.windowsfromanywhere.com";
+    private const string GitHubFeatureUrl = "https://github.com/bwya77/W365-CLI-Native/issues/new?labels=enhancement&title=Feature%3A%20";
+    private const string GitHubIssueUrl = "https://github.com/bwya77/W365-CLI-Native/issues/new?labels=bug&title=Bug%3A%20";
     private const string AccentColor = "#58a6ff";
     private const string AccentSoftColor = "#79c0ff";
     private const string MutedColor = "#8b949e";
@@ -15,83 +20,223 @@ internal sealed class W365CliApp
     private const string SurfaceColor = "#161b22";
     private const string PurpleColor = "#bc8cff";
     private const string GreenColor = "#3fb950";
+    private const string BorderColor = "#30363d";
     private readonly W365Session _session = new();
+    private readonly Tip launchTip = Tips[Random.Shared.Next(Tips.Length)];
     private static readonly List<ActionHistoryItem> ActionHistory = [];
     private static readonly Tip[] Tips =
     [
         new("/palette", "Use P or Ctrl+K to open the command palette from anywhere on the main screen."),
-        new("/tabs", "Use Tab, Shift+Tab, Left, or Right to move across the top areas."),
+        new("/filter", "Use slash or F on list screens to filter down to the thing you need."),
         new("/refresh", "Press R on data-heavy screens to refresh without leaving your current view."),
         new("/history", "Press H to open hidden action history for submitted Cloud PC actions."),
-        new("/resize", "Resize uses an interactive service plan picker so you can compare sizes before submitting.")
+        new("/resize", "Resize uses an interactive service plan picker so you can compare sizes before submitting."),
+        new("/licensing", "Licensing shows Flex, Reserve, Cloud Apps, shared pool, and dedicated capacity together."),
+        new("/cloudapps", "Cloud Apps can be browsed, published, and unpublished from the native CLI."),
+        new("/snapshots", "Snapshots can be reviewed across all Cloud PCs or opened from a specific Cloud PC."),
+        new("/reports", "Report rows can open Cloud PC detail pages when Graph returns enough identifying data."),
+        new("/safe-actions", "Device-impacting actions use confirmation screens before submission.")
     ];
     private static string? statusMessage;
     private static DateTimeOffset? statusMessageAt;
+    private static string statusBarConnection = "[white on red] NOT CONNECTED [/]";
+    private static string statusBarTenant = "No tenant selected";
     private GitHubReleaseInfo? latestRelease;
-    private bool updateCheckComplete;
-    private string? updateCheckError;
 
     public async Task<int> RunAsync(string[] args)
     {
-        Console.Title = "W365 CLI Native";
+        // Console.Title's setter throws PlatformNotSupportedException on non-Windows platforms —
+        // this app ships macOS builds too, so guard it instead of crashing at startup.
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            Console.Title = "W365 CLI";
+        }
+
         Console.CursorVisible = false;
+        Console.CancelKeyPress += (_, _) => Console.CursorVisible = true;
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .StartAsync("Checking cached sign-in...", async _ => await _session.TryRestoreAsync());
+        await ShowMissingPermissionPromptIfNeededAsync();
         await CheckForUpdatesOnStartupAsync();
+        PromptForUpdateIfAvailable();
 
         var selectedIndex = 0;
+        var expandedIndex = -1;
+        var selectedChildIndex = -1;
+        var topNavIndex = -1;
         while (true)
         {
-            var menuChoices = GetMainMenuChoices();
-            if (selectedIndex >= menuChoices.Count)
+            try
             {
-                selectedIndex = menuChoices.Count - 1;
-            }
-
-            RenderMainMenu(menuChoices, selectedIndex);
-            var key = Console.ReadKey(intercept: true);
-            switch (key.Key)
-            {
-                case ConsoleKey.UpArrow:
-                    selectedIndex = Math.Max(0, selectedIndex - 1);
-                    break;
-                case ConsoleKey.DownArrow:
-                    selectedIndex = Math.Min(menuChoices.Count - 1, selectedIndex + 1);
-                    break;
-                case ConsoleKey.Tab when key.Modifiers.HasFlag(ConsoleModifiers.Shift):
-                case ConsoleKey.LeftArrow:
-                    selectedIndex = selectedIndex <= 0 ? menuChoices.Count - 1 : selectedIndex - 1;
-                    break;
-                case ConsoleKey.Tab:
-                case ConsoleKey.RightArrow:
-                    selectedIndex = selectedIndex >= menuChoices.Count - 1 ? 0 : selectedIndex + 1;
-                    break;
-                case ConsoleKey.Home:
-                    selectedIndex = 0;
-                    break;
-                case ConsoleKey.End:
+                var menuChoices = GetMainMenuChoices();
+                if (selectedIndex >= menuChoices.Count)
+                {
                     selectedIndex = menuChoices.Count - 1;
-                    break;
-                case ConsoleKey.Enter:
-                    if (await ExecuteMainMenuChoiceAsync(menuChoices[selectedIndex]))
+                    expandedIndex = -1;
+                    selectedChildIndex = -1;
+                }
+
+                RenderMainMenu(menuChoices, selectedIndex, expandedIndex, selectedChildIndex, topNavIndex);
+                var key = ReadNavigationKey(intercept: true, handleTopNavTab: false);
+                var selectedChoice = menuChoices[selectedIndex];
+                var selectedChildren = selectedChoice.Children ?? [];
+
+                if (TryHandleTopNavKey(key, ref topNavIndex, currentTabIndex: 0, out var activation))
+                {
+                    switch (activation)
                     {
-                        return 0;
+                        case TopNavActivation.Home:
+                            selectedIndex = 0;
+                            expandedIndex = -1;
+                            selectedChildIndex = -1;
+                            break;
+                        case TopNavActivation.About:
+                            try
+                            {
+                                ShowAbout();
+                            }
+                            catch (NavigateHomeException)
+                            {
+                                selectedIndex = 0;
+                                expandedIndex = -1;
+                                selectedChildIndex = -1;
+                                topNavIndex = -1;
+                            }
+                            catch (NavigateExitException)
+                            {
+                                AnsiConsole.Clear();
+                                Console.CursorVisible = true;
+                                return 0;
+                            }
+                            break;
+                        case TopNavActivation.Exit:
+                            AnsiConsole.Clear();
+                            Console.CursorVisible = true;
+                            return 0;
                     }
-                    break;
-                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
-                    await ShowCommandPaletteAsync();
-                    break;
-                default:
-                    if (IsActionHistoryHotkey(key))
-                    {
-                        await ShowActionHistoryAsync();
-                    }
-                    else if (key.KeyChar is 'p' or 'P')
-                    {
+                    continue;
+                }
+
+                switch (key.Key)
+                {
+                    case ConsoleKey.UpArrow:
+                        if (expandedIndex == selectedIndex && selectedChildIndex >= 0)
+                        {
+                            selectedChildIndex--;
+                        }
+                        else
+                        {
+                            selectedIndex = Math.Max(0, selectedIndex - 1);
+                            expandedIndex = -1;
+                            selectedChildIndex = -1;
+                        }
+                        break;
+                    case ConsoleKey.DownArrow:
+                        if (expandedIndex == selectedIndex && selectedChildren.Count > 0 && selectedChildIndex < selectedChildren.Count - 1)
+                        {
+                            selectedChildIndex++;
+                        }
+                        else
+                        {
+                            selectedIndex = Math.Min(menuChoices.Count - 1, selectedIndex + 1);
+                            expandedIndex = -1;
+                            selectedChildIndex = -1;
+                        }
+                        break;
+                    case ConsoleKey.Home:
+                        selectedIndex = 0;
+                        expandedIndex = -1;
+                        selectedChildIndex = -1;
+                        break;
+                    case ConsoleKey.End:
+                        selectedIndex = menuChoices.Count - 1;
+                        expandedIndex = -1;
+                        selectedChildIndex = -1;
+                        break;
+                    case ConsoleKey.RightArrow:
+                        if (selectedChildren.Count > 0)
+                        {
+                            expandedIndex = selectedIndex;
+                            selectedChildIndex = selectedChildIndex < 0 ? 0 : Math.Min(selectedChildren.Count - 1, selectedChildIndex + 1);
+                        }
+                        break;
+                    case ConsoleKey.Enter:
+                        if (selectedChildren.Count > 0 && selectedChildIndex < 0)
+                        {
+                            expandedIndex = selectedIndex;
+                            selectedChildIndex = 0;
+                            break;
+                        }
+
+                        var choiceToExecute = selectedChildIndex >= 0
+                            ? selectedChildren[selectedChildIndex]
+                            : selectedChoice;
+                        if (await ExecuteMainMenuChoiceAsync(choiceToExecute))
+                        {
+                            return 0;
+                        }
+                        break;
+                    case ConsoleKey.Escape:
+                    case ConsoleKey.LeftArrow:
+                        if (expandedIndex >= 0)
+                        {
+                            expandedIndex = -1;
+                            selectedChildIndex = -1;
+                        }
+                        break;
+                    case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
                         await ShowCommandPaletteAsync();
-                    }
-                    break;
+                        break;
+                    default:
+                        if (IsActionHistoryHotkey(key))
+                        {
+                            await ShowActionHistoryAsync();
+                        }
+                        else if (key.KeyChar is 'p' or 'P')
+                        {
+                            await ShowCommandPaletteAsync();
+                        }
+                        else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                        {
+                            expandedIndex = -1;
+                            selectedChildIndex = -1;
+                        }
+                        break;
+                }
+            }
+            catch (NavigateHomeException)
+            {
+                selectedIndex = 0;
+                expandedIndex = -1;
+                selectedChildIndex = -1;
+                topNavIndex = -1;
+            }
+            catch (NavigateAboutException)
+            {
+                try
+                {
+                    ShowAbout();
+                }
+                catch (NavigateHomeException)
+                {
+                    selectedIndex = 0;
+                    expandedIndex = -1;
+                    selectedChildIndex = -1;
+                    topNavIndex = -1;
+                }
+                catch (NavigateExitException)
+                {
+                    AnsiConsole.Clear();
+                    Console.CursorVisible = true;
+                    return 0;
+                }
+            }
+            catch (NavigateExitException)
+            {
+                AnsiConsole.Clear();
+                Console.CursorVisible = true;
+                return 0;
             }
         }
     }
@@ -109,16 +254,27 @@ internal sealed class W365CliApp
             case "Snapshots":
                 await ShowAllSnapshotsAsync();
                 return false;
-            case "Provisioning policies":
+            case "Policies":
                 await ShowProvisioningAsync();
                 return false;
+            case "Create policy":
+                await CreateProvisioningPolicyWizardAsync();
+                return false;
+            case "User experience sync overview":
+                await ShowUserExperienceSyncOverviewAsync();
+                return false;
             case "Usage report":
+            case "Usage":
+            case "Sign-in status":
                 await ShowGraphRowsAsync(
-                    "Windows 365 Cloud PC usage",
-                    async () => await _session.Graph.GetUsageRowsAsync(),
+                    "Windows 365 Cloud PC sign-in status",
+                    async () => await _session.Graph.GetSignInStatusRowsAsync(),
                     GetUsageReportHeader,
                     FormatUsageReportRow,
                     OpenCloudPcFromReportRowAsync);
+                return false;
+            case "Connectivity history":
+                await ShowConnectivityHistoryAsync();
                 return false;
             case "Launch details":
                 await ShowGraphRowsAsync(
@@ -127,11 +283,38 @@ internal sealed class W365CliApp
                     GetLaunchDetailsHeader,
                     FormatLaunchDetailsRow);
                 return false;
+            case "Cloud PC reports":
+                await ShowCloudPcReportsAsync();
+                return false;
+            case "Organization settings":
+                await ShowGraphRowsAsync(
+                    "Windows 365 organization settings",
+                    async () => await _session.Graph.GetOrganizationSettingsAsync(),
+                    GetOrganizationSettingsHeader,
+                    FormatOrganizationSettingRow);
+                return false;
+            case "Setting profiles":
+                await ShowGraphRowsAsync(
+                    "Windows 365 setting profiles",
+                    async () => await _session.Graph.GetSettingProfilesAsync(),
+                    GetSettingProfilesHeader,
+                    FormatSettingProfileRow);
+                return false;
+            case "User settings":
+                await ShowGraphRowsAsync(
+                    "Windows 365 user settings",
+                    async () => await _session.Graph.GetUserSettingsAsync(),
+                    GetUserSettingsHeader,
+                    FormatUserSettingRow);
+                return false;
             case "Service plans":
                 await ShowGraphRowsAsync("Windows 365 service plans", _session.Graph.GetServicePlanRowsAsync, GetServicePlansHeader, FormatServicePlanRow);
                 return false;
             case "Gallery images":
                 await ShowGraphRowsAsync("Windows 365 gallery images", _session.Graph.GetGalleryImageRowsAsync, GetGalleryImagesHeader, FormatGalleryImageRow);
+                return false;
+            case "Custom images":
+                await ShowGraphRowsAsync("Windows 365 custom images", _session.Graph.GetCustomImageRowsAsync, GetCustomImagesHeader, FormatCustomImageRow);
                 return false;
             case "Supported regions":
                 await ShowGraphRowsAsync("Windows 365 supported regions", _session.Graph.GetSupportedRegionRowsAsync, GetSupportedRegionsHeader, FormatSupportedRegionRow);
@@ -140,6 +323,12 @@ internal sealed class W365CliApp
 
         switch (choice.Key)
         {
+            case "CommandPalette":
+                await ShowCommandPaletteAsync();
+                break;
+            case "ActionHistory":
+                await ShowActionHistoryAsync();
+                break;
             case "Connection":
                 await ShowConnectionAsync();
                 break;
@@ -167,9 +356,6 @@ internal sealed class W365CliApp
             case "About":
                 ShowAbout();
                 break;
-            case "Update":
-                await ShowUpdateCheckAsync();
-                break;
             case "Exit":
                 AnsiConsole.Clear();
                 Console.CursorVisible = true;
@@ -192,20 +378,20 @@ internal sealed class W365CliApp
         {
             AnsiConsole.Clear();
             RenderBreadcrumb("Cloud PCs");
-            AnsiConsole.MarkupLine("[#4091f2]Cloud PCs[/]");
+            AnsiConsole.MarkupLine("[#58a6ff]Cloud PCs[/]");
             AnsiConsole.WriteLine();
             for (var index = 0; index < choices.Length; index++)
             {
                 var escaped = Markup.Escape(choices[index]);
                 AnsiConsole.MarkupLine(index == selectedIndex
-                    ? $"[black on #4091f2]> {escaped}[/]"
+                    ? $"[black on #58a6ff]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | Esc/B/Q back[/]");
+            AnsiConsole.MarkupLine("[grey]Up/Down move | Enter select | Esc/B/Q back[/]");
             RenderStatusBar();
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -305,7 +491,7 @@ internal sealed class W365CliApp
             AnsiConsole.Clear();
             RenderBreadcrumb("Cloud PCs", "Disk space");
             RenderDiskSpaceTable(items, visibleItems, selectedIndex, filter);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -372,14 +558,14 @@ internal sealed class W365CliApp
 
     private static void RenderDiskSpaceTable(IReadOnlyList<CloudPcDiskSpace> allItems, IReadOnlyList<CloudPcDiskSpace> visibleItems, int selectedIndex, string filter)
     {
-        AnsiConsole.MarkupLine("[#4091f2]Windows 365 Cloud PC disk space[/]");
+        AnsiConsole.MarkupLine("[#58a6ff]Windows 365 Cloud PC disk space[/]");
         AnsiConsole.MarkupLine($"[grey]Rows: {allItems.Count} | Visible: {visibleItems.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
         var header = Row("Cloud PC", 34, "Free", 10, "Used", 10, "Total", 10, "Free %", 8, "Last sync", 20);
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
         AnsiConsole.WriteLine();
 
-        var pageSize = Math.Max(8, Console.WindowHeight - 12);
+        var pageSize = Math.Max(8, Math.Min(20, Console.WindowHeight - 14));
         var totalRows = visibleItems.Count + 1;
         var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, totalRows - pageSize));
         var end = Math.Min(totalRows - 1, start + pageSize - 1);
@@ -394,9 +580,10 @@ internal sealed class W365CliApp
             else
             {
                 var disk = visibleItems[index];
+                var hasError = !string.IsNullOrWhiteSpace(disk.Error);
                 label = Row(
                     disk.CloudPcName, 34,
-                    FormatGb(disk.FreeStorageGb), 10,
+                    hasError ? "unavail" : FormatGb(disk.FreeStorageGb), 10,
                     FormatGb(disk.UsedStorageGb), 10,
                     FormatGb(disk.TotalStorageGb), 10,
                     disk.PercentFree is null ? "-" : $"{disk.PercentFree}%", 8,
@@ -405,7 +592,7 @@ internal sealed class W365CliApp
 
             var escaped = Markup.Escape(label);
             AnsiConsole.MarkupLine(index == selectedIndex
-                ? $"[black on #4091f2]> {escaped}[/]"
+                ? $"[black on #58a6ff]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -426,7 +613,8 @@ internal sealed class W365CliApp
                 Contains(item.CloudPcName, filter) ||
                 Contains(item.AssignedUserUpn, filter) ||
                 Contains(item.ManagedDeviceName, filter) ||
-                Contains(item.ManagedDeviceId, filter))
+                Contains(item.ManagedDeviceId, filter) ||
+                Contains(item.Error, filter))
             .ToArray();
     }
 
@@ -478,7 +666,7 @@ internal sealed class W365CliApp
             AnsiConsole.Clear();
             RenderBreadcrumb("Cloud PCs", "Snapshots");
             RenderAllSnapshotsTable(items, visibleItems, selectedIndex, filter);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -510,7 +698,6 @@ internal sealed class W365CliApp
                     }
                     break;
                 case ConsoleKey.A:
-                case ConsoleKey.S:
                     if (visibleItems.Count == 0)
                     {
                         break;
@@ -586,7 +773,7 @@ internal sealed class W365CliApp
 
     private static void RenderAllSnapshotsTable(IReadOnlyList<SnapshotListItem> allItems, IReadOnlyList<SnapshotListItem> visibleItems, int selectedIndex, string filter)
     {
-        AnsiConsole.MarkupLine("[#4091f2]Windows 365 Cloud PC snapshots[/]");
+        AnsiConsole.MarkupLine("[#58a6ff]Windows 365 Cloud PC snapshots[/]");
         AnsiConsole.MarkupLine($"[grey]Rows: {allItems.Count} | Visible: {visibleItems.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
         AnsiConsole.WriteLine();
 
@@ -603,7 +790,7 @@ internal sealed class W365CliApp
             return;
         }
 
-        var pageSize = Math.Max(8, Console.WindowHeight - 10);
+        var pageSize = Math.Max(8, Math.Min(20, Console.WindowHeight - 14));
         var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, visibleItems.Count - pageSize));
         var visible = visibleItems.Skip(start).Take(pageSize).ToArray();
         for (var index = 0; index < visible.Length; index++)
@@ -618,12 +805,12 @@ internal sealed class W365CliApp
                 item.Snapshot.ExpirationDateTime?.ToLocalTime().ToString("g") ?? "-", widths.Expires);
             var escaped = Markup.Escape(row);
             AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                ? $"[black on #4091f2]> {escaped}[/]"
+                ? $"[black on #58a6ff]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | S snapshot actions | / or F filter | C clear | R refresh | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter Cloud PC actions | A snapshot actions | / or F filter | C clear | R refresh | Esc/B/Q back[/]");
         RenderStatusBar();
     }
 
@@ -669,6 +856,7 @@ internal sealed class W365CliApp
                 new Markup($"[bold]Total:[/] {Markup.Escape(FormatGb(disk.TotalStorageGb))}"),
                 new Markup($"[bold]Percent free:[/] {Markup.Escape(disk.PercentFree is null ? "-" : $"{disk.PercentFree}%")}"),
                 new Markup($"[bold]Last sync:[/] {Markup.Escape(disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
+                new Markup($"[bold]Status:[/] {Markup.Escape(disk.Error ?? "Disk data available")}"),
                 new Markup($"[bold]Cloud PC ID:[/] [grey]{Markup.Escape(disk.CloudPcId)}[/]"),
                 new Markup($"[bold]Managed device ID:[/] [grey]{Markup.Escape(disk.ManagedDeviceId ?? "-")}[/]")))
             .Header("Disk space details")
@@ -690,101 +878,112 @@ internal sealed class W365CliApp
 
         return
         [
-            new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs"),
-            new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows"),
-            new("Reports", "Reports", "Usage, connectivity, launch details, report streams"),
-            new("Licensing", "Licensing", "Capacity, availability, and Flex utilization"),
+            new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs",
+            [
+                new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
+                new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
+                new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots")
+            ]),
+            new("Provisioning", "Provisioning", "Provisioning policies and maintenance windows",
+            [
+                new("Provisioning", "Policies", "View, copy, export, reprovision, and delete policies"),
+                new("Provisioning", "Create policy", "Create a new provisioning policy"),
+                new("Provisioning", "User experience sync overview", "Storage usage across all shared policies with user experience sync")
+            ]),
+            new("Reports", "Reports", "Usage, connectivity, launch details, report streams",
+            [
+                new("Reports", "Sign-in status", "Open current Cloud PC sign-in status"),
+                new("Reports", "Connectivity history", "Select a Cloud PC and inspect connection events"),
+                new("Reports", "Launch details", "Open Cloud PC launch details"),
+                new("Reports", "Cloud PC reports", "Browse Graph report streams")
+            ]),
+            new("Licensing", "Licensing", "Capacity, availability, Flex, and Reserve utilization"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
-            new("Catalog", "Catalog", "Service plans, images, regions"),
-            new("Tenant", "Tenant settings", "Organization settings, profiles, user settings"),
+            new("Catalog", "Catalog", "Service plans, images, regions",
+            [
+                new("Catalog", "Service plans", "Open service plan catalog"),
+                new("Catalog", "Gallery images", "Open gallery images"),
+                new("Catalog", "Custom images", "Open custom images"),
+                new("Catalog", "Supported regions", "Open supported regions")
+            ]),
+            new("Tenant", "Tenant settings", "Organization settings, profiles, user settings",
+            [
+                new("Tenant", "Organization settings", "View tenant-wide Windows 365 defaults"),
+                new("Tenant", "Setting profiles", "View Windows 365 setting profiles"),
+                new("Tenant", "User settings", "View user settings policies")
+            ]),
             new("Connection", "Connection", connectionDescription),
-            new("Update", "Check for updates", "Compare this build with GitHub Releases"),
             new("About", "About", "Version and project information"),
-            new("Exit", "Exit", "Close W365 CLI Native")
+            new("Exit", "Exit", "Close W365 CLI")
         ];
     }
 
     private void RenderMainMenuDashboard(IReadOnlyList<MenuChoice> choices)
     {
-        var connectionText = _session.IsConnected ? "Connected" : "Not connected";
-        var connectionColor = _session.IsConnected ? GreenColor : "yellow";
-        var tenantName = _session.TenantName ?? "No tenant selected";
-        var tenantId = _session.TenantId ?? "-";
-        var updateText = GetUpdateStatusText();
-        var updateColor = IsUpdateAvailable() ? "yellow" : updateCheckError is not null ? "red" : "grey";
-
-        var dashboard = new Grid();
-        dashboard.AddColumn();
-        dashboard.AddColumn();
-        dashboard.AddColumn();
-        dashboard.AddColumn();
-        dashboard.AddRow(
-            new Panel(new Markup($"[bold {connectionColor}]{connectionText}[/]\n[grey]Status[/]")).Border(BoxBorder.Rounded),
-            new Panel(new Markup($"[bold {TextColor}]{Markup.Escape(Fit(tenantId, 36))}[/]\n[grey]Tenant ID[/]")).Border(BoxBorder.Rounded),
-            new Panel(new Markup($"[bold {TextColor}]{Markup.Escape(Fit(tenantName, 30))}[/]\n[grey]Tenant name[/]")).Border(BoxBorder.Rounded),
-            new Panel(new Markup($"[bold {updateColor}]{Markup.Escape(Fit(updateText, 24))}[/]\n[grey]Updates[/]")).Border(BoxBorder.Rounded));
-
-        AnsiConsole.Write(dashboard);
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Pick an area below. Esc, B, or Q backs out in deeper screens.[/]");
-        AnsiConsole.WriteLine();
+        UpdateStatusBarSnapshot();
     }
 
-    private void RenderMainMenu(IReadOnlyList<MenuChoice> choices, int selectedIndex)
+    private void RenderMainMenu(IReadOnlyList<MenuChoice> choices, int selectedIndex, int expandedIndex, int selectedChildIndex, int topNavIndex)
     {
-        RenderHeader();
-        RenderTopTabs(choices, selectedIndex);
+        RenderHeader(focusedTopNavIndex: topNavIndex);
+        RenderTip();
+        AnsiConsole.WriteLine();
+        RenderHomeStatusLine();
         AnsiConsole.WriteLine();
         RenderMainMenuDashboard(choices);
-        RenderBreadcrumb("Main menu");
-
-        AnsiConsole.MarkupLine($"[{AccentColor}]Select an area[/]");
+        var menuRows = new List<Markup>();
         for (var index = 0; index < choices.Count; index++)
         {
-            var label = FormatMainMenuChoice(choices[index]);
-            AnsiConsole.MarkupLine(index == selectedIndex
-                ? $"[black on {AccentColor}]> {label}[/]"
-                : $"  {label}");
+            var selected = index == selectedIndex;
+            var label = FormatMainMenuChoice(choices[index], selected);
+            var expandMarker = choices[index].Children?.Count > 0
+                ? expandedIndex == index ? "v " : "  "
+                : "  ";
+            menuRows.Add(new Markup(selected
+                ? $"[black on {AccentColor}]{expandMarker}{label}[/]"
+                : $"{expandMarker}{label}"));
+
+            if (expandedIndex == index && choices[index].Children is { Count: > 0 } children)
+            {
+                for (var childIndex = 0; childIndex < children.Count; childIndex++)
+                {
+                    var childSelected = selected && selectedChildIndex == childIndex;
+                    var childLabel = FormatMainMenuChoice(children[childIndex], childSelected);
+                    menuRows.Add(new Markup(childSelected
+                        ? $"[black on {AccentColor}]  > {childLabel}[/]"
+                        : $"    {childLabel}"));
+                }
+            }
         }
 
+        AnsiConsole.Write(new Panel(new Rows(menuRows))
+            .Header("Main menu")
+            .Border(BoxBorder.Rounded)
+            .BorderStyle(new Style(Color.FromHex(AccentColor)))
+            .Expand());
         AnsiConsole.WriteLine();
-        RenderTip(choices[selectedIndex], selectedIndex);
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Tab/Left/Right areas | Up/Down list | Enter open | P or Ctrl+K command palette[/]");
-        RenderStatusBar();
+        RenderTopNavAwareHint(topNavIndex, "[grey]Tab top nav | Up/Down move | Right expand | Enter select | Esc/B/Q collapse | P or Ctrl+K command palette[/]");
     }
 
-    private static void RenderTopTabs(IReadOnlyList<MenuChoice> choices, int selectedIndex)
+    private void RenderTip()
     {
-        var tabs = choices
-            .Take(8)
-            .Select((choice, index) =>
-            {
-                var title = Markup.Escape(choice.Title.Replace(" settings", string.Empty, StringComparison.OrdinalIgnoreCase));
-                return index == selectedIndex
-                    ? $"[black on {AccentColor}] {title} [/]"
-                    : $"[{MutedColor}] {title} [/]";
-            });
-        AnsiConsole.MarkupLine(string.Join($"[{MutedColor}]  |  [/]", tabs));
-    }
-
-    private static void RenderTip(MenuChoice choice, int selectedIndex)
-    {
-        var tip = Tips[selectedIndex % Tips.Length];
-        var context = choice.Key switch
-        {
-            "Licensing" => new Tip("/licensing", "Open Licensing to see Flex, Reserve, shared pool, Cloud Apps, and dedicated capacity in one place."),
-            "CloudPcs" => new Tip("/cloudpcs", "Open Cloud PCs for browse, filter, resize, restart, reprovision, snapshots, and action history."),
-            "Provisioning" => new Tip("/policies", "Provisioning includes policy export, copy, Cloud PC reprovision, and policy cleanup workflows."),
-            "CloudApps" => new Tip("/apps", "Cloud Apps lets you browse, publish, and unpublish Windows 365 Cloud Apps."),
-            _ => tip
-        };
-
-        var body = $"[bold {PurpleColor}]Tip: {Markup.Escape(context.Command)}[/]\n" +
-            $"[{MutedColor}]L {Markup.Escape(context.Text)}[/]";
+        var body = $"[bold {PurpleColor}]Tip: {Markup.Escape(launchTip.Command)}[/]\n" +
+            $"[{MutedColor}]L {Markup.Escape(launchTip.Text)}[/]";
         AnsiConsole.Write(new Panel(new Markup(body))
-            .Border(BoxBorder.None)
+            .Border(BoxBorder.Rounded)
+            .BorderStyle(new Style(Color.FromHex(PurpleColor)))
             .Padding(0, 0, 0, 0));
+    }
+
+    private static void RenderHomeStatusLine()
+    {
+        var transient = statusMessage is not null &&
+            statusMessageAt is not null &&
+            DateTimeOffset.Now - statusMessageAt < TimeSpan.FromSeconds(6)
+                ? $"  [{MutedColor}]|[/]  {statusMessage}"
+                : string.Empty;
+
+        AnsiConsole.MarkupLine($"Graph {statusBarConnection}  [{MutedColor}]|[/]  Tenant [{TextColor}]{Markup.Escape(statusBarTenant)}[/]{transient}");
     }
 
     private async Task ShowCommandPaletteAsync()
@@ -806,7 +1005,7 @@ internal sealed class W365CliApp
 
             AnsiConsole.Clear();
             RenderBreadcrumb("Command palette");
-            AnsiConsole.MarkupLine("[#4091f2]Command palette[/]");
+            AnsiConsole.MarkupLine("[#58a6ff]Command palette[/]");
             AnsiConsole.MarkupLine($"[grey]Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}[/]");
             AnsiConsole.WriteLine();
 
@@ -816,7 +1015,7 @@ internal sealed class W365CliApp
             }
             else
             {
-                var pageSize = Math.Max(8, Console.WindowHeight - 8);
+                var pageSize = Math.Max(8, Math.Min(18, Console.WindowHeight - 12));
                 var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, visibleCommands.Count - pageSize));
                 var visiblePage = visibleCommands.Skip(start).Take(pageSize).ToArray();
                 for (var index = 0; index < visiblePage.Length; index++)
@@ -824,14 +1023,14 @@ internal sealed class W365CliApp
                     var absoluteIndex = start + index;
                     var label = FormatMainMenuChoice(visiblePage[index]);
                     AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                        ? $"[black on #4091f2]> {label}[/]"
+                        ? $"[black on #58a6ff]> {label}[/]"
                         : $"  {label}");
                 }
             }
 
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine("[grey]Type to filter | Up/Down move | Enter run | Backspace edit | Esc/B/Q back[/]");
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -879,14 +1078,16 @@ internal sealed class W365CliApp
         }
     }
 
-    private static string FormatMainMenuChoice(MenuChoice choice)
+    private static string FormatMainMenuChoice(MenuChoice choice, bool selected = false)
     {
-        return $"[{TextColor}]{Markup.Escape(Fit(choice.Title, 22))}[/] [{MutedColor}]{Markup.Escape(choice.Description)}[/]";
+        var descriptionColor = selected ? TextColor : MutedColor;
+        return $"[{TextColor}]{Markup.Escape(Fit(choice.Title, 22))}[/] [{descriptionColor}]{Markup.Escape(choice.Description)}[/]";
     }
 
     private static void RenderBreadcrumb(params string[] parts)
     {
-        var allParts = new[] { "W365 CLI Native" }
+        RenderTopNav();
+        var allParts = new[] { "W365 CLI" }
             .Concat(parts.Where(part => !string.IsNullOrWhiteSpace(part)))
             .ToArray();
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(string.Join(" > ", allParts))}[/]");
@@ -901,14 +1102,15 @@ internal sealed class W365CliApp
             new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
             new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
             new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots"),
-            new("Provisioning", "Provisioning policies", "Open provisioning policy browser"),
+            new("Provisioning", "Policies", "Open provisioning policy browser"),
+            new("Provisioning", "Create policy", "Create a new provisioning policy"),
+            new("Provisioning", "User experience sync overview", "Storage usage across all shared policies with user experience sync"),
             new("Reports", "Usage report", "Open Cloud PC usage"),
             new("Licensing", "Licensing", "Open licensing capacity view"),
             new("Reports", "Launch details", "Open Cloud PC launch details"),
             new("Catalog", "Service plans", "Open service plan catalog"),
             new("Catalog", "Gallery images", "Open gallery images"),
-            new("Catalog", "Supported regions", "Open supported regions"),
-            new("Update", "Check for updates", "Compare this build with GitHub Releases")
+            new("Catalog", "Supported regions", "Open supported regions")
         ];
     }
 
@@ -924,17 +1126,62 @@ internal sealed class W365CliApp
             .ToArray();
     }
 
-    private void RenderHeader()
+    private static void RenderTopNav(string? active = null, int focusedIndex = -1)
+    {
+        string Tab(string name, int index)
+        {
+            var isActive = focusedIndex == index || (focusedIndex < 0 && string.Equals(active, name, StringComparison.OrdinalIgnoreCase));
+            return isActive ? $"[{name}]" : $" {name} ";
+        }
+
+        var navText = $"  {Tab("Home", 0)}     {Tab("About", 1)}     {Tab("Exit", 2)}";
+        var width = Math.Max(navText.Length, Console.WindowWidth - 1);
+        AnsiConsole.MarkupLine($"[black on {AccentColor}]{Markup.Escape(navText.PadRight(width))}[/]");
+        AnsiConsole.WriteLine();
+    }
+
+    /// <summary>
+    /// Renders the keyboard hint line for a screen that shows the top nav. When a top-nav tab is
+    /// focused (topNavIndex >= 0), this replaces the screen's normal hint with an unambiguous
+    /// call to action so the user always knows what pressing Enter will do — most importantly,
+    /// making it obvious that focusing "Exit" requires a follow-up Enter to actually quit.
+    /// </summary>
+    private static void RenderTopNavAwareHint(int topNavIndex, string defaultHint)
+    {
+        var hint = topNavIndex switch
+        {
+            0 => "[black on yellow] Home [/] [grey]selected — press[/] [bold]Enter[/] [grey]to return to the main menu, or[/] [bold]Esc[/][grey]/[/][bold]Tab[/] [grey]to keep going[/]",
+            1 => "[black on yellow] About [/] [grey]selected — press[/] [bold]Enter[/] [grey]to open About, or[/] [bold]Esc[/][grey]/[/][bold]Tab[/] [grey]to keep going[/]",
+            2 => "[black on yellow] Exit [/] [grey]selected — press[/] [bold]Enter[/] [grey]to quit W365 CLI, or[/] [bold]Esc[/][grey]/[/][bold]Tab[/] [grey]to keep going[/]",
+            _ => defaultHint
+        };
+
+        AnsiConsole.MarkupLine(hint);
+    }
+
+    private void RenderHeader(string? activeNav = "Home", int focusedTopNavIndex = -1)
     {
         AnsiConsole.Clear();
-        AnsiConsole.MarkupLine($"[bold {AccentColor}]W365 CLI Native[/] [{MutedColor}]v{GetCurrentVersion()}[/]");
-        AnsiConsole.MarkupLine($"[{MutedColor}]Keyboard-first Windows 365 Cloud PC workflows[/]");
+        UpdateStatusBarSnapshot();
+        RenderTopNav(activeNav, focusedTopNavIndex);
+        AnsiConsole.Write(new Panel(new Rows(
+                new Markup($"[{AccentColor}]██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗[/]"),
+                new Markup($"[{AccentColor}]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]"),
+                new Markup($"[{AccentColor}]██║ █╗ ██║ █████╔╝███████╗ ███████╗    ██║     ██║     ██║[/]"),
+                new Markup($"[{AccentColor}]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]"),
+                new Markup($"[{AccentColor}]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]"),
+                new Markup($"[{AccentColor}] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]"),
+                new Markup(""),
+                new Markup($"[{MutedColor}]Version: v{GetCurrentVersion()} | Author: Bradley Wyatt[/]")))
+            .Border(BoxBorder.Rounded)
+            .BorderStyle(new Style(Color.FromHex(AccentColor)))
+            .Expand());
         AnsiConsole.WriteLine();
     }
 
     private async Task ShowConnectionAsync()
     {
-        RenderHeader();
+        RenderHeader(activeNav: null);
 
         var choices = _session.IsConnected
             ? new[] { "Disconnect", "Back" }
@@ -942,7 +1189,7 @@ internal sealed class W365CliApp
 
         var choice = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
-                .Title("[#4091f2]Connection[/]")
+                .Title("[#58a6ff]Connection[/]")
                 .HighlightStyle(SelectionHighlightStyle())
                 .AddChoices(choices));
 
@@ -950,13 +1197,53 @@ internal sealed class W365CliApp
         {
             case "Connect":
                 await _session.ConnectAsync();
+                UpdateStatusBarSnapshot();
+                await ShowMissingPermissionPromptIfNeededAsync();
                 TimedMessage("[grey]Returning...[/]");
                 break;
             case "Disconnect":
                 await _session.DisconnectAsync();
+                UpdateStatusBarSnapshot();
                 TimedMessage("[green]Disconnected.[/]");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Surfaces a first-run-friendly prompt right after connecting if any of the app's required
+    /// Graph permissions (<see cref="W365Session.MissingRequiredScopes"/>) aren't granted in this
+    /// tenant yet, so the user can fix it up front instead of discovering it later as a confusing
+    /// 403 mid-action.
+    /// </summary>
+    private Task ShowMissingPermissionPromptIfNeededAsync()
+    {
+        if (!_session.IsConnected || _session.MissingRequiredScopes.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        AnsiConsole.Clear();
+        AnsiConsole.MarkupLine("[yellow]Heads up: this app registration is missing permission(s) in your tenant that some features rely on:[/]");
+        foreach (var scope in _session.MissingRequiredScopes)
+        {
+            AnsiConsole.MarkupLine($"[grey]  - {Markup.Escape(scope)}[/]");
+        }
+        AnsiConsole.MarkupLine("[grey]Features that use these will fail with 403 Forbidden until a Global or Cloud Application administrator adds and grants consent for them.[/]");
+        AnsiConsole.WriteLine();
+
+        var choice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("How would you like to proceed?")
+                .HighlightStyle(SelectionHighlightStyle())
+                .AddChoices("Open admin consent page now", "Continue anyway"));
+
+        if (choice == "Open admin consent page now")
+        {
+            OpenUrl(_session.GetAdminConsentUrl());
+            TimedMessage("[grey]Opened the admin consent page in your browser. Have an admin approve it, then reconnect.[/]");
+        }
+
+        return Task.CompletedTask;
     }
 
     private static void ShowPlaceholderArea(string title, string message)
@@ -974,62 +1261,41 @@ internal sealed class W365CliApp
         Pause();
     }
 
-    private async Task ShowUpdateCheckAsync()
-    {
-        AnsiConsole.Clear();
-        RenderBreadcrumb("Updates");
-        AnsiConsole.MarkupLine("[#4091f2]Check for updates[/]");
-        AnsiConsole.WriteLine();
-
-        try
-        {
-            var latest = await AnsiConsole.Status()
-                .Spinner(Spinner.Known.Dots)
-                .StartAsync("Checking GitHub Releases...", async _ => await GetLatestReleaseAsync());
-            latestRelease = latest;
-            updateCheckComplete = true;
-            updateCheckError = null;
-
-            var currentVersion = GetCurrentVersion();
-            var current = ParseVersion(currentVersion);
-            var latestVersion = ParseVersion(latest.TagName);
-            var isNewer = latestVersion is not null && current is not null && latestVersion > current;
-
-            var rows = new Rows(
-                new Markup(PropertyInline("Current version", currentVersion)),
-                new Markup(PropertyInline("Latest release", latest.TagName)),
-                new Markup(PropertyInline("Published", latest.PublishedAt?.ToLocalTime().ToString("g") ?? "-")),
-                new Markup(PropertyInline("Status", isNewer ? "Update available" : "Up to date", isNewer ? "yellow" : "green")),
-                new Markup(PropertyBlock("Release URL", latest.HtmlUrl)));
-
-            AnsiConsole.Write(new Panel(rows).Header("Update status").Border(BoxBorder.Rounded));
-            if (isNewer)
-            {
-                AnsiConsole.WriteLine();
-                AnsiConsole.MarkupLine("[grey]Download the latest w365-win-x64.zip from the release URL. Self-update will be added after the install path is finalized.[/]");
-            }
-        }
-        catch (Exception ex)
-        {
-            AnsiConsole.MarkupLine("[red]Failed to check for updates.[/]");
-            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(ex.Message)}[/]");
-        }
-
-        WaitForBack();
-    }
-
     private async Task CheckForUpdatesOnStartupAsync()
     {
         try
         {
             latestRelease = await GetLatestReleaseAsync();
-            updateCheckComplete = true;
-            updateCheckError = null;
         }
-        catch (Exception ex)
+        catch
         {
-            updateCheckComplete = true;
-            updateCheckError = ex.Message;
+            latestRelease = null;
+        }
+    }
+
+    private void PromptForUpdateIfAvailable()
+    {
+        if (!IsUpdateAvailable() || latestRelease is null)
+        {
+            return;
+        }
+
+        AnsiConsole.Clear();
+        RenderTopNav("Home");
+        AnsiConsole.Write(new Panel(new Rows(
+                new Markup($"[bold yellow]Update available[/]"),
+                new Markup($"Current version: [grey]v{Markup.Escape(GetCurrentVersion())}[/]"),
+                new Markup($"Latest release: [grey]{Markup.Escape(latestRelease.TagName)}[/]"),
+                new Markup($"Release URL: [grey]{Markup.Escape(latestRelease.HtmlUrl)}[/]")))
+            .Header("W365 CLI")
+            .Border(BoxBorder.Rounded)
+            .BorderStyle(new Style(Color.Yellow)));
+
+        var openRelease = AskYesNo("Open the latest GitHub release now?");
+        if (openRelease)
+        {
+            OpenUrl(latestRelease.HtmlUrl);
+            TimedMessage("[green]Opened latest release.[/]", 1200);
         }
     }
 
@@ -1043,28 +1309,6 @@ internal sealed class W365CliApp
         var current = ParseVersion(GetCurrentVersion());
         var latest = ParseVersion(latestRelease.TagName);
         return latest is not null && current is not null && latest > current;
-    }
-
-    private string GetUpdateStatusText()
-    {
-        if (!updateCheckComplete)
-        {
-            return "Checking";
-        }
-
-        if (updateCheckError is not null)
-        {
-            return "Check failed";
-        }
-
-        if (latestRelease is null)
-        {
-            return "Unknown";
-        }
-
-        return IsUpdateAvailable()
-            ? $"Update {latestRelease.TagName}"
-            : "Up to date";
     }
 
     private static async Task<GitHubReleaseInfo> GetLatestReleaseAsync()
@@ -1095,7 +1339,7 @@ internal sealed class W365CliApp
         var policies = await LoadProvisioningPoliciesAsync();
         if (policies.Count == 0)
         {
-            TimedMessage("[yellow]No provisioning policies were returned.[/]");
+            TimedMessage("[yellow]No provisioning policies were returned. Use \"Create policy\" to add one.[/]");
             return;
         }
 
@@ -1116,7 +1360,7 @@ internal sealed class W365CliApp
 
             AnsiConsole.Clear();
             RenderProvisioningPolicyBrowser(policies, visiblePolicies, selectedIndex, filter, sortMode);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -1221,7 +1465,7 @@ internal sealed class W365CliApp
             {
                 AnsiConsole.Clear();
                 RenderLicensingOverview(items, selectedIndex);
-                var key = Console.ReadKey(intercept: true);
+                var key = ReadNavigationKey(intercept: true);
                 switch (key.Key)
                 {
                     case ConsoleKey.UpArrow:
@@ -1458,7 +1702,7 @@ internal sealed class W365CliApp
         private static void RenderLicensingOverview(IReadOnlyList<LicenseOverviewItem> items, int selectedIndex)
         {
             RenderBreadcrumb("Licensing");
-            AnsiConsole.MarkupLine("[#4091f2]Windows 365 licensing[/]");
+            AnsiConsole.MarkupLine("[#58a6ff]Windows 365 licensing[/]");
             AnsiConsole.MarkupLine("[grey]Capacity estimates use Microsoft Graph subscribedSkUs plus current Cloud PC inventory.[/]");
             AnsiConsole.WriteLine();
             var table = new Table()
@@ -1478,7 +1722,7 @@ internal sealed class W365CliApp
             {
                 var item = items[index];
                 table.AddRow(
-                    index == selectedIndex ? "[black on #4091f2]>[/]" : " ",
+                    index == selectedIndex ? "[black on #58a6ff]>[/]" : " ",
                     Markup.Escape(item.Family),
                     item.Purchased.ToString(),
                     item.Assigned.ToString(),
@@ -1548,7 +1792,7 @@ internal sealed class W365CliApp
             if (IsFlexLicense(item))
             {
                 AnsiConsole.WriteLine();
-                AnsiConsole.MarkupLine("[#4091f2]Flex rules[/]");
+                AnsiConsole.MarkupLine("[#58a6ff]Flex rules[/]");
                 AnsiConsole.MarkupLine($"[grey]Each Flex license unit can cover either 1 shared pool Cloud PC or up to 3 dedicated Cloud PCs. You have {item.LicenseUnitsLeft} license units left.[/]");
                 AnsiConsole.WriteLine();
                 var groupMembers = await LoadFlexPolicyGroupMembersAsync(item);
@@ -1861,10 +2105,10 @@ internal sealed class W365CliApp
         string filter,
         ProvisioningPolicySortMode sortMode)
     {
-        RenderBreadcrumb("Provisioning", "Provisioning policies");
+        RenderBreadcrumb("Provisioning", "Policies");
         AnsiConsole.Write(CreateProvisioningPolicySummaryPanel(allPolicies, visiblePolicies, filter));
         AnsiConsole.Write(CreateProvisioningPolicyTable(visiblePolicies, selectedIndex));
-        AnsiConsole.MarkupLine($"[grey]Sort: {FormatProvisioningPolicySortMode(sortMode)} | Up/Down move | Enter actions | / filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine($"[grey]Sort: {FormatProvisioningPolicySortMode(sortMode)} | Up/Down move | Enter actions | / filter | C clear | S sort | R refresh | Esc/B/Q back | P or Ctrl+K command palette[/]");
         RenderStatusBar();
     }
 
@@ -1883,7 +2127,7 @@ internal sealed class W365CliApp
                 new Markup($"[white]Total[/] {allPolicies.Count}   [white]Visible[/] {visiblePolicies.Count}   [white]Filter[/] {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}"),
                 new Markup($"[white]Types[/] {Markup.Escape(typeSummary)}"),
                 new Markup($"[white]Join[/] {Markup.Escape(joinSummary)}")))
-            .Header("Provisioning policies")
+            .Header("Policies")
             .Border(BoxBorder.Rounded);
     }
 
@@ -1907,7 +2151,7 @@ internal sealed class W365CliApp
 
         if (visiblePolicies.Count == 0)
         {
-            var cells = new List<string> { "-", "[grey]No provisioning policies match the current filter.[/]", "-", "-", "-", "-" };
+            var cells = new List<string> { "-", "[grey]No policies match the current filter.[/]", "-", "-", "-", "-" };
             if (showGroups) { cells.Add("-"); }
             table.AddRow(cells.ToArray());
             return table;
@@ -1923,7 +2167,7 @@ internal sealed class W365CliApp
             var selected = absoluteIndex == selectedIndex;
             var row = new List<string>
             {
-                selected ? "[black on #4091f2]>[/]" : " ",
+                selected ? "[black on #58a6ff]>[/]" : " ",
                 selected ? Selected(Markup.Escape(Fit(policy.DisplayName, widths.Name))) : Markup.Escape(Fit(policy.DisplayName, widths.Name)),
                 selected ? Selected(Markup.Escape(Fit(policy.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(policy.ProvisioningType ?? "-", widths.Type)),
                 selected ? Selected(Markup.Escape(Fit(policy.ImageDisplayName ?? "-", widths.Image))) : Markup.Escape(Fit(policy.ImageDisplayName ?? "-", widths.Image)),
@@ -1957,13 +2201,13 @@ internal sealed class W365CliApp
 
     private async Task ShowProvisioningPolicyDetailsAsync(ProvisioningPolicySummary policy)
     {
-        var actions = new[] { "View Cloud PCs", "Export", "Create copy", "Reprovision policy Cloud PCs", "Delete", "Back" };
+        var actions = GetProvisioningPolicyActions(policy);
         var selectedActionIndex = 0;
         while (true)
         {
             AnsiConsole.Clear();
             RenderProvisioningPolicyDetailLayout(policy, actions, selectedActionIndex);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -1993,19 +2237,68 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
                     if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
                     {
                         return;
+                    }
+
+                    if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
                     }
                     break;
             }
         }
     }
 
+    private static string[] GetProvisioningPolicyActions(ProvisioningPolicySummary policy)
+    {
+        var actions = new List<string> { "View Cloud PCs", "Export", "Create copy", "Reprovision policy Cloud PCs" };
+
+        if (IsSharedProvisioningPolicy(policy))
+        {
+            actions.Add("Reprovision (reserve %)");
+            actions.Add("Check reprovision status");
+        }
+
+        if (IsSharedByEntraGroupPolicy(policy))
+        {
+            actions.Add("User experience sync");
+        }
+
+        if (policy.AssignedGroupIds.Count > 0)
+        {
+            actions.Add("Manage group members");
+        }
+
+        actions.Add("Delete");
+        actions.Add("Back");
+        return actions.ToArray();
+    }
+
+    private static bool IsSharedProvisioningPolicy(ProvisioningPolicySummary policy)
+    {
+        return policy.ProvisioningType is not null &&
+            new[] { "shared", "sharedByUser", "sharedByEntraGroup" }.Any(value =>
+                string.Equals(policy.ProvisioningType, value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// User settings persistence ("user experience sync") is only available for shared-by-Entra-
+    /// group policies — not dedicated or shared-by-user — per Microsoft's documentation.
+    /// </summary>
+    private static bool IsSharedByEntraGroupPolicy(ProvisioningPolicySummary policy)
+    {
+        return string.Equals(policy.ProvisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void RenderProvisioningPolicyDetailLayout(ProvisioningPolicySummary policy, IReadOnlyList<string> actions, int selectedActionIndex)
     {
-        RenderBreadcrumb("Provisioning", "Provisioning policies", policy.DisplayName);
+        RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName);
         var details = new Panel(new Rows(
                 new Markup(PropertyInline("Name", policy.DisplayName)),
                 new Markup(PropertyInline("Description", policy.Description ?? "-")),
@@ -2024,9 +2317,7 @@ internal sealed class W365CliApp
             .Header("Details")
             .Border(BoxBorder.Rounded);
 
-        var actionLines = actions.Select((action, index) => index == selectedActionIndex
-            ? $"[black on #4091f2]> {Markup.Escape(action)}[/]"
-            : $"  {Markup.Escape(action)}");
+        var actionLines = actions.Select((action, index) => FormatActionLine(action, index == selectedActionIndex));
         var actionPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
             .Header("Actions")
             .Border(BoxBorder.Rounded);
@@ -2045,7 +2336,7 @@ internal sealed class W365CliApp
             AnsiConsole.Write(actionPanel);
         }
 
-        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back | P or Ctrl+K command palette[/]");
     }
 
     private async Task InvokeProvisioningPolicyActionAsync(ProvisioningPolicySummary policy, string action)
@@ -2064,10 +2355,73 @@ internal sealed class W365CliApp
             case "Reprovision policy Cloud PCs":
                 await ReprovisionProvisioningPolicyCloudPcsAsync(policy);
                 break;
+            case "Reprovision (reserve %)":
+                await ApplyProvisioningPolicyReservePercentageAsync(policy);
+                break;
+            case "Check reprovision status":
+                await ShowProvisioningPolicyApplyStatusAsync(policy);
+                break;
+            case "User experience sync":
+                await ShowUserExperienceSyncAsync(policy);
+                break;
+            case "Manage group members":
+                await ShowProvisioningPolicyGroupMembersAsync(policy);
+                break;
             case "Delete":
-                await ConfirmAndRunAsync("Delete", policy.DisplayName, async () => await _session.Graph.DeleteProvisioningPolicyAsync(policy.Id), "Policy", policy.DisplayName);
+                await DeleteProvisioningPolicyWithGuardAsync(policy);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Windows 365 requires a provisioning policy to have zero group assignments before it can be
+    /// deleted — attempting to delete an assigned policy fails with a 400 Bad Request. Detect that
+    /// up front and offer to remove the assignments (via the assign action with an empty list)
+    /// before retrying the delete, instead of surfacing a confusing raw error.
+    /// </summary>
+    private async Task DeleteProvisioningPolicyWithGuardAsync(ProvisioningPolicySummary policy)
+    {
+        if (policy.AssignedGroupNames.Count > 0)
+        {
+            AnsiConsole.Clear();
+            RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Delete");
+            AnsiConsole.MarkupLine("[yellow]This policy still has group assignments.[/]");
+            AnsiConsole.MarkupLine("[grey]Windows 365 requires a provisioning policy to have no assignments before it can be deleted.[/]");
+            AnsiConsole.MarkupLine($"[grey]Assigned groups:[/] {Markup.Escape(string.Join(", ", policy.AssignedGroupNames))}");
+            AnsiConsole.WriteLine();
+
+            var choice = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("How would you like to proceed?")
+                    .HighlightStyle(SelectionHighlightStyle())
+                    .AddChoices("Remove assignments, then delete", "Cancel"));
+
+            if (choice != "Remove assignments, then delete")
+            {
+                TimedMessage("[yellow]Delete cancelled.[/]");
+                return;
+            }
+
+            try
+            {
+                await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Removing assignments...", async _ => await _session.Graph.UnassignProvisioningPolicyAsync(policy.Id));
+            }
+            catch (Exception ex)
+            {
+                if (await HandlePermissionErrorAsync(ex, "Remove assignments", policy.DisplayName) ||
+                    HandleLockedResourceError(ex, "Remove assignments", policy.DisplayName))
+                {
+                    return;
+                }
+
+                ShowActionResult("Failed", "Remove assignments", policy.DisplayName, "[red]Failed to remove assignments.[/]", ex.Message);
+                return;
+            }
+        }
+
+        await ConfirmAndRunAsync("Delete", policy.DisplayName, async () => await _session.Graph.DeleteProvisioningPolicyAsync(policy.Id), "Policy", policy.DisplayName);
     }
 
     private async Task ShowCloudPcsForProvisioningPolicyAsync(ProvisioningPolicySummary policy)
@@ -2097,11 +2451,11 @@ internal sealed class W365CliApp
             }
 
             AnsiConsole.Clear();
-            RenderBreadcrumb("Provisioning", "Provisioning policies", policy.DisplayName, "Cloud PCs");
+            RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Cloud PCs");
             AnsiConsole.Write(CreateCloudPcSummaryPanel(cloudPcs, visibleCloudPcs, filter));
             AnsiConsole.Write(CreateCloudPcTable(cloudPcs, visibleCloudPcs, selectedIndex, filter));
             AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -2160,7 +2514,7 @@ internal sealed class W365CliApp
                     }
                     else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'n' or 'N')
                     {
-                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex]);
+                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex], "Snapshots");
                     }
                     else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'z' or 'Z')
                     {
@@ -2179,7 +2533,7 @@ internal sealed class W365CliApp
     {
         var defaultPath = Path.Combine(Environment.CurrentDirectory, $"{SanitizeFileName(policy.DisplayName)}.json");
         AnsiConsole.Clear();
-        RenderBreadcrumb("Provisioning", "Provisioning policies", policy.DisplayName, "Export");
+        RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Export");
         var path = AnsiConsole.Prompt(
             new TextPrompt<string>($"Export path [[{Markup.Escape(defaultPath)}]]:")
                 .AllowEmpty());
@@ -2196,7 +2550,7 @@ internal sealed class W365CliApp
     private async Task CreateProvisioningPolicyCopyAsync(ProvisioningPolicySummary policy)
     {
         AnsiConsole.Clear();
-        RenderBreadcrumb("Provisioning", "Provisioning policies", policy.DisplayName, "Create copy");
+        RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Create copy");
         var displayName = AnsiConsole.Ask<string>("New policy display name:");
         if (string.IsNullOrWhiteSpace(displayName))
         {
@@ -2204,13 +2558,195 @@ internal sealed class W365CliApp
             return;
         }
 
-        var assign = AnsiConsole.Confirm("Recreate assignment targets on the new policy?");
+        var assign = AskYesNo("Recreate assignment targets on the new policy?");
         await ConfirmAndRunAsync(
             "Create copy",
             $"{policy.DisplayName} to {displayName}",
             async () => await _session.Graph.CreateProvisioningPolicyCopyAsync(policy, displayName, assign),
             "Policy",
             policy.DisplayName);
+    }
+
+    private async Task CreateProvisioningPolicyWizardAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Provisioning", "Create policy");
+        AnsiConsole.MarkupLine("[grey]Create a new Windows 365 provisioning policy.[/]");
+        AnsiConsole.WriteLine();
+
+        var displayName = AnsiConsole.Ask<string>("Policy display name:");
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            TimedMessage("[yellow]Create policy cancelled. Display name is required.[/]");
+            return;
+        }
+
+        var description = AnsiConsole.Prompt(new TextPrompt<string>("Description [[optional]]:").AllowEmpty());
+
+        var provisioningTypeChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Provisioning type")
+                .HighlightStyle(SelectionHighlightStyle())
+                .AddChoices("Dedicated", "Shared by user", "Shared by Entra group", "Back"));
+        if (provisioningTypeChoice == "Back")
+        {
+            TimedMessage("[yellow]Create policy cancelled.[/]");
+            return;
+        }
+
+        var provisioningType = provisioningTypeChoice switch
+        {
+            "Dedicated" => "dedicated",
+            "Shared by user" => "sharedByUser",
+            "Shared by Entra group" => "sharedByEntraGroup",
+            _ => "dedicated"
+        };
+
+        IReadOnlyList<GraphTableRow> images;
+        try
+        {
+            images = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Loading gallery images...", async _ => await _session.Graph.GetGalleryImageRowsAsync());
+        }
+        catch (Exception ex)
+        {
+            if (!await HandlePermissionErrorAsync(ex, "Create policy", displayName) &&
+                !HandleLockedResourceError(ex, "Create policy", displayName))
+            {
+                ShowActionResult("Failed", "Create policy", displayName, "[red]Failed to load gallery images.[/]", ex.Message);
+            }
+            return;
+        }
+
+        if (images.Count == 0)
+        {
+            TimedMessage("[yellow]No gallery images are available to select.[/]");
+            return;
+        }
+
+        // notSupported gallery images can't be used to provision new Cloud PCs and Graph rejects
+        // the create with a generic 400 if you pick one — filter them out so only images that
+        // can actually be selected are shown.
+        var selectableImages = images
+            .Where(image => !string.Equals(GetOptionalField(image, "status"), "notSupported", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (selectableImages.Length == 0)
+        {
+            selectableImages = images.ToArray();
+        }
+
+        var imageHeader = Row("Image", 50, "Status", 14, "OS version", 16);
+        var selectedImage = SelectFromTable(
+            "Select gallery image",
+            imageHeader,
+            selectableImages,
+            image => Row(image.Title, 50, GetField(image, "status"), 14, GetField(image, "osVersionNumber"), 16));
+        if (selectedImage is null)
+        {
+            TimedMessage("[yellow]Create policy cancelled.[/]");
+            return;
+        }
+
+        var imageId = GetOptionalField(selectedImage, "id", "Id", "ID");
+        if (string.IsNullOrWhiteSpace(imageId))
+        {
+            TimedMessage("[red]Selected image is missing an ID; cannot continue.[/]");
+            return;
+        }
+
+        var namingTemplate = AnsiConsole.Prompt(
+            new TextPrompt<string>("Cloud PC naming template:")
+                .DefaultValue("CPC-%USERNAME:5%-%RAND:5%"));
+
+        IReadOnlyList<GraphTableRow> regions;
+        try
+        {
+            regions = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Loading supported regions...", async _ => await _session.Graph.GetSupportedRegionRowsAsync());
+        }
+        catch (Exception ex)
+        {
+            if (!await HandlePermissionErrorAsync(ex, "Create policy", displayName) &&
+                !HandleLockedResourceError(ex, "Create policy", displayName))
+            {
+                ShowActionResult("Failed", "Create policy", displayName, "[red]Failed to load supported regions.[/]", ex.Message);
+            }
+            return;
+        }
+
+        var availableRegions = regions
+            .Where(region => string.IsNullOrWhiteSpace(GetOptionalField(region, "supportedSolution")) ||
+                string.Equals(GetOptionalField(region, "supportedSolution"), "windows365", StringComparison.OrdinalIgnoreCase))
+            .Where(region => string.Equals(GetOptionalField(region, "regionStatus"), "available", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(region => region.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        if (availableRegions.Length == 0)
+        {
+            availableRegions = regions
+                .GroupBy(region => region.Title, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+        }
+
+        if (availableRegions.Length == 0)
+        {
+            TimedMessage("[yellow]No supported regions were returned; a region is required for Microsoft Entra join.[/]");
+            return;
+        }
+
+        // Microsoft Entra join requires either a region or an on-premises network connection —
+        // leaving both empty causes Graph to reject the create with a generic 400, so a region
+        // selection here is mandatory rather than optional.
+        var regionOptions = availableRegions.Select(region => region.Title).Append("Back").ToArray();
+        var regionChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Region for Microsoft Entra joined Cloud PCs")
+                .HighlightStyle(SelectionHighlightStyle())
+                .PageSize(18)
+                .AddChoices(regionOptions));
+
+        if (regionChoice == "Back")
+        {
+            TimedMessage("[yellow]Create policy cancelled.[/]");
+            return;
+        }
+
+        var regionRow = availableRegions.First(region => region.Title == regionChoice);
+        var regionName = regionRow.Title;
+
+        var enableSso = AskYesNo("Enable single sign-on?", defaultToYes: false);
+        var localAdmin = AskYesNo("Enable local admin?", defaultToYes: false);
+
+        var assignGroupId = AnsiConsole.Prompt(
+            new TextPrompt<string>("Assign to Entra group ID [[optional — paste the group's object ID]]:")
+                .AllowEmpty());
+
+        await ConfirmAndRunAsync(
+            "Create policy",
+            displayName,
+            async () => await _session.Graph.CreateProvisioningPolicyAsync(
+                displayName,
+                description,
+                provisioningType,
+                imageId,
+                selectedImage.Title,
+                "gallery",
+                "azureADJoin",
+                regionName,
+                namingTemplate,
+                enableSso,
+                localAdmin,
+                string.IsNullOrWhiteSpace(assignGroupId) ? null : assignGroupId.Trim()),
+            "Policy",
+            displayName);
     }
 
     private async Task ReprovisionProvisioningPolicyCloudPcsAsync(ProvisioningPolicySummary policy)
@@ -2263,6 +2799,782 @@ internal sealed class W365CliApp
             policy.DisplayName);
     }
 
+    private async Task ApplyProvisioningPolicyReservePercentageAsync(ProvisioningPolicySummary policy)
+    {
+        var reservePercentage = PromptForInteger(
+            $"Reprovision (reserve %) — {policy.DisplayName}",
+            "Reprovisions Frontline shared Cloud PCs under this policy while keeping the given percentage available. Cloud PCs are only reprovisioned once they have no active connected user. Enter the percentage to keep available (0-99), or Esc/B/Q to cancel.",
+            0,
+            99);
+        if (reservePercentage is null)
+        {
+            TimedMessage("[yellow]Reprovision cancelled.[/]");
+            return;
+        }
+
+        var forceLogoff = reservePercentage == 0 &&
+            AskYesNo("Forcibly sign out connected users and reprovision immediately?", defaultToYes: false);
+
+        await ConfirmAndRunAsync(
+            "Reprovision (reserve %)",
+            $"{policy.DisplayName} — reserve {reservePercentage}%{(forceLogoff ? ", force logoff" : string.Empty)}",
+            async () => await _session.Graph.ApplyProvisioningPolicyAsync(policy.Id, reservePercentage.Value, forceLogoff),
+            "Policy",
+            policy.DisplayName);
+    }
+
+    private async Task ShowProvisioningPolicyApplyStatusAsync(ProvisioningPolicySummary policy)
+    {
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Reprovision status");
+
+        CloudPcPolicyApplyActionResult? result;
+        try
+        {
+            result = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Checking reprovision status...", async _ => await _session.Graph.GetProvisioningPolicyApplyActionResultAsync(policy.Id));
+        }
+        catch (Exception ex)
+        {
+            if (await HandlePermissionErrorAsync(ex, "Check reprovision status", policy.DisplayName))
+            {
+                return;
+            }
+
+            if (HandleLockedResourceError(ex, "Check reprovision status", policy.DisplayName))
+            {
+                return;
+            }
+
+            TimedMessage($"[red]Failed to retrieve reprovision status: {Markup.Escape(ex.Message)}[/]");
+            return;
+        }
+
+        if (result is null)
+        {
+            TimedMessage("[yellow]No reprovision status is available yet.[/]");
+            return;
+        }
+
+        var statusMarkup = result.Status?.ToLowerInvariant() switch
+        {
+            "succeeded" => "[green]Succeeded[/]",
+            "pending" => "[yellow]Pending[/]",
+            "failed" => "[red]Failed[/]",
+            _ => Markup.Escape(result.Status ?? "-")
+        };
+
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Reprovision status");
+        AnsiConsole.MarkupLine($"[bold]Status[/] {statusMarkup}");
+        AnsiConsole.MarkupLine($"[bold]Started[/] {Markup.Escape(result.StartDateTime?.ToLocalTime().ToString("g") ?? "-")}");
+        AnsiConsole.MarkupLine($"[bold]Finished[/] {Markup.Escape(result.FinishDateTime?.ToLocalTime().ToString("g") ?? "-")}");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Press any key to return...[/]");
+        ReadNavigationKey(intercept: true);
+    }
+
+    /// <summary>
+    /// Admin-level rollup of user experience sync (UES) storage across every shared-by-Entra-group
+    /// provisioning policy — total/used/remaining GB and profile count per policy, plus an org-wide
+    /// aggregate bar. Enter on a row drills into that policy's per-user profile list.
+    /// </summary>
+    private async Task ShowUserExperienceSyncOverviewAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        var policies = await LoadProvisioningPoliciesAsync();
+        var uesPolicies = policies.Where(IsSharedByEntraGroupPolicy).ToArray();
+
+        if (uesPolicies.Length == 0)
+        {
+            TimedMessage("[yellow]No shared-by-Entra-group provisioning policies were found.[/]");
+            return;
+        }
+
+        var policiesById = uesPolicies.ToDictionary(policy => policy.Id, StringComparer.OrdinalIgnoreCase);
+
+        async Task<IReadOnlyList<GraphTableRow>> LoadOverviewRowsAsync()
+        {
+            var rows = new List<GraphTableRow>();
+
+            foreach (var policy in uesPolicies)
+            {
+                string enabledText;
+                string totalText = "-";
+                string usedText = "-";
+                string remainingText = "-";
+                string profileCountText = "-";
+
+                try
+                {
+                    var context = await _session.Graph.GetUserSettingsPersistenceContextAsync(policy.Id);
+                    if (context is null)
+                    {
+                        enabledText = "Not configured";
+                    }
+                    else if (!context.Enabled)
+                    {
+                        enabledText = "Disabled";
+                    }
+                    else
+                    {
+                        enabledText = "Enabled";
+                        var usage = await _session.Graph.GetUserSettingsPersistenceUsageAsync(context);
+                        if (usage is not null)
+                        {
+                            totalText = (usage.TotalAllocatedStorageInGB ?? 0).ToString("0.#");
+                            usedText = (usage.UsedStorageInGB ?? 0).ToString("0.#");
+                            remainingText = (usage.RemainingAvailableStorageInGB ?? Math.Max(0, (usage.TotalAllocatedStorageInGB ?? 0) - (usage.UsedStorageInGB ?? 0))).ToString("0.#");
+                        }
+
+                        var profiles = await _session.Graph.GetUserSettingsPersistenceProfilesAsync(context);
+                        profileCountText = profiles.Count.ToString();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    enabledText = $"Error: {ex.Message}";
+                }
+
+                var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["policyId"] = policy.Id,
+                    ["policyName"] = policy.DisplayName,
+                    ["status"] = enabledText,
+                    ["totalAllocatedStorageInGB"] = totalText,
+                    ["usedStorageInGB"] = usedText,
+                    ["remainingAvailableStorageInGB"] = remainingText,
+                    ["profileCount"] = profileCountText
+                };
+
+                rows.Add(new GraphTableRow(policy.DisplayName, enabledText, fields));
+            }
+
+            return rows;
+        }
+
+        await ShowGraphRowsAsync(
+            "User experience sync overview",
+            LoadOverviewRowsAsync,
+            GetUserSettingsPersistenceOverviewHeader,
+            FormatUserSettingsPersistenceOverviewRow,
+            enterAction: async row =>
+            {
+                var policyId = GetOptionalField(row, "policyId");
+                if (policyId is not null && policiesById.TryGetValue(policyId, out var policy))
+                {
+                    await ShowUserExperienceSyncAsync(policy);
+                }
+            },
+            summaryRenderer: RenderUserSettingsPersistenceOverviewSummary);
+    }
+
+    private static void RenderUserSettingsPersistenceOverviewSummary(IReadOnlyList<GraphTableRow> rows)
+    {
+        double total = 0;
+        double used = 0;
+        var enabledCount = 0;
+
+        foreach (var row in rows)
+        {
+            if (!string.Equals(GetField(row, "status"), "Enabled", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            enabledCount++;
+            if (double.TryParse(GetField(row, "totalAllocatedStorageInGB"), out var rowTotal))
+            {
+                total += rowTotal;
+            }
+
+            if (double.TryParse(GetField(row, "usedStorageInGB"), out var rowUsed))
+            {
+                used += rowUsed;
+            }
+        }
+
+        AnsiConsole.MarkupLine($"[bold]Policies with UES enabled[/] {enabledCount} of {rows.Count}");
+
+        if (enabledCount == 0)
+        {
+            return;
+        }
+
+        var remaining = Math.Max(0, total - used);
+        AnsiConsole.MarkupLine($"[bold]Total allocated[/] {total:0.#} GB    [bold]Used[/] {used:0.#} GB    [bold]Remaining[/] {remaining:0.#} GB");
+
+        const int barWidth = 40;
+        var usedSegments = total > 0 ? (int)Math.Round(barWidth * Math.Clamp(used / total, 0, 1)) : 0;
+        var freeSegments = Math.Max(0, barWidth - usedSegments);
+        var barColor = total > 0 && used / total >= 0.9 ? "red" : total > 0 && used / total >= 0.75 ? "yellow" : "green";
+        AnsiConsole.MarkupLine($"[{barColor}]{new string('█', usedSegments)}[/][grey]{new string('░', freeSegments)}[/]");
+    }
+
+    private static string GetUserSettingsPersistenceOverviewHeader()
+    {
+        var widths = GetUserSettingsPersistenceOverviewWidths();
+        return Row("Policy", widths.Policy, "Status", widths.Status, "Total (GB)", widths.Total, "Used (GB)", widths.Used, "Remaining (GB)", widths.Remaining, "Profiles", widths.Profiles);
+    }
+
+    private static string FormatUserSettingsPersistenceOverviewRow(GraphTableRow row)
+    {
+        var widths = GetUserSettingsPersistenceOverviewWidths();
+        return Row(
+            GetField(row, "policyName"), widths.Policy,
+            GetField(row, "status"), widths.Status,
+            GetField(row, "totalAllocatedStorageInGB"), widths.Total,
+            GetField(row, "usedStorageInGB"), widths.Used,
+            GetField(row, "remainingAvailableStorageInGB"), widths.Remaining,
+            GetField(row, "profileCount"), widths.Profiles);
+    }
+
+    private static (int Policy, int Status, int Total, int Used, int Remaining, int Profiles) GetUserSettingsPersistenceOverviewWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int status = 14;
+        const int total = 11;
+        const int used = 10;
+        const int remaining = 15;
+        const int profiles = 9;
+        var gaps = 5;
+        var policy = Math.Max(20, available - status - total - used - remaining - profiles - gaps);
+        return (policy, status, total, used, remaining, profiles);
+    }
+
+    /// <summary>
+    /// "Manage group members" — lists members of the Entra group(s) assigned to this provisioning
+    /// policy, with actions to add or remove members directly from the CLI (mirrors what an admin
+    /// would otherwise do in the Entra/Azure AD portal's group membership blade).
+    /// </summary>
+    private async Task ShowProvisioningPolicyGroupMembersAsync(ProvisioningPolicySummary policy)
+    {
+        if (policy.AssignedGroupIds.Count == 0)
+        {
+            TimedMessage("[yellow]This policy has no assigned group.[/]");
+            return;
+        }
+
+        string groupId;
+        string groupName;
+
+        if (policy.AssignedGroupIds.Count == 1)
+        {
+            groupId = policy.AssignedGroupIds[0];
+            groupName = policy.AssignedGroupNames.Count > 0 ? policy.AssignedGroupNames[0] : groupId;
+        }
+        else
+        {
+            AnsiConsole.Clear();
+            RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Manage group members");
+            var choice = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Select a group to manage")
+                    .HighlightStyle(SelectionHighlightStyle())
+                    .AddChoices(policy.AssignedGroupNames));
+            var index = policy.AssignedGroupNames.ToList().IndexOf(choice);
+            groupId = policy.AssignedGroupIds[Math.Max(0, index)];
+            groupName = choice;
+        }
+
+        var selectedIndex = 0;
+
+        while (true)
+        {
+            List<GroupMemberSummary> members;
+            try
+            {
+                members = (await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync($"Loading members of {groupName}...", async _ => await _session.Graph.GetGroupMembersAsync(groupId)))
+                    .OrderBy(member => member.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                if (await HandlePermissionErrorAsync(ex, "Manage group members", groupName, "GroupMember.Read.All or Group.ReadWrite.All") ||
+                    HandleLockedResourceError(ex, "Manage group members", groupName))
+                {
+                    return;
+                }
+
+                TimedMessage($"[red]Failed to load group members: {Markup.Escape(ex.Message)}[/]");
+                return;
+            }
+
+            if (selectedIndex >= members.Count)
+            {
+                selectedIndex = Math.Max(0, members.Count - 1);
+            }
+
+            AnsiConsole.Clear();
+            RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Manage group members");
+            AnsiConsole.MarkupLine($"[#58a6ff]Group members[/] [grey]{Markup.Escape(groupName)}[/]  [grey]({members.Count})[/]");
+            AnsiConsole.WriteLine();
+
+            var table = new Table().Border(TableBorder.Rounded).AddColumn(" ").AddColumn("Name").AddColumn("UPN");
+            if (members.Count == 0)
+            {
+                table.AddRow(" ", "[grey]No members found.[/]", "-");
+            }
+            else
+            {
+                for (var index = 0; index < members.Count; index++)
+                {
+                    var member = members[index];
+                    var selected = index == selectedIndex;
+                    table.AddRow(
+                        selected ? "[black on #58a6ff]>[/]" : " ",
+                        selected ? Selected(Markup.Escape(member.DisplayName ?? "-")) : Markup.Escape(member.DisplayName ?? "-"),
+                        selected ? Selected(Markup.Escape(member.UserPrincipalName ?? "-")) : Markup.Escape(member.UserPrincipalName ?? "-"));
+                }
+            }
+
+            AnsiConsole.Write(table);
+            AnsiConsole.MarkupLine("[grey]Up/Down select | Enter view/remove | A add member | R refresh | Esc/B/Q back[/]");
+
+            var key = ReadNavigationKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(Math.Max(0, members.Count - 1), selectedIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = Math.Max(0, members.Count - 1);
+                    break;
+                case ConsoleKey.Enter:
+                    if (members.Count > 0)
+                    {
+                        await ShowGroupMemberDetailAsync(groupId, groupName, members[selectedIndex]);
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'a' or 'A')
+                    {
+                        await AddGroupMemberWizardAsync(groupId, groupName);
+                    }
+                    else if (key.KeyChar is 'r' or 'R')
+                    {
+                        // Loop reloads members at the top — nothing else to do here.
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Detail/actions screen for a single group member — Enter never removes directly; the user
+    /// must arrow down to "Remove" and press Enter again, avoiding an accidental destructive action.
+    /// </summary>
+    private async Task ShowGroupMemberDetailAsync(string groupId, string groupName, GroupMemberSummary member)
+    {
+        var actions = new[] { "Remove from group", "Back" };
+        var selectedActionIndex = 0;
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderBreadcrumb("Provisioning", "Policies", groupName, "Member");
+            var details = new Panel(new Rows(
+                    new Markup(PropertyInline("Name", member.DisplayName ?? "-")),
+                    new Markup(PropertyInline("UPN", member.UserPrincipalName ?? "-")),
+                    new Markup(PropertyBlock("User ID", member.Id))))
+                .Header("Member details")
+                .Border(BoxBorder.Rounded);
+
+            var actionLines = actions.Select((action, index) => FormatActionLine(action, index == selectedActionIndex));
+            var actionPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
+                .Header("Actions")
+                .Border(BoxBorder.Rounded);
+
+            if (Console.WindowWidth >= 120)
+            {
+                var grid = new Grid();
+                grid.AddColumn();
+                grid.AddColumn();
+                grid.AddRow(details, actionPanel);
+                AnsiConsole.Write(grid);
+            }
+            else
+            {
+                AnsiConsole.Write(details);
+                AnsiConsole.Write(actionPanel);
+            }
+
+            AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
+            var key = ReadNavigationKey(intercept: true);
+
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedActionIndex = Math.Max(0, selectedActionIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedActionIndex = Math.Min(actions.Length - 1, selectedActionIndex + 1);
+                    break;
+                case ConsoleKey.Enter:
+                    if (actions[selectedActionIndex] == "Back")
+                    {
+                        return;
+                    }
+
+                    await ConfirmAndRunAsync(
+                        "Remove from group",
+                        $"{member.Name} from {groupName}",
+                        async () => await _session.Graph.RemoveGroupMemberAsync(groupId, member.Id),
+                        resourceType: "Group member",
+                        resourceName: member.Name,
+                        requiredPermission: "GroupMember.ReadWrite.All or Group.ReadWrite.All");
+                    return;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Search-then-pick wizard for adding a user to the policy's assigned group. Prompts for a
+    /// search term (name/UPN/email prefix), shows matches, then adds the selected user via Graph.
+    /// </summary>
+    private async Task AddGroupMemberWizardAsync(string groupId, string groupName)
+    {
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Provisioning", "Policies", groupName, "Add member");
+        AnsiConsole.MarkupLine($"[#58a6ff]Add member[/] [grey]{Markup.Escape(groupName)}[/]");
+        AnsiConsole.WriteLine();
+
+        var query = AnsiConsole.Ask<string>("Search by name, UPN, or email:");
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return;
+        }
+
+        List<GroupMemberSummary> matches;
+        try
+        {
+            matches = (await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Searching directory...", async _ => await _session.Graph.SearchUsersAsync(query)))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            if (await HandlePermissionErrorAsync(ex, "Add member", groupName, "User.Read.All or Directory.Read.All") ||
+                HandleLockedResourceError(ex, "Add member", groupName))
+            {
+                return;
+            }
+
+            TimedMessage($"[red]Failed to search directory: {Markup.Escape(ex.Message)}[/]");
+            return;
+        }
+
+        if (matches.Count == 0)
+        {
+            TimedMessage("[yellow]No matching users were found.[/]");
+            return;
+        }
+
+        var choiceLabels = matches
+            .Select(match => $"{match.DisplayName ?? "-"}  <{match.UserPrincipalName ?? "-"}>")
+            .Append("Cancel")
+            .ToArray();
+
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Provisioning", "Policies", groupName, "Add member");
+        var selected = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Select a user to add")
+                .HighlightStyle(SelectionHighlightStyle())
+                .AddChoices(choiceLabels));
+
+        if (selected == "Cancel")
+        {
+            return;
+        }
+
+        var selectedIndex = Array.IndexOf(choiceLabels, selected);
+        var user = matches[selectedIndex];
+
+        await ConfirmAndRunAsync(
+            "Add group member",
+            $"{user.Name} to {groupName}",
+            async () => await _session.Graph.AddGroupMemberAsync(groupId, user.Id),
+            resourceType: "Group member",
+            resourceName: user.Name,
+            requiredPermission: "GroupMember.ReadWrite.All or Group.ReadWrite.All");
+    }
+
+    /// <summary>
+    /// "User experience sync" — surfaces the user settings persistence storage usage bar and
+    /// per-user profile list for a shared-by-Entra-group provisioning policy, matching the view
+    /// the Intune portal shows under a shared policy's assignment details.
+    /// </summary>
+    private async Task ShowUserExperienceSyncAsync(ProvisioningPolicySummary policy)
+    {
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "User experience sync");
+
+        ProvisioningPolicyUserSettingsPersistenceContext? context;
+        try
+        {
+            context = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Resolving user experience sync configuration...", async _ =>
+                    await _session.Graph.GetUserSettingsPersistenceContextAsync(policy.Id));
+        }
+        catch (Exception ex)
+        {
+            if (await HandlePermissionErrorAsync(ex, "User experience sync", policy.DisplayName))
+            {
+                return;
+            }
+
+            if (HandleLockedResourceError(ex, "User experience sync", policy.DisplayName))
+            {
+                return;
+            }
+
+            TimedMessage($"[red]Failed to resolve user experience sync configuration: {Markup.Escape(ex.Message)}[/]");
+            return;
+        }
+
+        if (context is null)
+        {
+            TimedMessage("[yellow]No assignment with user experience sync (user settings persistence) was found for this policy.[/]");
+            return;
+        }
+
+        if (!context.Enabled)
+        {
+            TimedMessage("[yellow]User experience sync is not enabled on this policy's assignment.[/]");
+            return;
+        }
+
+        CloudPcUserSettingsPersistenceUsageResult? usage = null;
+
+        async Task<IReadOnlyList<GraphTableRow>> LoadProfilesAsync()
+        {
+            // Refresh usage alongside the profile list (both on initial load and on manual "R"
+            // refresh) so the usage bar reflects reality after a profile is deleted.
+            try
+            {
+                usage = await _session.Graph.GetUserSettingsPersistenceUsageAsync(context);
+            }
+            catch
+            {
+                usage = null;
+            }
+
+            return await _session.Graph.GetUserSettingsPersistenceProfilesAsync(context);
+        }
+
+        await ShowGraphRowsAsync(
+            "User profiles",
+            LoadProfilesAsync,
+            GetUserSettingsPersistenceProfilesHeader,
+            FormatUserSettingsPersistenceProfileRow,
+            enterAction: row => ShowUserSettingsPersistenceProfileDetailAsync(context, row),
+            summaryRenderer: _ =>
+            {
+                if (usage is not null)
+                {
+                    RenderUserSettingsPersistenceUsageBar(usage);
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[yellow]Storage usage is not available.[/]");
+                }
+            });
+    }
+
+    /// <summary>
+    /// Detail/actions screen for a single UES profile row (opened via Enter on the profile list).
+    /// Shows the profile's fields and offers "Delete" as an explicit, arrow-key-selected action —
+    /// Enter on the row itself never deletes directly, avoiding an accidental destructive action.
+    /// </summary>
+    private async Task ShowUserSettingsPersistenceProfileDetailAsync(ProvisioningPolicyUserSettingsPersistenceContext context, GraphTableRow row)
+    {
+        var actions = new[] { "Delete", "Back" };
+        var selectedActionIndex = 0;
+
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderUserSettingsPersistenceProfileDetailLayout(row, actions, selectedActionIndex);
+            var key = ReadNavigationKey(intercept: true);
+
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedActionIndex = Math.Max(0, selectedActionIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedActionIndex = Math.Min(actions.Length - 1, selectedActionIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedActionIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedActionIndex = actions.Length - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    var action = actions[selectedActionIndex];
+                    if (action == "Back")
+                    {
+                        return;
+                    }
+
+                    await DeleteUserSettingsPersistenceProfileAsync(context, row);
+                    return;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void RenderUserSettingsPersistenceProfileDetailLayout(GraphTableRow row, IReadOnlyList<string> actions, int selectedActionIndex)
+    {
+        RenderBreadcrumb("Provisioning", "Policies", "User experience sync", "Profile");
+        var details = new Panel(new Rows(
+                new Markup(PropertyInline("User", GetField(row, "userPrincipalName"))),
+                new Markup(PropertyInline("Size (GB)", GetField(row, "profileSizeInGB"))),
+                new Markup(PropertyInline("Status", GetField(row, "status"))),
+                new Markup(PropertyInline("Last attached", GetField(row, "lastProfileAttachedDateTime"))),
+                new Markup(PropertyBlock("Profile ID", GetField(row, "profileId")))))
+            .Header("Profile details")
+            .Border(BoxBorder.Rounded);
+
+        var actionLines = actions.Select((action, index) => FormatActionLine(action, index == selectedActionIndex));
+        var actionPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
+            .Header("Actions")
+            .Border(BoxBorder.Rounded);
+
+        if (Console.WindowWidth >= 120)
+        {
+            var grid = new Grid();
+            grid.AddColumn();
+            grid.AddColumn();
+            grid.AddRow(details, actionPanel);
+            AnsiConsole.Write(grid);
+        }
+        else
+        {
+            AnsiConsole.Write(details);
+            AnsiConsole.Write(actionPanel);
+        }
+
+        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
+    }
+
+    /// <summary>
+    /// Deletes ("cleans up") a UES disk/profile for one user, after the "Delete" action is chosen
+    /// on the profile detail screen. Mirrors the Intune portal's per-profile delete, which puts the
+    /// profile into a "deleting" status the next time the list is refreshed (press R).
+    /// </summary>
+    private async Task DeleteUserSettingsPersistenceProfileAsync(ProvisioningPolicyUserSettingsPersistenceContext context, GraphTableRow row)
+    {
+        var profileId = GetOptionalField(row, "profileId", "ProfileId");
+        var upn = GetOptionalField(row, "userPrincipalName", "UserPrincipalName") ?? "this user";
+
+        if (string.IsNullOrWhiteSpace(profileId))
+        {
+            TimedMessage("[yellow]This profile has no profileId — it cannot be deleted.[/]");
+            return;
+        }
+
+        var deleted = false;
+        await ConfirmAndRunAsync(
+            "Delete user experience sync profile",
+            upn,
+            async () =>
+            {
+                await _session.Graph.BatchCleanupUserSettingsPersistenceProfileAsync(context, profileId);
+                deleted = true;
+            },
+            resourceType: "UES profile",
+            resourceName: upn);
+
+        if (deleted)
+        {
+            TimedMessage("[grey]Deletion queued. Press R on the profile list to refresh status.[/]");
+        }
+    }
+
+    private static void RenderUserSettingsPersistenceUsageBar(CloudPcUserSettingsPersistenceUsageResult usage)
+    {
+        var total = usage.TotalAllocatedStorageInGB ?? 0;
+        var used = usage.UsedStorageInGB ?? 0;
+        var remaining = usage.RemainingAvailableStorageInGB ?? Math.Max(0, total - used);
+
+        AnsiConsole.MarkupLine($"[bold]Total allocated[/] {total:0.#} GB    [bold]Used[/] {used:0.#} GB    [bold]Remaining[/] {remaining:0.#} GB");
+
+        const int barWidth = 40;
+        var usedSegments = total > 0 ? (int)Math.Round(barWidth * Math.Clamp(used / total, 0, 1)) : 0;
+        var freeSegments = Math.Max(0, barWidth - usedSegments);
+        var barColor = total > 0 && used / total >= 0.9 ? "red" : total > 0 && used / total >= 0.75 ? "yellow" : "green";
+        AnsiConsole.MarkupLine($"[{barColor}]{new string('█', usedSegments)}[/][grey]{new string('░', freeSegments)}[/]");
+    }
+
+    private static string GetUserSettingsPersistenceProfilesHeader()
+    {
+        var widths = GetUserSettingsPersistenceProfileWidths();
+        return Row("UPN", widths.Upn, "Size (GB)", widths.Size, "Status", widths.Status, "Last attached", widths.LastAttached);
+    }
+
+    private static string FormatUserSettingsPersistenceProfileRow(GraphTableRow row)
+    {
+        var widths = GetUserSettingsPersistenceProfileWidths();
+        return Row(
+            GetField(row, "userPrincipalName"), widths.Upn,
+            GetField(row, "profileSizeInGB"), widths.Size,
+            GetField(row, "status"), widths.Status,
+            GetField(row, "lastProfileAttachedDateTime"), widths.LastAttached);
+    }
+
+    private static (int Upn, int Size, int Status, int LastAttached) GetUserSettingsPersistenceProfileWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int size = 10;
+        const int status = 14;
+        const int lastAttached = 20;
+        var gaps = 3;
+        var upn = Math.Max(20, available - size - status - lastAttached - gaps);
+        return (upn, size, status, lastAttached);
+    }
+
     private static string SanitizeFileName(string value)
     {
         var invalid = Path.GetInvalidFileNameChars();
@@ -2281,7 +3593,7 @@ internal sealed class W365CliApp
         {
             AnsiConsole.Clear();
             RenderActionHistory(selectedIndex);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -2324,7 +3636,7 @@ internal sealed class W365CliApp
         RenderBreadcrumb("Action history");
         var submitted = ActionHistory.Count(item => item.Status.Equals("Submitted", StringComparison.OrdinalIgnoreCase));
         var failed = ActionHistory.Count(item => item.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase));
-        AnsiConsole.MarkupLine("[#4091f2]Action history[/]");
+        AnsiConsole.MarkupLine("[#58a6ff]Action history[/]");
         AnsiConsole.MarkupLine($"[grey]Total: {ActionHistory.Count} | Submitted: {submitted} | Failed: {failed}[/]");
         AnsiConsole.WriteLine();
 
@@ -2345,13 +3657,13 @@ internal sealed class W365CliApp
             .AddColumn("Type")
             .AddColumn("Resource")
             .AddColumn("Target");
-        var pageSize = Math.Max(8, Console.WindowHeight - 10);
+        var pageSize = Math.Max(8, Math.Min(18, Console.WindowHeight - 18));
         var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, ActionHistory.Count - pageSize));
         var visible = ActionHistory.Skip(start).Take(pageSize).ToArray();
         foreach (var item in visible.Select((value, index) => new { value, index }))
         {
             var absoluteIndex = start + item.index;
-            var selectedMarker = absoluteIndex == selectedIndex ? "[black on #4091f2]>[/]" : " ";
+            var selectedMarker = absoluteIndex == selectedIndex ? "[black on #58a6ff]>[/]" : " ";
             table.AddRow(
                 selectedMarker,
                 Markup.Escape(item.value.RequestedAt.ToLocalTime().ToString("t")),
@@ -2420,10 +3732,10 @@ internal sealed class W365CliApp
             AnsiConsole.Clear();
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
-                    .Title("[#4091f2]Reports[/]")
+                    .Title("[#58a6ff]Reports[/]")
                     .HighlightStyle(SelectionHighlightStyle())
                     .AddChoices(
-                        "Usage",
+                    "Sign-in status",
                         "Connectivity history",
                         "Launch details",
                         "Cloud PC reports",
@@ -2431,10 +3743,10 @@ internal sealed class W365CliApp
 
             switch (choice)
             {
-                case "Usage":
+                case "Sign-in status":
                     await ShowGraphRowsAsync(
-                        "Windows 365 Cloud PC usage",
-                        async () => await _session.Graph.GetUsageRowsAsync(),
+                        "Windows 365 Cloud PC sign-in status",
+                        async () => await _session.Graph.GetSignInStatusRowsAsync(),
                         GetUsageReportHeader,
                         FormatUsageReportRow,
                         OpenCloudPcFromReportRowAsync);
@@ -2470,7 +3782,7 @@ internal sealed class W365CliApp
             AnsiConsole.Clear();
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
-                    .Title("[#4091f2]Tenant settings[/]")
+                    .Title("[#58a6ff]Tenant settings[/]")
                     .HighlightStyle(SelectionHighlightStyle())
                     .AddChoices(
                         "Organization settings",
@@ -2520,7 +3832,7 @@ internal sealed class W365CliApp
         {
             AnsiConsole.Clear();
             RenderBreadcrumb("Catalog");
-            AnsiConsole.MarkupLine("[#4091f2]Catalog[/]");
+            AnsiConsole.MarkupLine("[#58a6ff]Catalog[/]");
             AnsiConsole.MarkupLine("[grey]Plans, images, and regions used by Windows 365.[/]");
             AnsiConsole.WriteLine();
 
@@ -2528,14 +3840,14 @@ internal sealed class W365CliApp
             {
                 var escaped = Markup.Escape(choices[index]);
                 AnsiConsole.MarkupLine(index == selectedIndex
-                    ? $"[black on #4091f2]> {escaped}[/]"
+                    ? $"[black on #58a6ff]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]Up/Down move | Enter open | Esc/B/Q back[/]");
+            AnsiConsole.MarkupLine("[grey]Up/Down move | Enter select | Esc/B/Q back[/]");
             RenderStatusBar();
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -2612,7 +3924,8 @@ internal sealed class W365CliApp
                 async () => await _session.Graph.GetConnectivityHistoryAsync(cloudPc),
                 GetConnectivityHistoryHeader,
                 FormatConnectivityHistoryRow,
-                async _ => await ShowCloudPcDetailsAsync(cloudPc));
+                async _ => await ShowCloudPcDetailsAsync(cloudPc),
+                RenderConnectivityHistorySummary);
         }
     }
 
@@ -2660,10 +3973,11 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            AnsiConsole.MarkupLine("[#4091f2]Cloud PC report[/]");
+            RenderBreadcrumb("Reports", "Cloud PC reports");
+            AnsiConsole.MarkupLine("[#58a6ff]Cloud PC report[/]");
             AnsiConsole.WriteLine();
 
-            var pageSize = Math.Max(8, Console.WindowHeight - 7);
+            var pageSize = Math.Max(8, Math.Min(20, Console.WindowHeight - 14));
             var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, reportNames.Count - pageSize));
             var visible = reportNames.Skip(start).Take(pageSize).ToArray();
             for (var index = 0; index < visible.Length; index++)
@@ -2671,13 +3985,13 @@ internal sealed class W365CliApp
                 var absoluteIndex = start + index;
                 var escaped = Markup.Escape(visible[index]);
                 AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                    ? $"[black on #4091f2]> {escaped}[/]"
+                    ? $"[black on #58a6ff]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter select | Esc/B/Q back[/]");
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -2717,30 +4031,54 @@ internal sealed class W365CliApp
 
     private static int? PromptTopRows()
     {
+        return PromptForInteger(
+            "Top rows",
+            "Enter a positive number, press Enter for 50, or Esc/B/Q to go back.",
+            1,
+            int.MaxValue,
+            50);
+    }
+
+    /// <summary>
+    /// Standard bounded-integer input prompt used across the app (row counts, percentages, etc.),
+    /// so every "type a number" screen behaves identically: type digits, Backspace to edit, Enter
+    /// to accept (falling back to defaultValue when left blank, if one is provided), Esc/B/Q to
+    /// cancel back to the caller.
+    /// </summary>
+    private static int? PromptForInteger(string title, string instructions, int min, int max, int? defaultValue = null)
+    {
         var input = string.Empty;
         while (true)
         {
             AnsiConsole.Clear();
-            AnsiConsole.MarkupLine("[#4091f2]Top rows[/]");
-            AnsiConsole.MarkupLine("[grey]Enter a positive number, press Enter for 50, or Esc/B/Q to go back.[/]");
+            RenderBreadcrumb(title);
+            AnsiConsole.MarkupLine($"[{AccentColor}]{Markup.Escape(title)}[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(instructions)}[/]");
             AnsiConsole.WriteLine();
-            AnsiConsole.Markup($"Top rows [50]: {Markup.Escape(input)}");
+            var prompt = defaultValue is null ? $"{title}: " : $"{title} [{defaultValue}]: ";
+            AnsiConsole.Markup($"{Markup.Escape(prompt)}{Markup.Escape(input)}");
 
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.Enter:
                     if (string.IsNullOrWhiteSpace(input))
                     {
-                        return 50;
+                        if (defaultValue is not null)
+                        {
+                            return defaultValue;
+                        }
+
+                        TimedMessage($"[yellow]Enter a value between {min} and {max}.[/]");
+                        break;
                     }
 
-                    if (int.TryParse(input, out var top) && top > 0)
+                    if (int.TryParse(input, out var value) && value >= min && value <= max)
                     {
-                        return top;
+                        return value;
                     }
 
-                    TimedMessage("[yellow]Enter a positive row count.[/]");
+                    TimedMessage($"[yellow]Enter a value between {min} and {max}.[/]");
                     break;
                 case ConsoleKey.Backspace:
                     if (input.Length > 0)
@@ -2756,7 +4094,7 @@ internal sealed class W365CliApp
                         return null;
                     }
 
-                    if (char.IsDigit(key.KeyChar))
+                    if (char.IsDigit(key.KeyChar) && input.Length < 10)
                     {
                         input += key.KeyChar;
                     }
@@ -2770,17 +4108,31 @@ internal sealed class W365CliApp
         Func<Task<IReadOnlyList<GraphTableRow>>> loader,
         Func<string>? headerFactory = null,
         Func<GraphTableRow, string>? rowFactory = null,
-        Func<GraphTableRow, Task>? enterAction = null)
+        Func<GraphTableRow, Task>? enterAction = null,
+        Action<IReadOnlyList<GraphTableRow>>? summaryRenderer = null,
+        Func<int, int, Task<IReadOnlyList<GraphTableRow>>>? loadMoreAsync = null,
+        int pageBatchSize = 0)
     {
-        IReadOnlyList<GraphTableRow> rows;
+        List<GraphTableRow> rows;
         try
         {
-            rows = await AnsiConsole.Status()
+            var initial = await AnsiConsole.Status()
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync($"Loading {title}...", async _ => await loader());
+            rows = initial.ToList();
         }
         catch (Exception ex)
         {
+            if (await HandlePermissionErrorAsync(ex, $"Load {title}", title))
+            {
+                return;
+            }
+
+            if (HandleLockedResourceError(ex, $"Load {title}", title))
+            {
+                return;
+            }
+
             AnsiConsole.Clear();
             AnsiConsole.MarkupLine($"[red]Failed to load {Markup.Escape(title)}.[/]");
             AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
@@ -2799,6 +4151,37 @@ internal sealed class W365CliApp
         var selectedIndex = 0;
         var filter = string.Empty;
         var sortMode = GraphRowSortMode.None;
+        var hasMore = loadMoreAsync is not null && pageBatchSize > 0;
+
+        async Task<bool> TryLoadMoreAsync()
+        {
+            if (loadMoreAsync is null || !hasMore)
+            {
+                return false;
+            }
+
+            IReadOnlyList<GraphTableRow> more;
+            try
+            {
+                more = await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Loading more rows...", async _ => await loadMoreAsync(rows.Count, pageBatchSize));
+            }
+            catch (Exception ex)
+            {
+                hasMore = false;
+                TimedMessage($"[yellow]Failed to load more rows: {Markup.Escape(ex.Message)}[/]");
+                return false;
+            }
+
+            if (more.Count > 0)
+            {
+                rows.AddRange(more);
+            }
+
+            hasMore = more.Count >= pageBatchSize;
+            return more.Count > 0;
+        }
 
         while (true)
         {
@@ -2813,8 +4196,8 @@ internal sealed class W365CliApp
             }
 
             AnsiConsole.Clear();
-            RenderGraphRows(title, rows, visibleRows, selectedIndex, filter, sortMode, headerFactory, rowFactory);
-            var key = Console.ReadKey(intercept: true);
+            RenderGraphRows(title, rows, visibleRows, selectedIndex, filter, sortMode, headerFactory, rowFactory, summaryRenderer, hasMore);
+            var key = ReadNavigationKey(intercept: true);
 
             switch (key.Key)
             {
@@ -2822,12 +4205,26 @@ internal sealed class W365CliApp
                     selectedIndex = Math.Max(0, selectedIndex - 1);
                     break;
                 case ConsoleKey.DownArrow:
+                    if (selectedIndex >= visibleRows.Count - 1 && string.IsNullOrEmpty(filter) && hasMore)
+                    {
+                        if (await TryLoadMoreAsync())
+                        {
+                            visibleRows = SortGraphRows(FilterGraphRows(rows, filter), sortMode);
+                        }
+                    }
                     selectedIndex = Math.Min(Math.Max(0, visibleRows.Count - 1), selectedIndex + 1);
                     break;
                 case ConsoleKey.PageUp:
                     selectedIndex = Math.Max(0, selectedIndex - 10);
                     break;
                 case ConsoleKey.PageDown:
+                    if (selectedIndex + 10 >= visibleRows.Count - 1 && string.IsNullOrEmpty(filter) && hasMore)
+                    {
+                        if (await TryLoadMoreAsync())
+                        {
+                            visibleRows = SortGraphRows(FilterGraphRows(rows, filter), sortMode);
+                        }
+                    }
                     selectedIndex = Math.Min(Math.Max(0, visibleRows.Count - 1), selectedIndex + 10);
                     break;
                 case ConsoleKey.Home:
@@ -2844,7 +4241,27 @@ internal sealed class W365CliApp
                     sortMode = NextSortMode(sortMode);
                     selectedIndex = 0;
                     break;
+                case ConsoleKey.R:
+                    try
+                    {
+                        var refreshed = await AnsiConsole.Status()
+                            .Spinner(Spinner.Known.Dots)
+                            .StartAsync($"Refreshing {title}...", async _ => await loader());
+                        rows = refreshed.ToList();
+                        hasMore = loadMoreAsync is not null && pageBatchSize > 0;
+                        selectedIndex = 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!await HandlePermissionErrorAsync(ex, $"Refresh {title}", title) &&
+                            !HandleLockedResourceError(ex, $"Refresh {title}", title))
+                        {
+                            TimedMessage($"[red]Failed to refresh: {Markup.Escape(ex.Message)}[/]");
+                        }
+                    }
+                    break;
                 case ConsoleKey.Enter:
+                case ConsoleKey.RightArrow:
                     if (visibleRows.Count == 0)
                     {
                         break;
@@ -2924,7 +4341,8 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            AnsiConsole.MarkupLine("[#4091f2]Select Cloud PC for connectivity history[/]");
+            RenderBreadcrumb("Reports", "Connectivity history");
+            AnsiConsole.MarkupLine("[#58a6ff]Select Cloud PC for connectivity history[/]");
             var widths = GetConnectivityCloudPcWidths();
             var header = widths.ServicePlan > 0
                 ? Row("Name", widths.Name, "Status", widths.Status, "User", widths.User, "Service plan", widths.ServicePlan)
@@ -2932,7 +4350,7 @@ internal sealed class W365CliApp
             AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
             AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
 
-            var pageSize = Math.Max(8, Console.WindowHeight - 8);
+            var pageSize = Math.Max(8, Math.Min(20, Console.WindowHeight - 14));
             var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, cloudPcs.Count - pageSize));
             var visible = cloudPcs.Skip(start).Take(pageSize).ToArray();
             for (var index = 0; index < visible.Length; index++)
@@ -2944,13 +4362,13 @@ internal sealed class W365CliApp
                     : Row(pc.Name, widths.Name, pc.Status ?? "-", widths.Status, pc.UserPrincipalName ?? "-", widths.User);
                 var escaped = Markup.Escape(row);
                 AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                    ? $"[black on #4091f2]> {escaped}[/]"
+                    ? $"[black on #58a6ff]> {escaped}[/]"
                     : $"  {escaped}");
             }
 
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter open | Esc/B/Q back[/]");
-            var key = Console.ReadKey(intercept: true);
+            AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter select | Esc/B/Q back[/]");
+            var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
                 case ConsoleKey.UpArrow:
@@ -3007,22 +4425,30 @@ internal sealed class W365CliApp
         string filter,
         GraphRowSortMode sortMode,
         Func<string> headerFactory,
-        Func<GraphTableRow, string> rowFactory)
+        Func<GraphTableRow, string> rowFactory,
+        Action<IReadOnlyList<GraphTableRow>>? summaryRenderer,
+        bool hasMore = false)
     {
         var header = headerFactory();
         RenderBreadcrumb(title);
-        AnsiConsole.MarkupLine($"[#4091f2]{Markup.Escape(title)}[/]");
-        AnsiConsole.MarkupLine($"[grey]Rows: {allRows.Count} | Visible: {visibleRows.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)} | Sort: {FormatSortMode(sortMode)}[/]");
+        AnsiConsole.MarkupLine($"[#58a6ff]{Markup.Escape(title)}[/]");
+        var rowCountText = hasMore ? $"{allRows.Count}+" : allRows.Count.ToString();
+        AnsiConsole.MarkupLine($"[grey]Rows: {rowCountText} | Visible: {visibleRows.Count} | Filter: {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)} | Sort: {FormatSortMode(sortMode)}[/]");
         AnsiConsole.WriteLine();
+        summaryRenderer?.Invoke(allRows);
+        if (summaryRenderer is not null)
+        {
+            AnsiConsole.WriteLine();
+        }
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
 
-        var pageSize = Math.Max(8, Console.WindowHeight - 10);
+        var pageSize = Math.Max(8, Math.Min(20, Console.WindowHeight - 14));
         if (visibleRows.Count == 0)
         {
             AnsiConsole.MarkupLine("[grey]No rows match the current filter.[/]");
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | S sort | Esc/B/Q back[/]");
+            AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
             RenderStatusBar();
             return;
         }
@@ -3035,12 +4461,15 @@ internal sealed class W365CliApp
             var absoluteIndex = start + index;
             var escaped = Markup.Escape(rowFactory(visible[index]));
             AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                ? $"[black on #4091f2]> {escaped}[/]"
+                ? $"[black on #58a6ff]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | / or F filter | C clear | S sort | Esc/B/Q back[/]");
+        var hint = hasMore
+            ? "Up/Down move (loads more at end) | PgUp/PgDn page | Enter/-> details | / or F filter | C clear | S sort | R refresh | Esc/B/Q back"
+            : "Up/Down move | PgUp/PgDn page | Enter/-> details | / or F filter | C clear | S sort | R refresh | Esc/B/Q back";
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(hint)}[/]");
         RenderStatusBar();
     }
 
@@ -3119,8 +4548,8 @@ internal sealed class W365CliApp
     {
         var widths = GetUsageReportWidths();
         return widths.ServicePlan > 0
-            ? Row("Cloud PC", widths.CloudPc, "Status", widths.Status, "Power", widths.Power, "User", widths.User, "Service plan", widths.ServicePlan)
-            : Row("Cloud PC", widths.CloudPc, "Status", widths.Status, "Power", widths.Power, "User", widths.User);
+            ? Row("Cloud PC", widths.CloudPc, "Sign-in", widths.Status, "Days", widths.Power, "Last active", widths.User, "Service plan", widths.ServicePlan)
+            : Row("Cloud PC", widths.CloudPc, "Sign-in", widths.Status, "Days", widths.Power, "Last active", widths.User);
     }
 
     private static string FormatUsageReportRow(GraphTableRow row)
@@ -3129,22 +4558,22 @@ internal sealed class W365CliApp
         return widths.ServicePlan > 0
             ? Row(
                 GetField(row, "Cloud PC"), widths.CloudPc,
-                GetField(row, "Status"), widths.Status,
-                GetField(row, "Power state"), widths.Power,
-                GetField(row, "User"), widths.User,
+                GetField(row, "SignInStatus"), widths.Status,
+                GetField(row, "DaysSinceLastSignIn"), widths.Power,
+                GetField(row, "LastActiveTime"), widths.User,
                 GetField(row, "Service plan"), widths.ServicePlan)
             : Row(
                 GetField(row, "Cloud PC"), widths.CloudPc,
-                GetField(row, "Status"), widths.Status,
-                GetField(row, "Power state"), widths.Power,
-                GetField(row, "User"), widths.User);
+                GetField(row, "SignInStatus"), widths.Status,
+                GetField(row, "DaysSinceLastSignIn"), widths.Power,
+                GetField(row, "LastActiveTime"), widths.User);
     }
 
     private static (int CloudPc, int Status, int Power, int User, int ServicePlan) GetUsageReportWidths()
     {
         var available = Math.Max(76, Console.WindowWidth - 4);
-        const int status = 12;
-        const int power = 10;
+        const int status = 14;
+        const int power = 8;
         var showServicePlan = available >= 118;
         var gaps = showServicePlan ? 4 : 3;
         var remaining = Math.Max(42, available - status - power - gaps);
@@ -3179,6 +4608,57 @@ internal sealed class W365CliApp
                 GetField(row, "message"), widths.Message);
     }
 
+    private static void RenderConnectivityHistorySummary(IReadOnlyList<GraphTableRow> rows)
+    {
+        var ordered = rows
+            .Select(row => new
+            {
+                Row = row,
+                EventTime = ParseGraphDate(GetField(row, "eventDateTime")),
+                EventName = GetField(row, "eventName"),
+                EventResult = GetField(row, "eventResult")
+            })
+            .Where(item => item.EventTime is not null)
+            .OrderByDescending(item => item.EventTime)
+            .ToArray();
+
+        var latest = ordered.FirstOrDefault();
+        var lastStarted = ordered.FirstOrDefault(item =>
+            item.EventName.Contains("Started", StringComparison.OrdinalIgnoreCase) &&
+            item.EventResult.Contains("success", StringComparison.OrdinalIgnoreCase));
+        var lastFinished = ordered.FirstOrDefault(item =>
+            item.EventName.Contains("Finished", StringComparison.OrdinalIgnoreCase) &&
+            item.EventResult.Contains("success", StringComparison.OrdinalIgnoreCase));
+        var inferredState = lastStarted?.EventTime is not null &&
+            (lastFinished?.EventTime is null || lastStarted.EventTime > lastFinished.EventTime)
+                ? "Possibly connected"
+                : lastFinished?.EventTime is not null
+                    ? "Last known disconnected"
+                    : "Unknown";
+
+        var rowsPanel = new Rows(
+            new Markup($"[bold]Latest event[/] {Markup.Escape(FormatConnectivityEvent(latest?.EventName, latest?.EventTime))}"),
+            new Markup($"[bold]Last started[/] {Markup.Escape(FormatConnectivityEvent(lastStarted?.EventName, lastStarted?.EventTime))}"),
+            new Markup($"[bold]Last finished[/] {Markup.Escape(FormatConnectivityEvent(lastFinished?.EventName, lastFinished?.EventTime))}"),
+            new Markup($"[bold]Inferred state[/] {Markup.Escape(inferredState)}"));
+
+        AnsiConsole.Write(new Panel(rowsPanel)
+            .Header("Connection summary")
+            .Border(BoxBorder.Rounded));
+    }
+
+    private static DateTimeOffset? ParseGraphDate(string value)
+    {
+        return DateTimeOffset.TryParse(value, out var parsed) ? parsed.ToLocalTime() : null;
+    }
+
+    private static string FormatConnectivityEvent(string? eventName, DateTimeOffset? eventTime)
+    {
+        return eventTime is null
+            ? "-"
+            : $"{eventName ?? "Event"} at {eventTime.Value:g}";
+    }
+
     private static (int Time, int Type, int Event, int Result, int Message) GetConnectivityHistoryWidths()
     {
         var available = Math.Max(76, Console.WindowWidth - 4);
@@ -3190,6 +4670,36 @@ internal sealed class W365CliApp
         var gaps = showEvent ? 4 : 3;
         var message = Math.Max(24, available - time - type - eventWidth - result - gaps);
         return (time, type, eventWidth, result, message);
+    }
+
+    private static string GetConnectionHistoryReportHeader()
+    {
+        var widths = GetConnectionHistoryReportWidths();
+        return Row("Session begin", widths.Begin, "Session end", widths.End, "UPN", widths.Upn, "Client OS", widths.ClientOs, "Transport", widths.Transport);
+    }
+
+    private static string FormatConnectionHistoryReportRow(GraphTableRow row)
+    {
+        var widths = GetConnectionHistoryReportWidths();
+        return Row(
+            GetField(row, "SessionBeginTime"), widths.Begin,
+            GetField(row, "SessionEndTime"), widths.End,
+            GetField(row, "UPN"), widths.Upn,
+            GetField(row, "ClientOS"), widths.ClientOs,
+            GetField(row, "TransportType"), widths.Transport);
+    }
+
+    private static (int Begin, int End, int Upn, int ClientOs, int Transport) GetConnectionHistoryReportWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int begin = 20;
+        const int end = 20;
+        const int transport = 12;
+        var gaps = 4;
+        var remaining = Math.Max(30, available - begin - end - transport - gaps);
+        var upn = Math.Max(20, (int)(remaining * 0.6));
+        var clientOs = Math.Max(10, remaining - upn);
+        return (begin, end, upn, clientOs, transport);
     }
 
     private static string GetLaunchDetailsHeader()
@@ -3480,7 +4990,7 @@ internal sealed class W365CliApp
             }
 
             RenderCloudPcBrowser(cloudPcs, visibleCloudPcs, selectedIndex, filter, sortMode);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
 
             switch (key.Key)
             {
@@ -3552,7 +5062,7 @@ internal sealed class W365CliApp
                     }
                     else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'n' or 'N')
                     {
-                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex]);
+                        await ShowCloudPcDetailsAsync(visibleCloudPcs[selectedIndex], "Snapshots");
                     }
                     else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'z' or 'Z')
                     {
@@ -3612,7 +5122,7 @@ internal sealed class W365CliApp
             }
 
             RenderCloudAppBrowser(apps, visibleApps, selectedIndex, filter);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
 
             switch (key.Key)
             {
@@ -3652,6 +5162,9 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
                     if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
                     {
@@ -3661,6 +5174,10 @@ internal sealed class W365CliApp
                     else if (key.KeyChar == 'q' || key.KeyChar == 'Q' || key.KeyChar == 'b' || key.KeyChar == 'B')
                     {
                         return;
+                    }
+                    else if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
                     }
                     break;
             }
@@ -3680,7 +5197,7 @@ internal sealed class W365CliApp
 
         var selected = AnsiConsole.Prompt(
             new SelectionPrompt<TableChoice<T>>()
-                .Title($"[#4091f2]{Markup.Escape(title)}[/]\n[grey]{Markup.Escape(header)}[/]\n[grey]{Markup.Escape(new string('-', header.Length))}[/]")
+                .Title($"[#58a6ff]{Markup.Escape(title)}[/]\n[grey]{Markup.Escape(header)}[/]\n[grey]{Markup.Escape(new string('-', header.Length))}[/]")
                 .HighlightStyle(SelectionHighlightStyle())
                 .PageSize(18)
                 .UseConverter(choice => Markup.Escape(choice.Label))
@@ -3729,7 +5246,7 @@ internal sealed class W365CliApp
             AnsiConsole.Write(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter));
             AnsiConsole.Write(CreateCloudPcSidePanel(selectedCloudPc));
         }
-        AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Up/Down move | PgUp/PgDn page | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc back[/]");
+        AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Up/Down move | PgUp/PgDn page | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc/B/Q back | P or Ctrl+K command palette[/]");
         RenderStatusBar();
     }
 
@@ -3745,17 +5262,27 @@ internal sealed class W365CliApp
             .OrderBy(group => group.Key)
             .Select(group => $"{group.Key}: {group.Count()}"));
 
-        var content = new Rows(
+        var rows = new List<Spectre.Console.Rendering.IRenderable>
+        {
             new Markup($"[bold]Total[/] {allCloudPcs.Count}   [bold]Visible[/] {visibleCloudPcs.Count}   [bold]Filter[/] {Markup.Escape(string.IsNullOrWhiteSpace(filter) ? "none" : filter)}"),
             new Markup($"[bold]Status[/] {Markup.Escape(statusSummary)}"),
-            new Markup($"[bold]Type[/] {Markup.Escape(typeSummary)}"));
+            new Markup($"[bold]Type[/] {Markup.Escape(typeSummary)}")
+        };
 
-        return new Panel(content).Border(BoxBorder.Rounded).Header("Cloud PC fleet");
+        if (allCloudPcs.Any(pc => pc.ConnectivityResult is not null))
+        {
+            var inUseCount = allCloudPcs.Count(pc => string.Equals(pc.ConnectivityResult?.Status, "inUse", StringComparison.OrdinalIgnoreCase));
+            var availableCount = allCloudPcs.Count(pc => string.Equals(pc.ConnectivityResult?.Status, "available", StringComparison.OrdinalIgnoreCase));
+            rows.Add(new Markup($"[bold]Shared usage[/] [yellow]In use: {inUseCount}[/]  [green]Available: {availableCount}[/]"));
+        }
+
+        return new Panel(new Rows(rows)).Border(BoxBorder.Rounded).Header("Cloud PC fleet");
     }
 
     private static Table CreateCloudPcTable(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, int selectedIndex, string filter)
     {
         var widths = GetCloudPcWidths();
+        var showInUse = allCloudPcs.Any(pc => pc.ConnectivityResult is not null);
         var table = new Table()
             .Title("Cloud PCs")
             .Border(TableBorder.Rounded)
@@ -3766,6 +5293,11 @@ internal sealed class W365CliApp
 
         var showUser = Console.WindowWidth >= 105;
         var showServicePlan = Console.WindowWidth >= 135;
+
+        if (showInUse)
+        {
+            table.AddColumn("In use");
+        }
 
         if (showUser)
         {
@@ -3780,6 +5312,10 @@ internal sealed class W365CliApp
         if (visibleCloudPcs.Count == 0)
         {
             var emptyCells = new List<string> { "-", "-", "-", "[grey]No Cloud PCs match the current filter.[/]" };
+            if (showInUse)
+            {
+                emptyCells.Add("-");
+            }
             if (showUser)
             {
                 emptyCells.Add("-");
@@ -3802,15 +5338,20 @@ internal sealed class W365CliApp
             var selected = index == selectedIndex;
             var row = new List<string>
             {
-                selected ? "[black on #4091f2]>[/]" : " ",
-                selected ? Selected(Markup.Escape(Fit(pc.Status ?? "unknown", 12))) : StatusMarkup(pc.Status),
+                selected ? "[black on #58a6ff]>[/]" : " ",
+                selected ? Selected(Markup.Escape(Fit(pc.Status ?? "unknown", widths.Status))) : StatusMarkup(pc.Status, widths.Status),
                 selected ? Selected(Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type)),
                 selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name))
             };
 
+            if (showInUse)
+            {
+                row.Add(selected ? Selected(Markup.Escape(Fit(FormatInUsePlain(pc), 26))) : FormatInUseMarkup(pc));
+            }
+
             if (showUser)
             {
-                row.Add(selected ? Selected(Markup.Escape(Fit(pc.UserPrincipalName ?? "-", widths.User))) : Markup.Escape(Fit(pc.UserPrincipalName ?? "-", widths.User)));
+                row.Add(selected ? Selected(Markup.Escape(Fit(pc.EffectiveUserPrincipalName ?? "-", widths.User))) : Markup.Escape(Fit(pc.EffectiveUserPrincipalName ?? "-", widths.User)));
             }
 
             if (showServicePlan)
@@ -3822,6 +5363,48 @@ internal sealed class W365CliApp
         }
 
         return table;
+    }
+
+    private static string FormatInUsePlain(CloudPcSummary pc)
+    {
+        var status = pc.ConnectivityResult?.Status;
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return "-";
+        }
+
+        if (string.Equals(status, "inUse", StringComparison.OrdinalIgnoreCase))
+        {
+            var sessionStart = pc.SharedDeviceDetail?.SessionStartDateTime;
+            return sessionStart is null
+                ? "In use"
+                : $"In use since {sessionStart.Value.ToLocalTime():t}";
+        }
+
+        if (string.Equals(status, "available", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Available";
+        }
+
+        return status;
+    }
+
+    private static string FormatInUseMarkup(CloudPcSummary pc)
+    {
+        var status = pc.ConnectivityResult?.Status;
+        var text = Markup.Escape(Fit(FormatInUsePlain(pc), 26));
+
+        if (string.Equals(status, "inUse", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"[yellow]{text}[/]";
+        }
+
+        if (string.Equals(status, "available", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"[green]{text}[/]";
+        }
+
+        return $"[grey]{text}[/]";
     }
 
     private static Panel CreateCloudPcSidePanel(CloudPcSummary? cloudPc)
@@ -3837,8 +5420,9 @@ internal sealed class W365CliApp
             new Markup(PropertyBlock("Name", cloudPc.Name, "grey")),
             new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
             new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-", "grey")),
-            new Markup(PropertyBlock("User", cloudPc.UserPrincipalName ?? "-", "grey")),
+            new Markup(PropertyBlock("User", cloudPc.EffectiveUserPrincipalName ?? "-", "grey")),
             new Markup(PropertyBlock("Service plan", cloudPc.ServicePlanName ?? "-", "grey")),
+            new Markup(PropertyInline("In use", FormatInUseMarkup(cloudPc), valueIsMarkup: true)),
             new Markup(PropertyBlock("Cloud PC ID", cloudPc.Id, "grey")),
             new Markup(PropertyBlock("Actions", "Enter details, A actions", "grey")));
 
@@ -3871,7 +5455,7 @@ internal sealed class W365CliApp
             AnsiConsole.Write(CreateCloudAppTable(allApps, visibleApps, selectedIndex, filter));
             AnsiConsole.Write(CreateCloudAppSidePanel(selectedApp));
         }
-        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | A actions | / filter | C clear | R refresh | Esc back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | A actions | / filter | C clear | R refresh | Esc/B/Q back | P or Ctrl+K command palette[/]");
         RenderStatusBar();
     }
 
@@ -3930,7 +5514,7 @@ internal sealed class W365CliApp
             var selected = index == selectedIndex;
             var row = new List<string>
             {
-                selected ? "[black on #4091f2]>[/]" : " ",
+                selected ? "[black on #58a6ff]>[/]" : " ",
                 selected ? Selected(Markup.Escape(Fit(app.AppStatus ?? "unknown", widths.Status))) : AppStatusMarkup(app.AppStatus, widths.Status),
                 selected ? Selected(Markup.Escape(Fit(app.DisplayName, widths.Name))) : Markup.Escape(Fit(app.DisplayName, widths.Name))
             };
@@ -3996,7 +5580,7 @@ internal sealed class W365CliApp
                 Contains(pc.Name, filter) ||
                 Contains(pc.Status, filter) ||
                 Contains(pc.ProvisioningType, filter) ||
-                Contains(pc.UserPrincipalName, filter) ||
+                Contains(pc.EffectiveUserPrincipalName, filter) ||
                 Contains(pc.ServicePlanName, filter))
             .ToArray();
     }
@@ -4006,7 +5590,7 @@ internal sealed class W365CliApp
         return sortMode switch
         {
             CloudPcSortMode.Status => cloudPcs.OrderBy(pc => pc.Status, StringComparer.OrdinalIgnoreCase).ThenBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
-            CloudPcSortMode.User => cloudPcs.OrderBy(pc => pc.UserPrincipalName, StringComparer.OrdinalIgnoreCase).ThenBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
+            CloudPcSortMode.User => cloudPcs.OrderBy(pc => pc.EffectiveUserPrincipalName, StringComparer.OrdinalIgnoreCase).ThenBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
             CloudPcSortMode.ServicePlan => cloudPcs.OrderBy(pc => pc.ServicePlanName, StringComparer.OrdinalIgnoreCase).ThenBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
             _ => cloudPcs.OrderBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase).ToArray()
         };
@@ -4095,13 +5679,20 @@ internal sealed class W365CliApp
 
     private static string[] GetCloudPcActions(CloudPcSummary cloudPc)
     {
-        var actions = new List<string>
+        var actions = new List<string>();
+
+        if (HasStatusDetailsWorthViewing(cloudPc))
         {
+            actions.Add("View status details");
+        }
+
+        actions.AddRange([
             "Remote action history",
+            "Connection history",
             "Disk space",
             "Snapshots",
             "Resize"
-        };
+        ]);
 
         if (IsCloudPcClearlyOff(cloudPc))
         {
@@ -4126,6 +5717,16 @@ internal sealed class W365CliApp
         ]);
 
         return actions.ToArray();
+    }
+
+    /// <summary>
+    /// "View status details" is only useful when the Cloud PC's status indicates something didn't
+    /// apply cleanly — mirrors the Intune portal, which only shows "View more information" for
+    /// these states.
+    /// </summary>
+    private static bool HasStatusDetailsWorthViewing(CloudPcSummary cloudPc)
+    {
+        return MatchesAny(cloudPc.Status, "provisionedwithwarnings", "provisionedwitherrors", "failed");
     }
 
     private static bool IsCloudPcClearlyOff(CloudPcSummary cloudPc)
@@ -4155,19 +5756,20 @@ internal sealed class W365CliApp
         return AnsiConsole.Ask<string>("Filter:");
     }
 
-    private static string StatusMarkup(string? status)
+    private static string StatusMarkup(string? status, int width = 24)
     {
         var text = status ?? "unknown";
         var color = text.ToLowerInvariant() switch
         {
             "provisioned" or "available" or "ready" => "darkolivegreen3_1",
-            "provisioning" or "pending" or "inprogress" => "khaki1",
-            "failed" or "error" => "indianred1",
+            "provisionedwithwarnings" or "provisionedwitherrors" => "orange1",
+            "provisioning" or "pending" or "inprogress" or "pendingprovision" or "pendingupdate" => "khaki1",
+            "failed" or "error" or "resizevalidationfailed" or "movingregionfailed" or "restorefailed" => "indianred1",
             "ingraceperiod" => "plum1",
             _ => "grey"
         };
 
-        return $"[{color}]{Markup.Escape(Fit(text, 12))}[/]";
+        return $"[{color}]{Markup.Escape(Fit(text, width))}[/]";
     }
 
     private static string AppStatusMarkup(string? status, int width)
@@ -4206,9 +5808,22 @@ internal sealed class W365CliApp
         statusMessageAt = DateTimeOffset.Now;
     }
 
+    private void UpdateStatusBarSnapshot()
+    {
+        var connectionText = _session.IsConnected
+            ? "[black on #3fb950] CONNECTED [/]"
+            : "[white on red] NOT CONNECTED [/]";
+        var tenantName = _session.TenantName ?? "No tenant selected";
+        var tenantId = _session.TenantId ?? "-";
+        statusBarConnection = connectionText;
+        statusBarTenant = tenantId == "-"
+            ? tenantName
+            : $"{tenantName} ({tenantId})";
+    }
+
     private static void RenderStatusBar()
     {
-        return;
+        RenderHomeStatusLine();
     }
 
     private static bool IsActionHistoryHotkey(ConsoleKeyInfo key)
@@ -4239,6 +5854,42 @@ internal sealed class W365CliApp
     private static Style SelectionHighlightStyle()
     {
         return new Style(Color.Black, Color.FromHex(AccentColor));
+    }
+
+    /// <summary>
+    /// Standard yes/no confirmation UI for the whole app — an arrow-key selection prompt rather
+    /// than a type-y/n-and-Enter prompt, so every confirmation in the CLI behaves identically.
+    /// </summary>
+    private static bool AskYesNo(string question, bool defaultToYes = true)
+    {
+        var choices = defaultToYes ? new[] { "Yes", "No" } : new[] { "No", "Yes" };
+        var choice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title(question)
+                .HighlightStyle(SelectionHighlightStyle())
+                .AddChoices(choices));
+        return choice == "Yes";
+    }
+
+    private static readonly string[] DestructiveActionNames = ["Delete"];
+
+    /// <summary>
+    /// Renders one line of an action list, highlighting destructive actions (e.g. "Delete") in
+    /// red so they visually stand out from safe actions before the user even reaches a confirm
+    /// prompt — same treatment whether or not the row is currently selected.
+    /// </summary>
+    private static string FormatActionLine(string action, bool selected)
+    {
+        var isDestructive = DestructiveActionNames.Contains(action, StringComparer.OrdinalIgnoreCase);
+        var escaped = Markup.Escape(action);
+        if (selected)
+        {
+            return isDestructive
+                ? $"[black on {AccentColor}]> [red]{escaped}[/][/]"
+                : $"[black on {AccentColor}]> {escaped}[/]";
+        }
+
+        return isDestructive ? $"  [red]{escaped}[/]" : $"  {escaped}";
     }
 
     private static string Row(params object[] valuesAndWidths)
@@ -4272,7 +5923,9 @@ internal sealed class W365CliApp
     private static (int Name, int Status, int Type, int User, int ServicePlan) GetCloudPcWidths()
     {
         var available = Math.Max(90, Console.WindowWidth - 4);
-        const int status = 12;
+        // Wide enough for the longest real cloudPcStatus value ("provisionedWithWarnings" /
+        // "resizeValidationFailed" = 23 chars) so status text is never truncated.
+        const int status = 24;
         const int type = 10;
         var remaining = Math.Max(40, available - status - type - 4);
         var name = Console.WindowWidth < 105 ? Math.Max(28, remaining - 4) : Math.Max(24, (int)(remaining * 0.32));
@@ -4300,6 +5953,8 @@ internal sealed class W365CliApp
         var actions = GetCloudPcActions(cloudPc);
         var selectedActionIndex = 0;
         CloudPcDiskSpace? diskSpace = null;
+        GraphTableRow? signInStatus = await LoadSignInStatusForCloudPcAsync(cloudPc);
+        GraphTableRow? latestSession = await LoadLatestSessionForCloudPcAsync(cloudPc);
         IReadOnlyList<CloudPcSnapshot>? snapshots = null;
         IReadOnlyList<CloudPcRemoteActionResult>? remoteActions = null;
         var selectedSnapshotIndex = 0;
@@ -4321,8 +5976,8 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace, snapshots, selectedSnapshotIndex, remoteActions, selectedRemoteActionIndex);
-            var key = Console.ReadKey(intercept: true);
+            RenderCloudPcDetailLayout(cloudPc, actions, selectedActionIndex, activeSubPanel, diskSpace, signInStatus, latestSession, snapshots, selectedSnapshotIndex, remoteActions, selectedRemoteActionIndex);
+            var key = ReadNavigationKey(intercept: true);
 
             if (activeSubPanel == "Snapshots")
             {
@@ -4445,6 +6100,9 @@ internal sealed class W365CliApp
                         break;
                     }
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
                     if (key.KeyChar == 'b' || key.KeyChar == 'B' || key.KeyChar == 'q' || key.KeyChar == 'Q')
                     {
@@ -4454,6 +6112,11 @@ internal sealed class W365CliApp
                             break;
                         }
                         return;
+                    }
+
+                    if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
                     }
                     break;
             }
@@ -4473,6 +6136,31 @@ internal sealed class W365CliApp
         return results.FirstOrDefault();
     }
 
+    private async Task<GraphTableRow?> LoadSignInStatusForCloudPcAsync(CloudPcSummary cloudPc)
+    {
+        return await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading sign-in status...", async _ => await _session.Graph.GetSignInStatusRowAsync(cloudPc));
+    }
+
+    private async Task<GraphTableRow?> LoadLatestSessionForCloudPcAsync(CloudPcSummary cloudPc)
+    {
+        return await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading connection status...", async _ =>
+            {
+                try
+                {
+                    var rows = await _session.Graph.GetConnectionHistoryReportAsync(cloudPc, 1);
+                    return rows.FirstOrDefault();
+                }
+                catch
+                {
+                    return null;
+                }
+            });
+    }
+
     private async Task<IReadOnlyList<CloudPcSnapshot>> LoadSnapshotsForCloudPcAsync(CloudPcSummary cloudPc)
     {
         return await AnsiConsole.Status()
@@ -4487,9 +6175,10 @@ internal sealed class W365CliApp
             .StartAsync("Loading remote action history...", async _ => await _session.Graph.GetCloudPcRemoteActionResultsAsync(cloudPc));
     }
 
-    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace, IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex, IReadOnlyList<CloudPcRemoteActionResult>? remoteActions, int selectedRemoteActionIndex)
+    private static void RenderCloudPcDetailLayout(CloudPcSummary cloudPc, string[] actions, int selectedActionIndex, string activeSubPanel, CloudPcDiskSpace? diskSpace, GraphTableRow? signInStatus, GraphTableRow? latestSession, IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex, IReadOnlyList<CloudPcRemoteActionResult>? remoteActions, int selectedRemoteActionIndex)
     {
-        AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native > Cloud PCs > {Markup.Escape(cloudPc.Name)}[/]");
+        RenderTopNav();
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape($"W365 CLI > Cloud PCs > {cloudPc.Name}")}[/]");
         AnsiConsole.WriteLine();
 
         var details = new Panel(
@@ -4497,17 +6186,19 @@ internal sealed class W365CliApp
                 new Markup(PropertyInline("Name", cloudPc.Name, "grey")),
                 new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
                 new Markup(PropertyInline("Power state", cloudPc.PowerState ?? "-", "grey")),
+                new Markup(PropertyInline("In use", GetInUseStatusMarkup(latestSession), valueIsMarkup: true)),
+                new Markup(PropertyInline("Sign-in status", GetSignInStatusValue(signInStatus, "SignInStatus"), "grey")),
+                new Markup(PropertyInline("Last sign-in", GetSignInStatusValue(signInStatus, "LastActiveTime"), "grey")),
+                new Markup(PropertyInline("Days since sign-in", GetSignInStatusValue(signInStatus, "DaysSinceLastSignIn"), "grey")),
                 new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-", "grey")),
-                new Markup(PropertyInline("User", cloudPc.UserPrincipalName ?? "-", "grey")),
+                new Markup(PropertyInline("User", cloudPc.EffectiveUserPrincipalName ?? "-", "grey")),
                 new Markup(PropertyInline("Service plan", cloudPc.ServicePlanName ?? "-", "grey")),
                 new Markup(PropertyInline("Cloud PC ID", cloudPc.Id, "grey"))))
             .Header("Details")
             .Border(BoxBorder.Rounded);
 
         var actionLines = actions
-            .Select((action, index) => index == selectedActionIndex
-                ? $"[black on #4091f2]> {Markup.Escape(action)}[/]"
-                : $"  {Markup.Escape(action)}");
+            .Select((action, index) => FormatActionLine(action, index == selectedActionIndex));
 
         var rightPanel = activeSubPanel switch
         {
@@ -4538,7 +6229,7 @@ internal sealed class W365CliApp
             "Snapshots" => "Up/Down select snapshot | Enter actions | C/N create | R refresh | Esc/B/Q back to actions",
             "Remote action history" => "Up/Down select action | R refresh | Esc/B/Q back to actions",
             "Disk space" => "Esc/B/Q back to actions",
-            _ => "Up/Down choose action | Enter run | Esc/B/Q back"
+            _ => "Up/Down choose action | Enter run | Esc/B/Q back | P or Ctrl+K command palette"
         };
         AnsiConsole.MarkupLine($"[grey]{hint}[/]");
         RenderStatusBar();
@@ -4559,11 +6250,35 @@ internal sealed class W365CliApp
             new Markup($"[bold]Total[/] {Markup.Escape(FormatGb(disk.TotalStorageGb))}"),
             new Markup($"[bold]Percent free[/] {Markup.Escape(disk.PercentFree is null ? "-" : $"{disk.PercentFree}%")}"),
             new Markup($"[bold]Last sync[/] {Markup.Escape(disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
+            new Markup($"[bold]Status[/]\n{Markup.Escape(disk.Error ?? "Disk data available")}"),
             new Markup($"[bold]Managed device[/]\n{Markup.Escape(disk.ManagedDeviceName ?? "-")}"));
 
         return new Panel(rows)
             .Header("Disk space")
             .Border(BoxBorder.Rounded);
+    }
+
+    private static string GetSignInStatusValue(GraphTableRow? row, string field)
+    {
+        if (row is null)
+        {
+            return "-";
+        }
+
+        return GetOptionalField(row, field) ?? "-";
+    }
+
+    private static string GetInUseStatusMarkup(GraphTableRow? latestSession)
+    {
+        if (latestSession is null)
+        {
+            return "[grey]Unknown[/]";
+        }
+
+        var sessionEnd = GetField(latestSession, "SessionEndTime");
+        return sessionEnd == "-"
+            ? "[yellow]In use[/]"
+            : "[green]Available[/]";
     }
 
     private static Panel CreateSnapshotsSubPanel(IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex)
@@ -4676,7 +6391,7 @@ internal sealed class W365CliApp
     {
         var action = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
-                .Title("[#4091f2]Snapshot action[/]")
+                .Title("[#58a6ff]Snapshot action[/]")
                 .HighlightStyle(SelectionHighlightStyle())
                 .AddChoices("Restore from this snapshot", "Delete this snapshot", "Back"));
 
@@ -4739,10 +6454,258 @@ internal sealed class W365CliApp
             case "Reprovision":
                 await ConfirmAndRunAsync("Reprovision", cloudPc.Name, async () => await _session.Graph.ReprovisionCloudPcAsync(cloudPc.Id));
                 break;
+            case "Connection history":
+                await ShowConnectionHistoryReportAsync(cloudPc);
+                break;
+            case "View status details":
+                await ShowCloudPcStatusDetailAsync(cloudPc);
+                break;
             default:
                 TimedMessage($"[yellow]{Markup.Escape(action)} is not implemented in the native CLI yet.[/]");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Shows why a Cloud PC is provisionedWithWarnings/provisionedWithErrors/failed — mirrors the
+    /// Intune portal's "View more information" panel, which is built from the Cloud PC's
+    /// statusDetail (code, message, retriable, failedAction, rawError, failedPostProvisionSteps).
+    /// </summary>
+    private async Task ShowCloudPcStatusDetailAsync(CloudPcSummary cloudPc)
+    {
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Cloud PCs", cloudPc.Name, "Status details");
+
+        CloudPcStatusDetail? detail;
+        try
+        {
+            detail = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Loading status details...", async _ => await _session.Graph.GetCloudPcStatusDetailAsync(cloudPc.Id));
+        }
+        catch (Exception ex)
+        {
+            if (await HandlePermissionErrorAsync(ex, "View status details", cloudPc.Name))
+            {
+                return;
+            }
+
+            if (HandleLockedResourceError(ex, "View status details", cloudPc.Name))
+            {
+                return;
+            }
+
+            TimedMessage($"[red]Failed to load status details: {Markup.Escape(ex.Message)}[/]");
+            return;
+        }
+
+        if (detail is null)
+        {
+            TimedMessage("[yellow]No status details are available for this Cloud PC.[/]");
+            return;
+        }
+
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Cloud PCs", cloudPc.Name, "Status details");
+        AnsiConsole.MarkupLine($"[#58a6ff]Status details[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[bold]Status[/] {StatusMarkup(cloudPc.Status)}");
+        AnsiConsole.MarkupLine($"[bold]Code[/] {Markup.Escape(detail.Code ?? "-")}");
+        AnsiConsole.MarkupLine($"[bold]Message[/] {Markup.Escape(detail.Message ?? "-")}");
+
+        if (detail.AdditionalInformation.TryGetValue("failedAction", out var failedAction) && !string.IsNullOrWhiteSpace(failedAction))
+        {
+            AnsiConsole.MarkupLine($"[bold]Failed action[/] {Markup.Escape(failedAction)}");
+        }
+
+        if (detail.AdditionalInformation.TryGetValue("retriable", out var retriable) && !string.IsNullOrWhiteSpace(retriable))
+        {
+            AnsiConsole.MarkupLine($"[bold]Retriable[/] {Markup.Escape(retriable)}");
+        }
+
+        var failedSteps = GetFailedPostProvisionSteps(detail);
+        if (failedSteps.Count > 0)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]The following configurations did not apply successfully:[/]");
+            foreach (var step in failedSteps)
+            {
+                var (title, description) = DescribePostProvisionStep(step);
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(title)}[/]");
+                AnsiConsole.MarkupLine($"[grey]{Markup.Escape(description)}[/]");
+            }
+        }
+
+        if (detail.AdditionalInformation.TryGetValue("rawError", out var rawError) && !string.IsNullOrWhiteSpace(rawError))
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]Raw error output[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(rawError)}[/]");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Press any key to return...[/]");
+        ReadNavigationKey(intercept: true);
+    }
+
+    private static IReadOnlyList<string> GetFailedPostProvisionSteps(CloudPcStatusDetail detail)
+    {
+        if (!detail.AdditionalInformation.TryGetValue("failedPostProvisionSteps", out var raw) || string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        try
+        {
+            var steps = JsonSerializer.Deserialize<string[]>(raw);
+            return steps ?? [];
+        }
+        catch (JsonException)
+        {
+            // Not JSON — treat the whole value as a single step name rather than dropping it.
+            return [raw];
+        }
+    }
+
+    /// <summary>
+    /// Maps a Graph "failedPostProvisionSteps" entry to a human-readable title/description,
+    /// matching the wording Intune's portal shows in its "View more information" panel. Keys are
+    /// normalized (letters/digits only, lowercased) to tolerate the different casing conventions
+    /// Graph uses across step names (e.g. "DevicePreparationProfileTimeout" vs the portal's
+    /// "devicePreparationProfileProfileTimedout").
+    /// </summary>
+    private static (string Title, string Description) DescribePostProvisionStep(string step)
+    {
+        var key = NormalizeStepKey(step);
+        return PostProvisionStepInfo.TryGetValue(key, out var info)
+            ? info
+            : (step, "This configuration step did not apply successfully. The Cloud PC is still accessible, but may be missing this configuration.");
+    }
+
+    private static string NormalizeStepKey(string value)
+    {
+        return new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+    }
+
+    private static readonly IReadOnlyDictionary<string, (string Title, string Description)> PostProvisionStepInfo =
+        new Dictionary<string, (string, string)>
+        {
+            [NormalizeStepKey("DevicePreparationProfileTimeout")] = (
+                "Windows Autopilot device preparation timed out",
+                "The Cloud PC was provisioned but timed out before Autopilot Device Preparation completed. Users can access this Cloud PC, but it may be missing important Intune configuration. Check the Windows Autopilot device preparation deployments status report and adjust the Device Preparation Profile and Provisioning Policy timeout values to ensure that provisioning can complete."),
+            [NormalizeStepKey("DevicePreparationProfileProfileTimedout")] = (
+                "Windows Autopilot device preparation timed out",
+                "The Cloud PC was provisioned but timed out before Autopilot Device Preparation completed. Users can access this Cloud PC, but it may be missing important Intune configuration. Check the Windows Autopilot device preparation deployments status report and adjust the Device Preparation Profile and Provisioning Policy timeout values to ensure that provisioning can complete."),
+            [NormalizeStepKey("DevicePreparationProfileProfileErrorOccurDuringProvisioning")] = (
+                "Windows Autopilot device preparation deployment",
+                "The Cloud PC was provisioned but failed to apply Autopilot Device Preparation. Users can access this Cloud PC, but it may be missing important Intune configuration. Check the Windows Autopilot device preparation deployments status report for details."),
+            [NormalizeStepKey("DevicePreparationProfileProfileInternalError")] = (
+                "Windows Autopilot device preparation deployment",
+                "The Cloud PC was provisioned but failed to apply Autopilot Device Preparation. Users can access this Cloud PC, but it may be missing important Intune configuration. We encountered a service error."),
+            [NormalizeStepKey("DevicePreparationProfileProfileNotEnabled")] = (
+                "Windows Autopilot device preparation deployment",
+                "The Cloud PC was provisioned but failed to apply Autopilot Device Preparation. Users can access this Cloud PC, but it may be missing important Intune configuration. Check that the Device Preparation Policy exists, Cloud PCs are running a supported operating system version, and that the device group used in the Device Preparation Profile is configured properly."),
+            [NormalizeStepKey("ApplySecurityBaselines")] = (
+                "Secure Default Configurations",
+                "The secure default configurations for disabling drive, clipboard USB, and printer redirections were not completed for the Cloud PC."),
+            [NormalizeStepKey("AutoStartOneDrive")] = (
+                "OneDrive configuration",
+                "OneDrive couldn't be configured to start automatically when users sign in."),
+            [NormalizeStepKey("BlockHighRiskPorts")] = (
+                "Blocking High Risk Ports",
+                "One or more high risk port(s) couldn't be disabled."),
+            [NormalizeStepKey("ChangePageFileLocation")] = (
+                "Page file location",
+                "The virtual memory page file couldn't be moved to the C drive."),
+            [NormalizeStepKey("ConfigOneDrive")] = (
+                "OneDrive configuration",
+                "The OneDrive client settings and configuration couldn't be applied."),
+            [NormalizeStepKey("DepersistRecycleBin")] = (
+                "Recycle Bin configuration",
+                "Recycle Bin couldn't be disabled."),
+            [NormalizeStepKey("DisableBitLocker")] = (
+                "BitLocker configuration",
+                "BitLocker drive encryption couldn't be disabled."),
+            [NormalizeStepKey("DisableRedirections")] = (
+                "Local device access",
+                "One or more redirection restrictions (clipboard copy/paste, local drives, printers, or USB devices) couldn't be configured."),
+            [NormalizeStepKey("DisableReset")] = (
+                "Windows reset",
+                "The built-in Windows reset option under Settings couldn't be disabled."),
+            [NormalizeStepKey("DisableShutdownButton")] = (
+                "Start Menu power icons",
+                "The shutdown and restart icons on the Start Menu couldn't be hidden."),
+            [NormalizeStepKey("DisableTaskManager")] = (
+                "Task Manager access",
+                "Task Manager access restrictions couldn't be applied."),
+            [NormalizeStepKey("DiskExpansion")] = (
+                "Disk allocation",
+                "The full OS storage, as defined by the assigned license, couldn't be allocated."),
+            [NormalizeStepKey("EnableAttackSurfaceReductionRules")] = (
+                "Attack surface reduction rules",
+                "Microsoft Defender security attack surface reductions rules couldn't be enabled."),
+            [NormalizeStepKey("EnableNestedVirtualization")] = (
+                "Nested virtualization",
+                "Nested virtualization couldn't be enabled on the Cloud PC."),
+            [NormalizeStepKey("EnableVirtualizationBasedSecurityFeatures")] = (
+                "Advanced security features",
+                "Credential Guard and hypervisor-protected code integrity features couldn't be configured."),
+            [NormalizeStepKey("EnableWindowsUpdateBeforeInitialLogon")] = (
+                "Windows Update pre-logon",
+                "Windows Update couldn't be configured to run before the first user logon."),
+            [NormalizeStepKey("HideEdgeFirstRunExperience")] = (
+                "Microsoft Edge configuration",
+                "Microsoft Edge first run experience couldn't be disabled."),
+            [NormalizeStepKey("HideTemporaryDrive")] = (
+                "Temporary drive",
+                "Temporary drive couldn't be hidden from user view in File Explorer."),
+            [NormalizeStepKey("InstallCitrixAgent")] = (
+                "Citrix HDX Plus installation",
+                "Citrix HDX Plus installation or registration was not completed for the Cloud PC. Please inspect the Citrix HDX Plus installation logs for root cause and retry provisioning. The assigned user may connect to the Cloud PC via Remote Desktop."),
+            [NormalizeStepKey("LocalAdmin")] = (
+                "Local administrator permissions",
+                "Administrator permissions on the Cloud PC, as defined by a User Settings policy, couldn't be granted for the user."),
+            [NormalizeStepKey("MmdEnrollment")] = (
+                "Microsoft Managed Desktop enrollment",
+                "Microsoft Managed Desktop enrollment was not completed for the Cloud PC."),
+            [NormalizeStepKey("SetCloudPCRegistryKey")] = (
+                "Cloud PC registry key",
+                "The Cloud PC registry key couldn't be set correctly."),
+            [NormalizeStepKey("SetRdpMaxDisconnectionTime")] = (
+                "RDP configuration",
+                "Maximum disconnection time for Remote Desktop sessions couldn't be configured."),
+            [NormalizeStepKey("SetRdpMaxIdleTime")] = (
+                "RDP configuration",
+                "Maximum idle time for Remote Desktop connections couldn't be configured."),
+            [NormalizeStepKey("SetTeamsWebRTCRegistryKey")] = (
+                "Teams WebRTC configuration",
+                "The WebRTC registry settings for Microsoft Teams couldn't be configured properly."),
+            [NormalizeStepKey("SetWindowsUpdatePolicy")] = (
+                "Windows Update policy",
+                "Windows updates default policies couldn't be configured."),
+            [NormalizeStepKey("TimeZoneRedirection")] = (
+                "Time zone redirection",
+                "The time zone redirection for the device couldn't be configured."),
+            [NormalizeStepKey("WindowsAutopatchEnrollment")] = (
+                "Windows Autopatch enrollment",
+                "Windows Autopatch enrollment was not completed for the Cloud PC."),
+            [NormalizeStepKey("WindowsLocalization")] = (
+                "Windows language & Region",
+                "We're unable to install the selected language for your provisioned Cloud PCs.")
+        };
+
+    private async Task ShowConnectionHistoryReportAsync(CloudPcSummary cloudPc)
+    {
+        const int pageSize = 50;
+
+        await ShowGraphRowsAsync(
+            $"Connection history for {cloudPc.Name}",
+            async () => await _session.Graph.GetConnectionHistoryReportAsync(cloudPc, pageSize, 0),
+            GetConnectionHistoryReportHeader,
+            FormatConnectionHistoryReportRow,
+            loadMoreAsync: async (skip, top) => await _session.Graph.GetConnectionHistoryReportAsync(cloudPc, top, skip),
+            pageBatchSize: pageSize);
     }
 
     private async Task ShowResizeAsync(CloudPcSummary cloudPc)
@@ -4765,12 +6728,13 @@ internal sealed class W365CliApp
         while (true)
         {
             AnsiConsole.Clear();
-            AnsiConsole.MarkupLine($"[#4091f2]Resize[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
+            RenderBreadcrumb("Cloud PCs", cloudPc.Name, "Resize");
+            AnsiConsole.MarkupLine($"[#58a6ff]Resize[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
             AnsiConsole.MarkupLine($"Current service plan: [grey]{Markup.Escape(cloudPc.ServicePlanName ?? "-")}[/]");
             AnsiConsole.WriteLine();
 
             RenderServicePlanTable(plans, selectedPlanIndex);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
 
             switch (key.Key)
             {
@@ -4815,12 +6779,12 @@ internal sealed class W365CliApp
 
     private static void RenderServicePlanTable(IReadOnlyList<CloudPcServicePlan> plans, int selectedPlanIndex)
     {
-        AnsiConsole.MarkupLine("[#4091f2]Select target service plan[/]");
+        AnsiConsole.MarkupLine("[#58a6ff]Select target service plan[/]");
         var header = Row("Name", 46, "Type", 12, "vCPU", 6, "RAM", 8, "Storage", 10, "Profile", 10);
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(header)}[/]");
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(new string('-', header.Length))}[/]");
 
-        var pageSize = Math.Max(8, Console.WindowHeight - 10);
+        var pageSize = Math.Max(8, Math.Min(20, Console.WindowHeight - 14));
         var start = Math.Clamp(selectedPlanIndex - pageSize / 2, 0, Math.Max(0, plans.Count - pageSize));
         var visible = plans.Skip(start).Take(pageSize).ToArray();
 
@@ -4838,7 +6802,7 @@ internal sealed class W365CliApp
 
             var escaped = Markup.Escape(row);
             AnsiConsole.MarkupLine(absoluteIndex == selectedPlanIndex
-                ? $"[black on #4091f2]> {escaped}[/]"
+                ? $"[black on #58a6ff]> {escaped}[/]"
                 : $"  {escaped}");
         }
 
@@ -4849,7 +6813,8 @@ internal sealed class W365CliApp
     private async Task ShowRenameAsync(CloudPcSummary cloudPc)
     {
         AnsiConsole.Clear();
-        AnsiConsole.MarkupLine($"[#4091f2]Rename[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
+        RenderBreadcrumb("Cloud PCs", cloudPc.Name, "Rename");
+        AnsiConsole.MarkupLine($"[#58a6ff]Rename[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
 
         var newDisplayName = AnsiConsole.Ask<string>("New Cloud PC display name:");
@@ -4865,10 +6830,10 @@ internal sealed class W365CliApp
             async () => await _session.Graph.RenameCloudPcAsync(cloudPc.Id, newDisplayName));
     }
 
-    private async Task ConfirmAndRunAsync(string action, string target, Func<Task> operation, string resourceType = "Cloud PC", string? resourceName = null)
+    private async Task ConfirmAndRunAsync(string action, string target, Func<Task> operation, string resourceType = "Cloud PC", string? resourceName = null, string requiredPermission = "CloudPC.ReadWrite.All")
     {
         AnsiConsole.Clear();
-        AnsiConsole.MarkupLine($"[#4091f2]{Markup.Escape(action)}[/]");
+        AnsiConsole.MarkupLine($"[#58a6ff]{Markup.Escape(action)}[/]");
         AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(target)}[/]");
         AnsiConsole.WriteLine();
 
@@ -4895,25 +6860,146 @@ internal sealed class W365CliApp
         catch (Exception ex)
         {
             AddActionHistory(action, target, "Failed", ex.Message, resourceType, resourceName);
+            if (await HandlePermissionErrorAsync(ex, action, target, requiredPermission))
+            {
+                return;
+            }
+
+            if (HandleLockedResourceError(ex, action, target))
+            {
+                return;
+            }
+
             ShowActionResult("Failed", action, target, "[red]Action failed.[/]", ex.Message);
         }
+    }
+
+    private static bool IsPermissionError(Exception ex)
+    {
+        return ex.Message.Contains("403", StringComparison.Ordinal) ||
+            ex.Message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("Authorization_RequestDenied", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// When a Graph call fails with a permission-shaped error (403/Forbidden/Authorization_RequestDenied),
+    /// shows an actionable recovery screen instead of a bare error, and offers to open the admin
+    /// consent page or retry sign-in with a fresh consent prompt. Returns true if it handled the
+    /// error (caller should stop further generic error rendering).
+    /// </summary>
+    private async Task<bool> HandlePermissionErrorAsync(Exception ex, string action, string target, string requiredPermission = "CloudPC.ReadWrite.All")
+    {
+        if (!IsPermissionError(ex))
+        {
+            return false;
+        }
+
+        AnsiConsole.Clear();
+        AnsiConsole.MarkupLine($"[red]{Markup.Escape(action)} was denied by Microsoft Graph (403 Forbidden).[/]");
+        AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(target)}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Fit(ex.Message, Math.Max(40, Console.WindowWidth - 4)))}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]This usually means one of two things:[/]");
+        AnsiConsole.MarkupLine($"[grey]  1. This app's {Markup.Escape(requiredPermission)} permission hasn't been granted admin consent in your tenant yet.[/]");
+        AnsiConsole.MarkupLine("[grey]  2. Your account doesn't have the administrator role required for this specific action.[/]");
+        AnsiConsole.WriteLine();
+
+        var choice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("What would you like to do?")
+                .HighlightStyle(SelectionHighlightStyle())
+                .AddChoices("Open admin consent page", "Sign in again and re-consent", "Continue"));
+
+        switch (choice)
+        {
+            case "Open admin consent page":
+                OpenUrl(_session.GetAdminConsentUrl());
+                TimedMessage("[grey]Opened the admin consent page. Ask a Global or Cloud Application admin to approve it, then retry.[/]");
+                break;
+            case "Sign in again and re-consent":
+                var reconnected = await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Re-authenticating...", async _ => await _session.ReconsentAsync());
+                UpdateStatusBarSnapshot();
+                TimedMessage(reconnected ? "[green]Re-authenticated. Try the action again.[/]" : "[red]Re-authentication failed.[/]");
+                break;
+        }
+
+        return true;
+    }
+
+    private static bool IsLockedResourceError(Exception ex)
+    {
+        return ex.Message.Contains("423", StringComparison.Ordinal) ||
+            ex.Message.Contains("Locked", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// When a Graph call fails with a 423 Locked error, shows a clear explanation instead of a
+    /// bare "Action failed" — 423 almost always means another operation (a pending apply/
+    /// reprovision, or a concurrent policy change) is already running against the same resource.
+    /// Returns true if it handled the error (caller should stop further generic error rendering).
+    /// </summary>
+    private static bool HandleLockedResourceError(Exception ex, string action, string target)
+    {
+        if (!IsLockedResourceError(ex))
+        {
+            return false;
+        }
+
+        AnsiConsole.Clear();
+        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(action)} couldn't run right now — the resource is locked (423 Locked).[/]");
+        AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(target)}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]This usually means another operation is already running against the same resource — most commonly a pending policy apply/reprovision, or a concurrent policy edit.[/]");
+        AnsiConsole.MarkupLine("[grey]Wait for that operation to finish, then try again. If this was a policy apply/reprovision, use \"Check reprovision status\" to see when it's done.[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Fit(ex.Message, Math.Max(40, Console.WindowWidth - 4)))}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Press any key to return...[/]");
+        ReadNavigationKey(intercept: true);
+        return true;
     }
 
     private static void ShowActionResult(string result, string action, string target, string resultMarkup, string? detail = null)
     {
         AnsiConsole.Clear();
-        AnsiConsole.MarkupLine($"[#4091f2]{Markup.Escape(action)}[/]");
+        AnsiConsole.MarkupLine($"[#58a6ff]{Markup.Escape(action)}[/]");
         AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(target)}[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine(resultMarkup);
-        if (!string.IsNullOrWhiteSpace(detail))
+
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Returning...[/]");
+            Thread.Sleep(1500);
+            return;
+        }
+
+        // Long or multi-line detail (e.g. a full Graph error plus the request body we sent) needs
+        // to be shown in full and given time to read/copy, rather than Fit-truncated to one line
+        // and auto-dismissed after 1.5s.
+        var isLong = detail.Contains('\n') || detail.Length > 150;
+        if (!isLong)
         {
             AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Fit(detail, Math.Max(40, Console.WindowWidth - 4)))}[/]");
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Returning...[/]");
+            Thread.Sleep(1500);
+            return;
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[grey]Returning...[/]");
-        Thread.Sleep(1500);
+        foreach (var line in detail.Split('\n'))
+        {
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(line)}[/]");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Press any key to return...[/]");
+        ReadNavigationKey(intercept: true);
     }
 
     private async Task ShowCloudAppDetailsAsync(CloudAppSummary app)
@@ -4927,7 +7013,7 @@ internal sealed class W365CliApp
         {
             AnsiConsole.Clear();
             RenderCloudAppDetailLayout(app, actions, selectedActionIndex);
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
 
             switch (key.Key)
             {
@@ -4954,10 +7040,18 @@ internal sealed class W365CliApp
                 case ConsoleKey.Escape:
                 case ConsoleKey.LeftArrow:
                     return;
+                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    await ShowCommandPaletteAsync();
+                    break;
                 default:
                     if (key.KeyChar == 'b' || key.KeyChar == 'B' || key.KeyChar == 'q' || key.KeyChar == 'Q')
                     {
                         return;
+                    }
+
+                    if (key.KeyChar is 'p' or 'P')
+                    {
+                        await ShowCommandPaletteAsync();
                     }
                     break;
             }
@@ -4981,7 +7075,7 @@ internal sealed class W365CliApp
 
     private static void RenderCloudAppDetailLayout(CloudAppSummary app, string[] actions, int selectedActionIndex)
     {
-        AnsiConsole.MarkupLine($"[#4091f2]W365 CLI Native > Cloud Apps > {Markup.Escape(app.DisplayName)}[/]");
+        AnsiConsole.MarkupLine($"[#58a6ff]W365 CLI > Cloud Apps > {Markup.Escape(app.DisplayName)}[/]");
         AnsiConsole.WriteLine();
 
         var details = new Panel(
@@ -4996,9 +7090,7 @@ internal sealed class W365CliApp
             .Header("Details")
             .Border(BoxBorder.Rounded);
 
-        var actionLines = actions.Select((action, index) => index == selectedActionIndex
-            ? $"[black on #4091f2]> {Markup.Escape(action)}[/]"
-            : $"  {Markup.Escape(action)}");
+        var actionLines = actions.Select((action, index) => FormatActionLine(action, index == selectedActionIndex));
 
         var actionsPanel = new Panel(new Markup(string.Join(Environment.NewLine, actionLines)))
             .Header("Actions")
@@ -5018,7 +7110,7 @@ internal sealed class W365CliApp
             AnsiConsole.Write(actionsPanel);
         }
 
-        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back[/]");
+        AnsiConsole.MarkupLine("[grey]Up/Down choose action | Enter run | Esc/B/Q back | P or Ctrl+K command palette[/]");
         RenderStatusBar();
     }
 
@@ -5026,7 +7118,7 @@ internal sealed class W365CliApp
 
     private sealed record SnapshotListItem(CloudPcSummary CloudPc, CloudPcSnapshot Snapshot);
 
-    private sealed record MenuChoice(string Key, string Title, string Description);
+    private sealed record MenuChoice(string Key, string Title, string Description, IReadOnlyList<MenuChoice>? Children = null);
 
     private sealed record Tip(string Command, string Text);
 
@@ -5089,24 +7181,137 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.MarkupLine("[yellow]Connect to Microsoft Graph first.[/]");
-        var connect = AnsiConsole.Confirm("Connect now?");
+        var connect = AskYesNo("Connect now?");
         if (!connect)
         {
             return false;
         }
 
         await _session.ConnectAsync();
+        await ShowMissingPermissionPromptIfNeededAsync();
         return _session.IsConnected;
     }
 
     private static void ShowAbout()
     {
-        AnsiConsole.MarkupLine("[#4091f2]W365 CLI Native[/]");
-        AnsiConsole.MarkupLine($"Version: {GetCurrentVersion()}");
-        AnsiConsole.MarkupLine("A native .NET rewrite experiment for Windows 365 Cloud PC workflows.");
-        AnsiConsole.MarkupLine("This project does not depend on the PowerShell W365CLI module.");
-        AnsiConsole.MarkupLine($"[grey]GitHub:[/] {GitHubRepositoryUrl}");
-        Pause();
+        var choices = new[] { "Go to GitHub", "Go to website", "Request feature", "Open issue", "Back" };
+        var selectedIndex = 0;
+        var topNavIndex = -1;
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderTopNav("About", topNavIndex);
+            var panel = new Panel(new Rows(
+                    new Markup($"[bold {AccentColor}]W365 CLI[/] [{MutedColor}]v{GetCurrentVersion()}[/]"),
+                    new Markup("[grey]A native .NET keyboard-first experience for Windows 365 Cloud PC workflows.[/]"),
+                    new Markup("[grey]This project does not depend on the PowerShell W365CLI module.[/]"),
+                    new Markup($"[grey]GitHub:[/] {Markup.Escape(GitHubRepositoryUrl)}"),
+                    new Markup($"[grey]Website:[/] {Markup.Escape(ProjectWebsiteUrl)}")))
+                .Header("About")
+                .Border(BoxBorder.Rounded);
+            AnsiConsole.Write(panel);
+            AnsiConsole.WriteLine();
+
+            for (var index = 0; index < choices.Length; index++)
+            {
+                var escaped = Markup.Escape(choices[index]);
+                AnsiConsole.MarkupLine(index == selectedIndex
+                    ? $"[black on {AccentColor}]> {escaped}[/]"
+                    : $"  {escaped}");
+            }
+
+            AnsiConsole.WriteLine();
+            RenderTopNavAwareHint(topNavIndex, "[grey]Tab top nav | Up/Down move | Enter select | Esc/B/Q back[/]");
+            var key = ReadNavigationKey(intercept: true, handleTopNavTab: false);
+
+            if (TryHandleTopNavKey(key, ref topNavIndex, currentTabIndex: 1, out var activation))
+            {
+                switch (activation)
+                {
+                    case TopNavActivation.Home:
+                        throw new NavigateHomeException();
+                    case TopNavActivation.Exit:
+                        throw new NavigateExitException();
+                }
+
+                continue;
+            }
+
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(choices.Length - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = choices.Length - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    switch (choices[selectedIndex])
+                    {
+                        case "Go to GitHub":
+                            OpenUrl(GitHubRepositoryUrl);
+                            TimedMessage("[green]Opened GitHub.[/]");
+                            break;
+                        case "Go to website":
+                            OpenUrl(ProjectWebsiteUrl);
+                            TimedMessage("[green]Opened website.[/]");
+                            break;
+                        case "Request feature":
+                            OpenUrl(GitHubFeatureUrl);
+                            TimedMessage("[green]Opened feature request.[/]");
+                            break;
+                        case "Open issue":
+                            OpenUrl(GitHubIssueUrl);
+                            TimedMessage("[green]Opened issue form.[/]");
+                            break;
+                        case "Back":
+                            return;
+                    }
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void OpenUrl(string url)
+    {
+        // Process.Start with UseShellExecute=true only reliably opens a browser on Windows.
+        // macOS and Linux need their platform-specific launcher commands instead.
+        try
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                Process.Start("open", url);
+            }
+            else
+            {
+                Process.Start("xdg-open", url);
+            }
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Couldn't open a browser automatically. Open this URL manually:[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(url)}[/]");
+            AnsiConsole.MarkupLine($"[grey]({Markup.Escape(ex.Message)})[/]");
+        }
     }
 
     private static string GetCurrentVersion()
@@ -5154,7 +7359,7 @@ internal sealed class W365CliApp
         AnsiConsole.MarkupLine("[grey]Press Esc, B, or Q to go back...[/]");
         while (true)
         {
-            var key = Console.ReadKey(intercept: true);
+            var key = ReadNavigationKey(intercept: true);
             if (key.Key is ConsoleKey.Escape or ConsoleKey.LeftArrow ||
                 key.KeyChar is 'b' or 'B' or 'q' or 'Q')
             {
@@ -5162,4 +7367,73 @@ internal sealed class W365CliApp
             }
         }
     }
+
+    private static ConsoleKeyInfo ReadNavigationKey(bool intercept, bool handleTopNavTab = true)
+    {
+        var key = Console.ReadKey(intercept);
+        if (handleTopNavTab && key.Key == ConsoleKey.Tab)
+        {
+            throw new NavigateAboutException();
+        }
+
+        return key;
+    }
+
+    private enum TopNavActivation
+    {
+        None,
+        Home,
+        About,
+        Exit
+    }
+
+    /// <summary>
+    /// Shared Home/About/Exit top-nav key handling, used by every screen that owns an interactive
+    /// top nav (the main menu and the About screen) so Tab/Left/Right/Down/Escape/Enter behave
+    /// identically everywhere. topNavIndex is -1 when the top nav isn't focused; 0/1/2 map to
+    /// Home/About/Exit, matching RenderTopNav's layout. currentTabIndex is the tab that matches
+    /// the screen currently being shown (0 for the main menu, 1 for the About screen) — the first
+    /// Tab press skips straight past it to the next tab, since focusing the tab you're already on
+    /// would look like nothing happened. Activation always requires an explicit Enter, so landing
+    /// on "Exit" can never be mistaken for having already quit.
+    /// </summary>
+    private static bool TryHandleTopNavKey(ConsoleKeyInfo key, ref int topNavIndex, int currentTabIndex, out TopNavActivation activation)
+    {
+        activation = TopNavActivation.None;
+        switch (key.Key)
+        {
+            case ConsoleKey.Tab when topNavIndex < 0:
+                topNavIndex = (currentTabIndex + 1) % 3;
+                return true;
+            case ConsoleKey.Tab when topNavIndex >= 0:
+            case ConsoleKey.RightArrow when topNavIndex >= 0:
+                topNavIndex = (topNavIndex + 1) % 3;
+                return true;
+            case ConsoleKey.LeftArrow when topNavIndex >= 0:
+                topNavIndex = topNavIndex == 0 ? 2 : topNavIndex - 1;
+                return true;
+            case ConsoleKey.DownArrow when topNavIndex >= 0:
+            case ConsoleKey.Escape when topNavIndex >= 0:
+                topNavIndex = -1;
+                return true;
+            case ConsoleKey.Enter when topNavIndex >= 0:
+                activation = topNavIndex switch
+                {
+                    0 => TopNavActivation.Home,
+                    1 => TopNavActivation.About,
+                    2 => TopNavActivation.Exit,
+                    _ => TopNavActivation.None
+                };
+                topNavIndex = -1;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private sealed class NavigateHomeException : Exception;
+
+    private sealed class NavigateAboutException : Exception;
+
+    private sealed class NavigateExitException : Exception;
 }

@@ -1,15 +1,15 @@
-# W365 CLI Native
+# W365 CLI
 
 [![CI](https://github.com/bwya77/W365-CLI-Native/actions/workflows/ci.yml/badge.svg)](https://github.com/bwya77/W365-CLI-Native/actions/workflows/ci.yml)
 [![Release](https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml/badge.svg)](https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/bwya77/W365-CLI-Native?label=release)](https://github.com/bwya77/W365-CLI-Native/releases/latest)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Platform](https://img.shields.io/badge/platform-Windows-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
 
 ![mainUI](docs/images/mainUI.png)
 
-W365 CLI Native is a keyboard-first Windows 365 Cloud PC management experience built as a native
-.NET command-line app.
+W365 CLI is a keyboard-first Windows 365 Cloud PC management experience built as a .NET
+command-line app.
 
 It is separate from the PowerShell-based `W365CLI` module and does not require the PowerShell module at runtime.
 
@@ -22,8 +22,14 @@ It is separate from the PowerShell-based `W365CLI` module and does not require t
   reset local admin password, and end grace period.
 - View disk space, snapshots, and remote action history.
 - Create, restore, and delete snapshots.
+- View detailed status information (including provisioning warnings/errors) for a Cloud PC.
 - Browse provisioning policies and view the Cloud PCs assigned to a policy.
+- Create a new provisioning policy from scratch.
 - Export, copy, reprovision, and delete provisioning policies.
+- Reprovision a shared policy's Cloud PCs while keeping a reserve percentage available.
+- View and manage user experience sync (user settings persistence) storage and profiles for
+  shared provisioning policies, including a tenant-wide overview across all policies.
+- View and manage the members of a provisioning policy's assigned Entra group.
 - Understand Windows 365 license capacity, availability, and Flex utilization.
 - Browse reports for usage, connectivity history, launch details, and Graph report streams.
 - Browse Cloud Apps and publish or unpublish them.
@@ -32,6 +38,28 @@ It is separate from the PowerShell-based `W365CLI` module and does not require t
 - Check GitHub Releases for newer builds.
 
 ## Install
+
+### Windows (recommended: installer)
+
+One-line install (no admin/UAC prompt — installs to `%LocalAppData%\Programs\W365CLI` and adds it
+to your user PATH):
+
+```powershell
+irm https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.ps1 | iex
+```
+
+Open a new terminal and type `w365cli` to get started. The installer also registers a normal
+uninstaller under **Settings > Apps** (or **Control Panel > Programs and Features**), so you can
+remove it like any other application — or run:
+
+```powershell
+irm https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/uninstall.ps1 | iex
+```
+
+Alternatively, download `W365CLISetup-<version>-win-x64.exe` or `-win-arm64.exe` from the
+[latest release](https://github.com/bwya77/W365-CLI-Native/releases/latest) and run it directly.
+
+### Portable (no install)
 
 Download the latest release:
 
@@ -50,13 +78,8 @@ Download the package for your platform, extract it, and run the binary:
 
 On macOS, the MSAL token cache is stored with Keychain protection.
 
-Recommended install folder:
-
-```text
-%LOCALAPPDATA%\Programs\W365CLI
-```
-
-Add that folder to your user PATH if you want to launch the CLI from any terminal.
+If you extract the portable Windows package instead of using the installer, add the extracted
+folder to your user PATH manually if you want to launch the CLI from any terminal.
 
 ## Sign in
 
@@ -78,7 +101,8 @@ The default public client app ID is built in:
 9d497858-c200-402c-a363-279a5800d730
 ```
 
-The app registration must be configured as a native public client with this redirect URI:
+The app registration must be configured as a public client (the "Mobile and desktop
+applications" platform in Entra) with this redirect URI:
 
 ```text
 http://localhost
@@ -87,18 +111,23 @@ http://localhost
 Recommended delegated Microsoft Graph permissions:
 
 ```text
-CloudPC.Read.All
 CloudPC.ReadWrite.All
 DeviceManagementManagedDevices.Read.All
 DeviceManagementManagedDevices.PrivilegedOperations.All
-User.Read.All
 Group.Read.All
+GroupMember.ReadWrite.All
+User.Read.All
 Organization.Read.All
 offline_access
 openid
 profile
 email
 ```
+
+`GroupMember.ReadWrite.All` is required for the "Manage group members" feature (add/remove
+members of a provisioning policy's assigned Entra group). `User.Read.All` is used to search the
+directory when adding a member. If you only need read-only features, `Group.Read.All` alone is
+enough and `GroupMember.ReadWrite.All` can be omitted.
 
 You can override the client or tenant during development:
 
@@ -147,12 +176,19 @@ The Provisioning area includes a provisioning policy browser with actions to:
 - Export policy JSON
 - Create a policy copy
 - Reprovision Cloud PCs assigned to the policy
+- Reprovision a shared policy while keeping a reserve percentage available, and check status
+- View user experience sync storage usage and profiles for shared-by-Entra-group policies
+- Manage the members of a policy's assigned Entra group (view, add, remove)
 - Delete a policy
+
+It also includes a "Create policy" wizard, and a tenant-wide "User experience sync overview" that
+rolls up storage usage across every shared-by-Entra-group policy.
 
 ### Reports
 
 Reports include:
 
+- Sign-in status
 - Usage
 - Connectivity history
 - Launch details
@@ -197,6 +233,8 @@ Use **Check for updates** in the app to compare your local binary with the lates
 Release builds are published as GitHub Release assets:
 
 ```text
+W365CLISetup-<version>-win-x64.exe
+W365CLISetup-<version>-win-arm64.exe
 w365-win-x64.zip
 w365-win-arm64.zip
 w365-osx-x64.zip
@@ -205,8 +243,9 @@ SHA256SUMS-windows.txt
 SHA256SUMS-macos.txt
 ```
 
-Windows release binaries are signed with Azure Trusted Signing before packaging. macOS release
-binaries are signed and notarized when the Apple Developer signing secrets are available.
+Windows release binaries and installers are signed with Azure Trusted Signing before packaging.
+macOS release binaries are signed and notarized when the Apple Developer signing secrets are
+available.
 
 ## Development
 
@@ -245,6 +284,6 @@ osx-arm64
 Create a release:
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```

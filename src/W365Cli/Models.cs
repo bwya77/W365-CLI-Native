@@ -65,6 +65,72 @@ internal sealed record GroupMemberSummary
         : UserPrincipalName ?? Id;
 }
 
+internal sealed record CloudPcSharedDeviceDetail
+{
+    [JsonPropertyName("assignedToUserPrincipalName")]
+    public string? AssignedToUserPrincipalName { get; init; }
+
+    [JsonPropertyName("sessionStartDateTime")]
+    public DateTimeOffset? SessionStartDateTime { get; init; }
+}
+
+internal sealed record CloudPcConnectivityResult
+{
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("lastModifiedDateTime")]
+    public DateTimeOffset? LastModifiedDateTime { get; init; }
+}
+
+internal sealed record CloudPcPolicyApplyActionResult
+{
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("startDateTime")]
+    public DateTimeOffset? StartDateTime { get; init; }
+
+    [JsonPropertyName("finishDateTime")]
+    public DateTimeOffset? FinishDateTime { get; init; }
+}
+
+internal sealed record CloudPcUserSettingsPersistenceUsageResult
+{
+    [JsonPropertyName("totalAllocatedStorageInGB")]
+    public double? TotalAllocatedStorageInGB { get; init; }
+
+    [JsonPropertyName("remainingAvailableStorageInGB")]
+    public double? RemainingAvailableStorageInGB { get; init; }
+
+    [JsonPropertyName("usedStorageInGB")]
+    public double? UsedStorageInGB { get; init; }
+}
+
+/// <summary>
+/// The assignment ID and user-settings-persistence configuration ID needed to call the
+/// retrieveUserSettingsPersistenceProfileUsage / retrieveUserSettingsPersistenceProfiles
+/// functions for a shared (sharedByEntraGroup) provisioning policy's "user experience sync"
+/// (a.k.a. user settings persistence / FSLogix-style profile roaming) feature.
+/// </summary>
+internal sealed record ProvisioningPolicyUserSettingsPersistenceContext(
+    string PolicyId,
+    string AssignmentId,
+    string ConfigurationId,
+    double? StorageSizeGb,
+    bool Enabled);
+
+/// <summary>
+/// Parsed <c>statusDetail</c>/<c>statusDetails</c> from a Cloud PC — surfaces why a Cloud PC is
+/// "provisionedWithWarnings"/"provisionedWithErrors"/"failed", matching the "View more information"
+/// panel Intune's portal shows. <c>AdditionalInformation</c> holds raw name/value pairs (e.g.
+/// retriable, failedAction, rawError, failedPostProvisionSteps as a JSON-encoded string array).
+/// </summary>
+internal sealed record CloudPcStatusDetail(
+    string? Code,
+    string? Message,
+    IReadOnlyDictionary<string, string> AdditionalInformation);
+
 internal sealed record CloudPcSummary
 {
     [JsonPropertyName("id")]
@@ -99,6 +165,17 @@ internal sealed record CloudPcSummary
 
     [JsonPropertyName("provisioningPolicyName")]
     public string? ProvisioningPolicyName { get; init; }
+
+    [JsonPropertyName("sharedDeviceDetail")]
+    public CloudPcSharedDeviceDetail? SharedDeviceDetail { get; init; }
+
+    [JsonPropertyName("connectivityResult")]
+    public CloudPcConnectivityResult? ConnectivityResult { get; init; }
+
+    [JsonIgnore]
+    public string? EffectiveUserPrincipalName => !string.IsNullOrWhiteSpace(UserPrincipalName)
+        ? UserPrincipalName
+        : SharedDeviceDetail?.AssignedToUserPrincipalName;
 
     [JsonIgnore]
     public string Name => !string.IsNullOrWhiteSpace(DisplayName)
@@ -212,6 +289,8 @@ internal sealed record CloudPcDiskSpace
     public double? PercentFree { get; init; }
 
     public DateTimeOffset? LastSyncDateTime { get; init; }
+
+    public string? Error { get; init; }
 }
 
 internal sealed record CloudPcSnapshotRaw

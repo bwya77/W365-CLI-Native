@@ -14,14 +14,43 @@ internal sealed class W365Session
         "https://graph.microsoft.com/.default"
     ];
 
+    /// <summary>
+    /// Every delegated Microsoft Graph permission this CLI relies on somewhere in its feature set.
+    /// This is the single source of truth for "what should be granted on the app registration" —
+    /// when you add a Graph call that needs a permission not already covered here, add it to this
+    /// list AND to the app registration's API permissions in Entra (Add a permission → grant admin
+    /// consent). The list drives <see cref="MissingRequiredScopes"/>, which proactively warns users
+    /// right after connecting instead of letting them hit a confusing 403 mid-action.
+    /// </summary>
+    private static readonly string[] RequiredScopes =
+    [
+        "CloudPC.ReadWrite.All",
+        "DeviceManagementManagedDevices.Read.All",
+        "DeviceManagementManagedDevices.PrivilegedOperations.All",
+        "Group.Read.All",
+        "GroupMember.ReadWrite.All",
+        "User.Read.All",
+        "Organization.Read.All"
+    ];
+
     private IPublicClientApplication? _application;
     private AuthenticationResult? _currentAuthentication;
+    private string _clientId = DefaultClientId;
 
     public bool IsConnected { get; private set; }
 
     public string? TenantId { get; private set; }
 
     public string? TenantName { get; private set; }
+
+    /// <summary>
+    /// Any permissions from <see cref="RequiredScopes"/> that are NOT present in the granted token
+    /// scopes after connecting — meaning they likely haven't been added to the app registration
+    /// and/or admin-consented in this tenant yet. Empty when everything the app needs is granted.
+    /// Used to proactively surface a "grant permission" prompt on first connect instead of letting
+    /// the user hit a confusing 403 later, mid-action.
+    /// </summary>
+    public IReadOnlyList<string> MissingRequiredScopes { get; private set; } = [];
 
     public W365GraphClient Graph { get; private set; } = W365GraphClient.NotConnected;
 
@@ -38,6 +67,7 @@ internal sealed class W365Session
 
             _currentAuthentication = await _application.AcquireTokenSilent(_scopes, account).ExecuteAsync();
             ConfigureConnectedGraph();
+            UpdateMissingPermissionFlag();
         }
         catch
         {
@@ -58,6 +88,7 @@ internal sealed class W365Session
                 .ExecuteAsync();
 
             ConfigureConnectedGraph();
+            UpdateMissingPermissionFlag();
             AnsiConsole.MarkupLine(IsConnected ? "[green]Connected.[/]" : "[red]Connection failed.[/]");
         }
         catch (MsalServiceException ex)
@@ -87,6 +118,64 @@ internal sealed class W365Session
         }
     }
 
+    /// <summary>
+    /// Forces a fresh interactive sign-in with the Microsoft consent screen shown again, even if a
+    /// cached token already exists. Use this to let the user (or a tenant admin) grant/consent to
+    /// permissions that weren't accepted the first time around.
+    /// </summary>
+    public async Task<bool> ReconsentAsync()
+    {
+        try
+        {
+            _application ??= await CreateApplicationAsync();
+            _currentAuthentication = await _application
+                .AcquireTokenInteractive(_scopes)
+                .WithPrompt(Prompt.Consent)
+                .ExecuteAsync();
+
+            ConfigureConnectedGraph();
+            UpdateMissingPermissionFlag();
+            return IsConnected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort URL that lets a tenant administrator grant admin consent for this app
+    /// registration's requested permissions without having to hunt through the Entra portal.
+    /// Includes redirect_uri (matching the app's registered "http://localhost" redirect) — without
+    /// it, Microsoft's /adminconsent endpoint can fail to redirect back after consent completes.
+    /// </summary>
+    public string GetAdminConsentUrl()
+    {
+        var tenantSegment = string.IsNullOrWhiteSpace(TenantId) ? "common" : TenantId;
+        var redirectUri = Uri.EscapeDataString("http://localhost");
+        return $"https://login.microsoftonline.com/{tenantSegment}/adminconsent?client_id={_clientId}&redirect_uri={redirectUri}";
+    }
+
+    private void UpdateMissingPermissionFlag()
+    {
+        if (!IsConnected)
+        {
+            MissingRequiredScopes = [];
+            return;
+        }
+
+        var grantedScopes = _currentAuthentication?.Scopes ?? [];
+
+        // Granted scope strings come back like "CloudPC.ReadWrite.All" or with a resource prefix
+        // ("https://graph.microsoft.com/CloudPC.ReadWrite.All") depending on the flow — compare on
+        // just the trailing permission name so both shapes match correctly.
+        bool IsGranted(string requiredScope) => grantedScopes.Any(granted =>
+            granted.Equals(requiredScope, StringComparison.OrdinalIgnoreCase) ||
+            granted.EndsWith($"/{requiredScope}", StringComparison.OrdinalIgnoreCase));
+
+        MissingRequiredScopes = RequiredScopes.Where(scope => !IsGranted(scope)).ToArray();
+    }
+
     public async Task DisconnectAsync()
     {
         if (_application is not null)
@@ -102,6 +191,7 @@ internal sealed class W365Session
         IsConnected = false;
         TenantId = null;
         TenantName = null;
+        MissingRequiredScopes = [];
     }
 
     private async Task<IPublicClientApplication> CreateApplicationAsync()
@@ -111,6 +201,8 @@ internal sealed class W365Session
         {
             clientId = DefaultClientId;
         }
+
+        _clientId = clientId;
 
         var tenantId = Environment.GetEnvironmentVariable("W365CLI_TENANT_ID");
         TenantId = tenantId;

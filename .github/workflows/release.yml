@@ -78,6 +78,44 @@ jobs:
             }
           }
 
+      # Build a per-user Windows installer per architecture (no admin/UAC required) that adds
+      # W365 CLI to PATH and registers a normal Apps & Features uninstall entry. ISCC ships on
+      # windows-latest; install it on the fly if a future runner image drops it.
+      - name: Build installers
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $iscc = (Get-ChildItem "C:\Program Files (x86)\Inno Setup 6\ISCC.exe","C:\Program Files\Inno Setup 6\ISCC.exe" -EA SilentlyContinue | Select-Object -First 1).FullName
+          if (-not $iscc) {
+            choco install innosetup --no-progress -y
+            $iscc = (Get-ChildItem "C:\Program Files (x86)\Inno Setup 6\ISCC.exe","C:\Program Files\Inno Setup 6\ISCC.exe" -EA SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if (-not $iscc) { throw "ISCC (Inno Setup) not found" }
+          foreach ($rid in 'win-x64','win-arm64') {
+            $arch = $rid -replace '^win-', ''
+            & "$iscc" "/DAppVersion=$v" "/DArch=$arch" "/DSourceDir=$env:GITHUB_WORKSPACE\artifacts\w365-$rid" "/O$env:GITHUB_WORKSPACE\artifacts\installers" "installer\W365Cli.iss"
+            if ($LASTEXITCODE -ne 0) { throw "ISCC failed for $arch" }
+          }
+          Get-ChildItem .\artifacts\installers\W365CLISetup-*.exe | ForEach-Object { Write-Host "$($_.Name)  $([math]::Round($_.Length/1MB,1)) MB" }
+
+      # Sign the installer executables so the file users actually double-click is signed too.
+      - name: Sign installers
+        if: env.HAS_SIGNING == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\artifacts\installers
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Package
         shell: pwsh
         run: |
@@ -85,7 +123,8 @@ jobs:
           foreach ($rid in 'win-x64','win-arm64') {
             Compress-Archive -Path ".\artifacts\w365-$rid\*" -DestinationPath ".\artifacts\release\w365-$rid.zip" -Force
           }
-          Get-FileHash .\artifacts\release\*.zip -Algorithm SHA256 |
+          Copy-Item .\artifacts\installers\W365CLISetup-*.exe .\artifacts\release\
+          Get-FileHash .\artifacts\release\*.zip, .\artifacts\release\*.exe -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash)  $(Split-Path $_.Path -Leaf)" } |
             Set-Content .\artifacts\release\SHA256SUMS-windows.txt
 
@@ -95,6 +134,7 @@ jobs:
           files: |
             artifacts/release/w365-win-x64.zip
             artifacts/release/w365-win-arm64.zip
+            artifacts/release/W365CLISetup-*.exe
             artifacts/release/SHA256SUMS-windows.txt
           generate_release_notes: true
 
