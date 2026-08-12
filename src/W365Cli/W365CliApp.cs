@@ -59,7 +59,7 @@ internal sealed class W365CliApp
             .StartAsync("Checking cached sign-in...", async _ => await _session.TryRestoreAsync());
         await ShowMissingPermissionPromptIfNeededAsync();
         await CheckForUpdatesOnStartupAsync();
-        PromptForUpdateIfAvailable();
+        await PromptForUpdateIfAvailableAsync();
 
         var selectedIndex = 0;
         var expandedIndex = -1;
@@ -1305,7 +1305,7 @@ internal sealed class W365CliApp
         }
     }
 
-    private void PromptForUpdateIfAvailable()
+    private async Task PromptForUpdateIfAvailableAsync()
     {
         if (!IsUpdateAvailable() || latestRelease is null)
         {
@@ -1323,11 +1323,249 @@ internal sealed class W365CliApp
             .Border(BoxBorder.Rounded)
             .BorderStyle(new Style(Color.Yellow)));
 
-        var openRelease = AskYesNo("Open the latest GitHub release now?");
-        if (openRelease)
+        var installNow = AskYesNo("Download and install this update now?");
+        if (!installNow)
         {
+            var openRelease = AskYesNo("Open the latest GitHub release page instead?", defaultToYes: false);
+            if (openRelease)
+            {
+                OpenUrl(latestRelease.HtmlUrl);
+                TimedMessage("[green]Opened latest release.[/]", 1200);
+            }
+
+            return;
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            await DownloadAndInstallWindowsUpdateAsync(latestRelease);
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            await DownloadAndInstallMacUpdateAsync(latestRelease);
+        }
+        else
+        {
+            AnsiConsole.MarkupLine("[yellow]Automatic updates aren't supported on this platform yet. Opening the release page instead.[/]");
             OpenUrl(latestRelease.HtmlUrl);
-            TimedMessage("[green]Opened latest release.[/]", 1200);
+            TimedMessage("[green]Opened latest release.[/]", 1500);
+        }
+    }
+
+    private static string GetCurrentOsArch() => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.Arm64 => "arm64",
+        _ => "x64"
+    };
+
+    private static GitHubReleaseAsset? FindWindowsInstallerAsset(GitHubReleaseInfo release)
+    {
+        var suffix = $"win-{GetCurrentOsArch()}.exe";
+        return release.Assets.FirstOrDefault(a =>
+            a.Name.StartsWith("W365CLISetup-", StringComparison.OrdinalIgnoreCase) &&
+            a.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static GitHubReleaseAsset? FindMacZipAsset(GitHubReleaseInfo release)
+    {
+        var name = $"w365-osx-{GetCurrentOsArch()}.zip";
+        return release.Assets.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static async Task DownloadFileAsync(string url, string destinationPath)
+    {
+        using var http = new HttpClient
+        {
+            Timeout = TimeSpan.FromMinutes(5)
+        };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("W365CliNative");
+        await using var responseStream = await http.GetStreamAsync(url);
+        await using var fileStream = File.Create(destinationPath);
+        await responseStream.CopyToAsync(fileStream);
+    }
+
+    private static async Task DownloadAndInstallWindowsUpdateAsync(GitHubReleaseInfo release)
+    {
+        var asset = FindWindowsInstallerAsset(release);
+        if (asset is null)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Couldn't find a Windows installer for this release ({Markup.Escape(GetCurrentOsArch())}). Opening the release page instead.[/]");
+            OpenUrl(release.HtmlUrl);
+            TimedMessage("[green]Opened latest release.[/]", 1500);
+            return;
+        }
+
+        var tempPath = Path.Combine(Path.GetTempPath(), asset.Name);
+        try
+        {
+            await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync($"Downloading {asset.Name}...", async _ => await DownloadFileAsync(asset.BrowserDownloadUrl, tempPath));
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Download failed:[/] [grey]{Markup.Escape(ex.Message)}[/]");
+            AnsiConsole.MarkupLine("[grey]Opening the release page so you can download it manually.[/]");
+            OpenUrl(release.HtmlUrl);
+            TimedMessage("[green]Opened latest release.[/]", 1500);
+            return;
+        }
+
+        TimedMessage($"[green]Downloaded {Markup.Escape(asset.Name)}.[/]", 1000);
+
+        var runNow = AskYesNo("Run the installer now? W365 CLI will close so it can update — it installs silently and only takes a few seconds.");
+        if (!runNow)
+        {
+            AnsiConsole.MarkupLine($"[grey]Saved the installer to:[/] [white]{Markup.Escape(tempPath)}[/]");
+            AnsiConsole.MarkupLine("[grey]Double-click it anytime to update.[/]");
+            var reveal = AskYesNo("Open the folder containing the installer?", defaultToYes: false);
+            if (reveal)
+            {
+                try { Process.Start("explorer.exe", $"/select,\"{tempPath}\""); } catch { /* best effort */ }
+            }
+
+            TimedMessage("[grey]You can update whenever you're ready.[/]", 1200);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(tempPath, "/VERYSILENT /NORESTART")
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Couldn't launch the installer:[/] [grey]{Markup.Escape(ex.Message)}[/]");
+            AnsiConsole.MarkupLine($"[grey]You can run it manually from:[/] [white]{Markup.Escape(tempPath)}[/]");
+            TimedMessage("[yellow]Update not applied.[/]", 1500);
+            return;
+        }
+
+        AnsiConsole.MarkupLine("[green]Installer launched.[/] [grey]W365 CLI is closing so it can finish updating — reopen it in a few seconds.[/]");
+        Thread.Sleep(1200);
+        Environment.Exit(0);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
+    private static async Task DownloadAndInstallMacUpdateAsync(GitHubReleaseInfo release)
+    {
+        var asset = FindMacZipAsset(release);
+        if (asset is null)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Couldn't find a macOS build for this release ({Markup.Escape(GetCurrentOsArch())}). Opening the release page instead.[/]");
+            OpenUrl(release.HtmlUrl);
+            TimedMessage("[green]Opened latest release.[/]", 1500);
+            return;
+        }
+
+        var processPath = Environment.ProcessPath;
+        var canReplaceInPlace = processPath is not null &&
+            !string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase);
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "w365cli-update-" + Guid.NewGuid().ToString("N"));
+        var cleanUpTempDir = true;
+        try
+        {
+            Directory.CreateDirectory(tempDir);
+            var zipPath = Path.Combine(tempDir, asset.Name);
+
+            await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync($"Downloading {asset.Name}...", async _ => await DownloadFileAsync(asset.BrowserDownloadUrl, zipPath));
+
+            var extractDir = Path.Combine(tempDir, "extracted");
+            Directory.CreateDirectory(extractDir);
+            System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, extractDir);
+
+            var newBinary = Directory.GetFiles(extractDir, "W365Cli", SearchOption.AllDirectories).FirstOrDefault();
+            if (newBinary is null)
+            {
+                AnsiConsole.MarkupLine("[red]Couldn't find the W365Cli binary inside the downloaded archive.[/]");
+                AnsiConsole.MarkupLine("[grey]Opening the release page so you can update manually.[/]");
+                OpenUrl(release.HtmlUrl);
+                TimedMessage("[green]Opened latest release.[/]", 1500);
+                return;
+            }
+
+            const UnixFileMode ExecutablePermissions =
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+            File.SetUnixFileMode(newBinary, ExecutablePermissions);
+
+            // Best-effort: clear the quarantine flag in case this ever gets flagged (matches install.sh).
+            try
+            {
+                var xattrProcess = Process.Start(new ProcessStartInfo("xattr", $"-d com.apple.quarantine \"{newBinary}\"")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true
+                });
+                xattrProcess?.WaitForExit(2000);
+            }
+            catch { /* best effort */ }
+
+            if (!canReplaceInPlace || processPath is null)
+            {
+                cleanUpTempDir = false;
+                AnsiConsole.MarkupLine("[yellow]Downloaded the update, but couldn't determine where W365 CLI is installed to replace it automatically.[/]");
+                AnsiConsole.MarkupLine($"[grey]New binary saved to:[/] [white]{Markup.Escape(newBinary)}[/]");
+                AnsiConsole.MarkupLine("[grey]Copy it over your installed w365cli binary (commonly ~/.local/bin/w365cli) to finish updating.[/]");
+                TimedMessage("[yellow]Manual step required to finish updating.[/]", 2000);
+                return;
+            }
+
+            // Atomic replace: copy the new binary next to the running one, then rename over it.
+            // rename() on Unix swaps the directory entry without touching the inode the currently
+            // running process still has open, so this is safe even while w365cli is executing.
+            var targetDir = Path.GetDirectoryName(processPath)!;
+            var stagingPath = Path.Combine(targetDir, ".w365cli.update.tmp");
+            File.Copy(newBinary, stagingPath, overwrite: true);
+            File.SetUnixFileMode(stagingPath, ExecutablePermissions);
+            File.Move(stagingPath, processPath, overwrite: true);
+
+            TimedMessage($"[green]Updated to {Markup.Escape(release.TagName)}.[/]", 1000);
+
+            var restartNow = AskYesNo("Restart W365 CLI now to use the new version?");
+            if (!restartNow)
+            {
+                AnsiConsole.MarkupLine("[grey]Run 'w365cli' again whenever you like to use the new version.[/]");
+                TimedMessage("[grey]Update installed.[/]", 1200);
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(processPath) { UseShellExecute = false });
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Couldn't relaunch automatically:[/] [grey]{Markup.Escape(ex.Message)}[/]");
+                AnsiConsole.MarkupLine("[grey]Run 'w365cli' again to use the new version.[/]");
+                TimedMessage("[grey]Please restart manually.[/]", 1500);
+                return;
+            }
+
+            try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort cleanup */ }
+            cleanUpTempDir = false;
+            Environment.Exit(0);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Update failed:[/] [grey]{Markup.Escape(ex.Message)}[/]");
+            AnsiConsole.MarkupLine("[grey]Opening the release page so you can update manually.[/]");
+            OpenUrl(release.HtmlUrl);
+            TimedMessage("[green]Opened latest release.[/]", 1500);
+        }
+        finally
+        {
+            if (cleanUpTempDir)
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort cleanup */ }
+            }
         }
     }
 
@@ -1353,12 +1591,27 @@ internal sealed class W365CliApp
         await using var stream = await http.GetStreamAsync(GitHubLatestReleaseApiUrl);
         using var document = await JsonDocument.ParseAsync(stream);
         var root = document.RootElement;
+        var assets = new List<GitHubReleaseAsset>();
+        if (root.TryGetProperty("assets", out var assetsElement) && assetsElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var assetElement in assetsElement.EnumerateArray())
+            {
+                var name = assetElement.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                var assetUrl = assetElement.TryGetProperty("browser_download_url", out var urlEl) ? urlEl.GetString() : null;
+                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(assetUrl))
+                {
+                    assets.Add(new GitHubReleaseAsset(name, assetUrl));
+                }
+            }
+        }
+
         return new GitHubReleaseInfo(
             root.TryGetProperty("tag_name", out var tag) ? tag.GetString() ?? "unknown" : "unknown",
             root.TryGetProperty("html_url", out var url) ? url.GetString() ?? GitHubRepositoryUrl : GitHubRepositoryUrl,
             root.TryGetProperty("published_at", out var published) && published.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(published.GetString(), out var publishedAt)
                 ? publishedAt
-                : null);
+                : null,
+            assets);
     }
 
     private async Task ShowProvisioningAsync()
@@ -7156,7 +7409,9 @@ internal sealed class W365CliApp
 
     private sealed record ActionHistoryItem(string Action, string Target, string ResourceType, string? ResourceName, string Status, DateTimeOffset RequestedAt, string? Detail);
 
-    private sealed record GitHubReleaseInfo(string TagName, string HtmlUrl, DateTimeOffset? PublishedAt);
+    private sealed record GitHubReleaseInfo(string TagName, string HtmlUrl, DateTimeOffset? PublishedAt, IReadOnlyList<GitHubReleaseAsset> Assets);
+
+    private sealed record GitHubReleaseAsset(string Name, string BrowserDownloadUrl);
 
     private sealed record LicenseOverviewItem(
         string Family,

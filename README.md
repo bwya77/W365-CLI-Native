@@ -51,7 +51,7 @@ It is separate from the PowerShell-based `W365CLI` module and does not require t
 - Browse Cloud Apps and publish or unpublish them.
 - Browse service plans, gallery images, custom images, and supported regions.
 - View tenant settings, setting profiles, and user settings.
-- Check GitHub Releases for newer builds.
+- Check GitHub Releases for newer builds and install updates automatically.
 
 ## Install
 
@@ -262,7 +262,14 @@ Cloud Apps includes browse, publish, and unpublish workflows.
 
 ## Updates
 
-Use **Check for updates** in the app to compare your local binary with the latest GitHub Release.
+W365 CLI checks GitHub Releases on startup and offers to update automatically when a newer
+version is available:
+
+- **Windows** — downloads the matching installer and, if you agree, runs it silently
+  (`/VERYSILENT /NORESTART`); W365 CLI closes for a few seconds while it updates, then reopen it.
+  If you'd rather update later, the installer is saved locally and you can double-click it anytime.
+- **macOS** — downloads the matching build and replaces the installed `w365cli` binary in place
+  (an atomic rename, safe even while it's running), then offers to restart into the new version.
 
 Release builds are published as GitHub Release assets:
 
