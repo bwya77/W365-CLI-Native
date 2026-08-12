@@ -166,29 +166,42 @@ h1 .accent { color: var(--blue-bright); }
 }
 .cta-note code { color: var(--blue-bright); background: var(--panel); padding: 2px 6px; border-radius: 4px; }
 
-.platform-links {
-  margin: 22px auto 0;
+.platform-links-inline {
+  margin: 18px auto 0;
   max-width: 760px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-  font-size: 13px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  color: var(--muted);
+  line-height: 2;
 }
-.platform-links a {
+.platform-links-inline a {
   color: var(--muted);
   text-decoration: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-family: var(--mono);
 }
-.platform-links a:hover { color: var(--blue-bright); border-color: var(--blue); }
-.platform-links a.current { border-color: var(--blue); color: var(--blue-bright); }
+.platform-links-inline a:hover { color: var(--blue-bright); }
+.platform-links-inline a.current { color: var(--blue-bright); }
+
+/* Command-line toggle */
+.cmd-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.cmd-toggle:hover { color: var(--blue-bright); }
+.cmd-toggle .chev { font-size: 11px; transition: transform .15s ease; }
+.cmd-toggle.open .chev { transform: rotate(180deg); }
 
 /* Install command box */
 .cmd-box {
-  margin: 28px auto 18px;
+  margin: 16px auto 0;
   max-width: 620px;
   text-align: left;
 }

@@ -119,6 +119,21 @@
     activate(defaultOs === "macos" ? "macos" : "windows");
   }
 
+  function setupCmdToggle() {
+    const toggle = document.getElementById("cmd-toggle");
+    const box = document.getElementById("cmd-box");
+    if (!toggle || !box) return null;
+
+    function setOpen(open) {
+      box.hidden = !open;
+      toggle.classList.toggle("open", open);
+      toggle.firstChild.textContent = open ? "Hide install command " : "Prefer the command line? ";
+    }
+
+    toggle.addEventListener("click", () => setOpen(box.hidden));
+    return setOpen;
+  }
+
   async function init() {
     setYear();
     setupCopyButtons();
@@ -135,6 +150,7 @@
     }
 
     setupCmdTabs(detected.os);
+    const setCmdBoxOpen = setupCmdToggle();
 
     const primaryBtn = document.getElementById("primary-download");
     const primaryLabel = document.getElementById("primary-download-label");
@@ -185,7 +201,7 @@
       });
       if (navBtn) { navBtn.href = url; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Download";
-      platformNote.textContent = `Detected ${detected.label}. Prefer the command line? Use the Windows tab below.`;
+      platformNote.textContent = `Detected ${detected.label}. Need the command line instead? Use the toggle below.`;
     } else if (detected.os === "macos") {
       const copyCommand = (evt) => {
         evt.preventDefault();
@@ -194,6 +210,7 @@
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(text).catch(() => {});
         }
+        if (setCmdBoxOpen) setCmdBoxOpen(true);
         document.querySelector('[data-os-tab="macos"]')?.click();
         const btn = evt.currentTarget;
         const labelEl = btn.querySelector("span");

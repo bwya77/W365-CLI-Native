@@ -51,7 +51,8 @@
     </div>
     <div class="cta-note" id="platform-note">Detecting your platform…</div>
 
-    <div class="cmd-box">
+    <button type="button" class="cmd-toggle" id="cmd-toggle">Prefer the command line? <span class="chev">⌄</span></button>
+    <div class="cmd-box" id="cmd-box" hidden>
       <div class="cmd-tabs">
         <button type="button" class="cmd-tab" data-os-tab="windows">Windows</button>
         <button type="button" class="cmd-tab" data-os-tab="macos">macOS</button>
@@ -68,13 +69,13 @@
       profile and adds <code>w365cli</code> to your PATH automatically.</p>
     </div>
 
-    <div class="platform-links">
-      <a href="#" data-asset-pattern="installer-x64">Windows installer (x64)</a>
-      <a href="#" data-asset-pattern="installer-arm64">Windows installer (ARM64)</a>
-      <a href="#" data-asset="w365-win-x64.zip">Windows portable (x64)</a>
-      <a href="#" data-asset="w365-win-arm64.zip">Windows portable (ARM64)</a>
-      <a href="#" data-asset="w365-osx-x64.zip">macOS Intel (zip)</a>
-      <a href="#" data-asset="w365-osx-arm64.zip">macOS Apple Silicon (zip)</a>
+    <div class="platform-links-inline">
+      <a href="#" data-asset-pattern="installer-x64">Windows installer (x64)</a> ·
+      <a href="#" data-asset-pattern="installer-arm64">Windows installer (ARM64)</a> ·
+      <a href="#" data-asset="w365-win-x64.zip">Windows portable (x64)</a> ·
+      <a href="#" data-asset="w365-win-arm64.zip">Windows portable (ARM64)</a> ·
+      <a href="#" data-asset="w365-osx-x64.zip">macOS Intel</a> ·
+      <a href="#" data-asset="w365-osx-arm64.zip">macOS Apple Silicon</a> ·
       <a href="https://github.com/bwya77/W365-CLI-Native/releases/latest" id="latest-release-link">All releases and checksums →</a>
     </div>
 
