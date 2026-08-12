@@ -210,6 +210,7 @@ jobs:
         run: |
           for rid in osx-x64 osx-arm64; do
             codesign --force --timestamp --options runtime \
+              --entitlements installer/macos-entitlements.plist \
               --sign "Developer ID Application" \
               --keychain "$RUNNER_TEMP/app-signing.keychain-db" \
               "./artifacts/w365-$rid/W365Cli"

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Entitlements required for a self-contained .NET (CoreCLR) console app signed with Apple's
+      Hardened Runtime (the "runtime" codesign option, required for notarization). Without these,
+      macOS blocks the JIT compiler and unsigned executable memory pages CoreCLR needs at startup,
+      which surfaces as a generic "Failed to create CoreCLR, HRESULT: 0x80070008" error on launch
+      even though the binary itself is validly signed.
+    -->
+
+    <!-- CoreCLR's JIT needs to allocate and execute JIT compiled code pages. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- CoreCLR writes to and executes from memory pages that aren't backed by a signed file on
+         disk (JIT output, tiered compilation, etc). -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- PublishSingleFile bundles the runtime's native libraries (libcoreclr.dylib and friends)
+         inside the single executable and extracts them to a temp directory at first run. Those
+         freshly extracted files aren't independently signed, so Hardened Runtime's library
+         validation would otherwise refuse to dlopen them. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Allow dynamic linker environment variables that .NET's runtime and the single file host
+         may rely on internally. -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+</dict>
+</plist>
