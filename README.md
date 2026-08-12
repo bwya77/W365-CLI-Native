@@ -59,6 +59,24 @@ irm https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/uninstall.ps1 
 Alternatively, download `W365CLISetup-<version>-win-x64.exe` or `-win-arm64.exe` from the
 [latest release](https://github.com/bwya77/W365-CLI-Native/releases/latest) and run it directly.
 
+### macOS (recommended: install script)
+
+One-line install (no `sudo` required — installs to `~/.local/bin/w365cli` and adds it to your
+PATH):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.sh | bash
+```
+
+Open a new terminal and type `w365cli` to get started. To uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/uninstall.sh | bash
+```
+
+Add `--purge-path` to also remove the PATH line the installer added to your shell profile
+(`~/.zshrc` or `~/.bash_profile`).
+
 ### Portable (no install)
 
 Download the latest release:
@@ -78,8 +96,8 @@ Download the package for your platform, extract it, and run the binary:
 
 On macOS, the MSAL token cache is stored with Keychain protection.
 
-If you extract the portable Windows package instead of using the installer, add the extracted
-folder to your user PATH manually if you want to launch the CLI from any terminal.
+If you extract a portable package instead of using an installer/install script, add the
+extracted folder to your PATH manually if you want to launch the CLI from any terminal.
 
 ## Sign in
 
