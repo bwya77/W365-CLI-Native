@@ -37,7 +37,7 @@ if ($uninstaller) {
     # The registered string already includes the full path + flags. Use cmd to honor it verbatim.
     Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $uninstaller -Wait
 } else {
-    Write-Host "No W365 CLI uninstaller registered — is it installed?" -ForegroundColor Yellow
+    Write-Host "No W365 CLI uninstaller registered - is it installed?" -ForegroundColor Yellow
 }
 
 Write-Host ""

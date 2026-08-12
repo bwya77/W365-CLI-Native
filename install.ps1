@@ -7,7 +7,7 @@
     Downloads the latest W365 CLI installer from GitHub and runs it. The installer puts W365 CLI
     in "%LocalAppData%\Programs\W365CLI", registers a clean uninstaller in Apps & Features, and
     (by default) adds that folder to your user PATH so you can just type "w365cli" from any new
-    terminal. No admin rights or UAC prompt are required — this is a per-user install.
+    terminal. No admin rights or UAC prompt are required - this is a per-user install.
 
 .PARAMETER NoPath
     Install without adding W365 CLI to your PATH. You'll need to run it by full path or add it
@@ -74,7 +74,7 @@ if (-not (Test-Path $tempPath) -or (Get-Item $tempPath).Length -lt 500KB) {
     throw "Download failed or file is too small."
 }
 
-# --- Run installer (no UAC prompt — per-user install) ----------------------
+# --- Run installer (no UAC prompt - per-user install) ----------------------
 # The installer's "Add to PATH" task is ticked by default; use /TASKS=! to opt out.
 $installerArgs = @('/VERYSILENT', '/NORESTART')
 if ($NoPath) {
