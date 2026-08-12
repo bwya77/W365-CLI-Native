@@ -1,11 +1,11 @@
 (function () {
   const REPO = "bwya77/W365-CLI-Native";
   const API_LATEST = `https://api.github.com/repos/${REPO}/releases/latest`;
-  const FALLBACK_TAG = "v0.1.5";
+  const FALLBACK_TAG = "v0.2.2";
 
   const ASSET_LABELS = {
-    "w365-win-x64.zip": "Windows x64",
-    "w365-win-arm64.zip": "Windows ARM64",
+    "w365-win-x64.zip": "Windows x64 (portable)",
+    "w365-win-arm64.zip": "Windows ARM64 (portable)",
     "w365-osx-x64.zip": "macOS Intel",
     "w365-osx-arm64.zip": "macOS Apple Silicon",
   };
@@ -33,7 +33,7 @@
     return { os: "other", arch: "x64", label: "your platform" };
   }
 
-  function assetKeyFor(os, arch) {
+  function zipAssetKeyFor(os, arch) {
     if (os === "windows") return arch === "arm64" ? "w365-win-arm64.zip" : "w365-win-x64.zip";
     if (os === "macos") return arch === "arm64" ? "w365-osx-arm64.zip" : "w365-osx-x64.zip";
     return null;
@@ -57,8 +57,71 @@
     if (el) el.textContent = new Date().getFullYear();
   }
 
+  // Windows installer filenames embed the version (e.g. W365CLISetup-0.2.2-win-x64.exe), so they
+  // can't be looked up by a fixed asset name the way the zips can. Find them by pattern instead,
+  // either from the fetched release asset list or (offline fallback) by constructing the expected
+  // filename from the fallback tag's version number.
+  function findInstallerAsset(assets, arch) {
+    const suffix = `-win-${arch}.exe`;
+    if (assets) {
+      const match = Object.keys(assets).find((name) => name.startsWith("W365CLISetup-") && name.endsWith(suffix));
+      if (match) return { name: match, url: assets[match] };
+    }
+    return null;
+  }
+
+  function setupCopyButtons() {
+    document.querySelectorAll(".copy-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const targetId = btn.getAttribute("data-copy-target");
+        const codeEl = document.getElementById(targetId);
+        if (!codeEl) return;
+        const text = codeEl.textContent;
+
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textarea);
+          }
+          const original = btn.textContent;
+          btn.textContent = "Copied!";
+          btn.classList.add("copied");
+          setTimeout(() => {
+            btn.textContent = original;
+            btn.classList.remove("copied");
+          }, 1800);
+        } catch (e) { /* clipboard denied; user can still select the text manually */ }
+      });
+    });
+  }
+
+  function setupCmdTabs(defaultOs) {
+    const tabs = document.querySelectorAll(".cmd-tab");
+    const panels = document.querySelectorAll(".cmd-panel");
+
+    function activate(os) {
+      tabs.forEach((t) => t.classList.toggle("active", t.getAttribute("data-os-tab") === os));
+      panels.forEach((p) => p.classList.toggle("active", p.getAttribute("data-os-panel") === os));
+    }
+
+    tabs.forEach((t) => {
+      t.addEventListener("click", () => activate(t.getAttribute("data-os-tab")));
+    });
+
+    activate(defaultOs === "macos" ? "macos" : "windows");
+  }
+
   async function init() {
     setYear();
+    setupCopyButtons();
 
     const detected = detectPlatform();
     const highEntropyArch = await getHighEntropyArch();
@@ -71,6 +134,8 @@
       }
     }
 
+    setupCmdTabs(detected.os);
+
     const primaryBtn = document.getElementById("primary-download");
     const primaryLabel = document.getElementById("primary-download-label");
     const primaryBtn2 = document.getElementById("primary-download-2");
@@ -79,7 +144,7 @@
     const navLabel = document.getElementById("nav-download-label");
     const platformNote = document.getElementById("platform-note");
     const versionPills = document.querySelectorAll("[data-version-pill]");
-    const platformLinks = document.querySelectorAll("[data-asset]");
+    const platformLinks = document.querySelectorAll("[data-asset], [data-asset-pattern]");
 
     let tag = FALLBACK_TAG;
     let assets = null;
@@ -94,37 +159,84 @@
       }
     } catch (e) { /* offline or rate-limited: use fallback below */ }
 
+    const version = tag.replace(/^v/, "");
     const releaseBase = `https://github.com/${REPO}/releases/download/${tag}/`;
-    const resolve = (name) => (assets && assets[name]) || releaseBase + name;
+    const resolveZip = (name) => (assets && assets[name]) || releaseBase + name;
+    const resolveInstaller = (arch) => {
+      const found = findInstallerAsset(assets, arch);
+      if (found) return found.url;
+      return releaseBase + `W365CLISetup-${version}-win-${arch}.exe`;
+    };
 
     // Update version pills
     versionPills.forEach((el) => { el.textContent = tag; });
 
-    // Primary CTA
-    const key = assetKeyFor(detected.os, detected.arch);
-    if (key) {
-      primaryBtn.href = resolve(key);
-      primaryLabel.textContent = `Download for ${ASSET_LABELS[key]}`;
-      if (primaryBtn2) primaryBtn2.href = resolve(key);
-      if (primaryLabel2) primaryLabel2.textContent = `Download for ${ASSET_LABELS[key]}`;
-      if (navBtn) navBtn.href = resolve(key);
+    // Windows defaults to the installer (easiest, one click, no terminal needed); macOS has no
+    // double-click installer, so the primary action there is copying the install command instead
+    // of downloading a file directly.
+    if (detected.os === "windows") {
+      const url = resolveInstaller(detected.arch);
+      const label = `Download installer for ${detected.label}`;
+      [[primaryBtn, primaryLabel], [primaryBtn2, primaryLabel2]].forEach(([btn, lbl]) => {
+        if (!btn) return;
+        btn.href = url;
+        btn.onclick = null;
+        if (lbl) lbl.textContent = label;
+      });
+      if (navBtn) { navBtn.href = url; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Download";
-      platformNote.textContent = `Detected ${detected.label}. Not right? Pick a build below.`;
+      platformNote.textContent = `Detected ${detected.label}. Prefer the command line? Use the Windows tab below.`;
+    } else if (detected.os === "macos") {
+      const copyCommand = (evt) => {
+        evt.preventDefault();
+        const codeEl = document.getElementById("cmd-macos");
+        const text = codeEl ? codeEl.textContent : "";
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).catch(() => {});
+        }
+        document.querySelector('[data-os-tab="macos"]')?.click();
+        const btn = evt.currentTarget;
+        const labelEl = btn.querySelector("span");
+        const originalText = labelEl ? labelEl.textContent : btn.textContent;
+        if (labelEl) labelEl.textContent = "Copied! Paste into Terminal";
+        setTimeout(() => { if (labelEl) labelEl.textContent = originalText; }, 2200);
+      };
+      [primaryBtn, primaryBtn2].forEach((btn) => {
+        if (!btn) return;
+        btn.href = "#top";
+        btn.onclick = copyCommand;
+      });
+      if (primaryLabel) primaryLabel.textContent = "Copy install command";
+      if (primaryLabel2) primaryLabel2.textContent = "Copy install command";
+      if (navBtn) { navBtn.href = "#top"; navBtn.onclick = null; }
+      if (navLabel) navLabel.textContent = "Get started";
+      platformNote.textContent = `Detected ${detected.label}. Paste the command below into Terminal.`;
     } else {
-      primaryBtn.href = `https://github.com/${REPO}/releases/latest`;
-      primaryLabel.textContent = "See all downloads";
-      if (primaryBtn2) primaryBtn2.href = `https://github.com/${REPO}/releases/latest`;
-      if (primaryLabel2) primaryLabel2.textContent = "See all downloads";
-      if (navBtn) navBtn.href = `https://github.com/${REPO}/releases/latest`;
+      [[primaryBtn, primaryLabel], [primaryBtn2, primaryLabel2]].forEach(([btn, lbl]) => {
+        if (!btn) return;
+        btn.href = `https://github.com/${REPO}/releases/latest`;
+        btn.onclick = null;
+        if (lbl) lbl.textContent = "See all downloads";
+      });
+      if (navBtn) { navBtn.href = `https://github.com/${REPO}/releases/latest`; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Download";
       platformNote.textContent = "Choose your platform below.";
     }
 
-    // Platform link list
+    // Direct asset link list (installers + portable zips)
     platformLinks.forEach((a) => {
-      const assetName = a.getAttribute("data-asset");
-      a.href = resolve(assetName);
-      if (assetName === key) a.classList.add("current");
+      const zipName = a.getAttribute("data-asset");
+      const pattern = a.getAttribute("data-asset-pattern");
+      if (zipName) {
+        a.href = resolveZip(zipName);
+        if (zipName === zipAssetKeyFor(detected.os, detected.arch)) a.classList.add("current");
+      } else if (pattern === "installer-x64") {
+        a.href = resolveInstaller("x64");
+        if (detected.os === "windows" && detected.arch === "x64") a.classList.add("current");
+      } else if (pattern === "installer-arm64") {
+        a.href = resolveInstaller("arm64");
+        if (detected.os === "windows" && detected.arch === "arm64") a.classList.add("current");
+      }
     });
 
     const latestReleaseLink = document.getElementById("latest-release-link");

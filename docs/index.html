@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>W365 CLI Native - A Keyboard-First Windows 365 Companion</title>
-<meta name="description" content="A keyboard-first, native command-line companion for managing your Windows 365 Cloud PC fleet. Free, open source, signed builds for Windows and macOS.">
+<title>W365 CLI - A Keyboard-First Windows 365 Companion</title>
+<meta name="description" content="A keyboard-first command-line companion for managing your Windows 365 Cloud PC fleet. Free, open source. One-command install for Windows and macOS.">
 
-<meta property="og:title" content="W365 CLI Native">
+<meta property="og:title" content="W365 CLI">
 <meta property="og:description" content="A keyboard-first companion for managing your Windows 365 Cloud PC fleet.">
 <meta property="og:image" content="images/mainUI.png">
 <meta property="og:type" content="website">
@@ -20,7 +20,7 @@
 <nav class="nav">
   <div class="container">
     <a class="brand" href="#top">
-      <span>W365 CLI</span><span class="chip">Native</span>
+      <span>W365 CLI</span>
     </a>
     <div class="nav-links">
       <a href="#why">Why</a>
@@ -35,12 +35,12 @@
 
 <header class="hero" id="top">
   <div class="container">
-    <div class="eyebrow"><span class="dot"></span> Free and open source &middot; <span data-version-pill>v0.1.5</span></div>
+    <div class="eyebrow"><span class="dot"></span> Free and open source &middot; <span data-version-pill>v0.2.2</span></div>
     <h1>A keyboard-first companion <span class="accent">for your Windows 365 fleet.</span></h1>
     <p class="subhead">
-      W365 CLI Native is a fast, native command-line app for admins who want to browse, filter,
-      and act on Cloud PCs without stepping away from the terminal. One binary, sign in once,
-      and everything you need is a keystroke away.
+      W365 CLI is a fast command-line app for admins who want to browse, filter, and act on Cloud
+      PCs without stepping away from the terminal. One command to install, sign in once, and
+      everything you need is a keystroke away.
     </p>
 
     <div class="cta-row">
@@ -51,20 +51,39 @@
     </div>
     <div class="cta-note" id="platform-note">Detecting your platform…</div>
 
+    <div class="cmd-box">
+      <div class="cmd-tabs">
+        <button type="button" class="cmd-tab" data-os-tab="windows">Windows</button>
+        <button type="button" class="cmd-tab" data-os-tab="macos">macOS</button>
+      </div>
+      <div class="cmd-panel" data-os-panel="windows">
+        <code id="cmd-windows">irm https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.ps1 | iex</code>
+        <button class="copy-btn" data-copy-target="cmd-windows" type="button">Copy</button>
+      </div>
+      <div class="cmd-panel" data-os-panel="macos">
+        <code id="cmd-macos">curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.sh | bash</code>
+        <button class="copy-btn" data-copy-target="cmd-macos" type="button">Copy</button>
+      </div>
+      <p class="cmd-note">No admin rights or <code>sudo</code> required. Installs to your user
+      profile and adds <code>w365cli</code> to your PATH automatically.</p>
+    </div>
+
     <div class="platform-links">
-      <a href="#" data-asset="w365-win-x64.zip">Windows x64</a>
-      <a href="#" data-asset="w365-win-arm64.zip">Windows ARM64</a>
-      <a href="#" data-asset="w365-osx-x64.zip">macOS Intel</a>
-      <a href="#" data-asset="w365-osx-arm64.zip">macOS Apple Silicon</a>
+      <a href="#" data-asset-pattern="installer-x64">Windows installer (x64)</a>
+      <a href="#" data-asset-pattern="installer-arm64">Windows installer (ARM64)</a>
+      <a href="#" data-asset="w365-win-x64.zip">Windows portable (x64)</a>
+      <a href="#" data-asset="w365-win-arm64.zip">Windows portable (ARM64)</a>
+      <a href="#" data-asset="w365-osx-x64.zip">macOS Intel (zip)</a>
+      <a href="#" data-asset="w365-osx-arm64.zip">macOS Apple Silicon (zip)</a>
       <a href="https://github.com/bwya77/W365-CLI-Native/releases/latest" id="latest-release-link">All releases and checksums →</a>
     </div>
 
     <div class="window">
       <div class="window-bar">
         <div class="dots"><span></span><span></span><span></span></div>
-        <div class="title">W365 CLI Native</div>
+        <div class="title">W365 CLI</div>
       </div>
-      <img src="images/mainUI.png" alt="W365 CLI Native main menu showing tenant status, connection info, and update check">
+      <img src="images/mainUI.png" alt="W365 CLI main menu showing tenant status, connection info, and update check">
     </div>
   </div>
 </header>
@@ -75,7 +94,7 @@
     <h2>A faster way to work through everyday Cloud PC tasks.</h2>
     <p class="lede">
       If you manage a fleet of Cloud PCs, you know the routine: restart one, resize another, check
-      on a snapshot, review a provisioning policy. W365 CLI Native brings those everyday actions
+      on a snapshot, review a provisioning policy. W365 CLI brings those everyday actions
       into a single, fast, keyboard-driven view so you can move through them quickly.
     </p>
     <div class="grid-3">
@@ -118,7 +137,8 @@
         </div>
         <ul class="authority-list">
           <li>Open source on GitHub, so you can inspect every line before you trust it with your tenant</li>
-          <li>Windows binaries signed with Azure Trusted Signing; macOS builds signed and notarized by Apple</li>
+          <li>Windows binaries and installers signed with Azure Trusted Signing</li>
+          <li>macOS builds signed with an Apple Developer ID certificate</li>
           <li>Every release ships with SHA256 checksums for Windows and macOS assets</li>
           <li>Built on Microsoft Graph delegated permissions, so no standing admin credentials are stored</li>
           <li>Built-in "Check for updates" compares your binary against the latest GitHub Release</li>
@@ -129,7 +149,7 @@
           <div class="dots"><span></span><span></span><span></span></div>
           <div class="title">Cloud PCs · Browse</div>
         </div>
-        <img src="images/cloudPCs.png" alt="W365 CLI Native browsing a Cloud PC fleet with filters, sorting, and a detail panel">
+        <img src="images/cloudPCs.png" alt="W365 CLI browsing a Cloud PC fleet with filters, sorting, and a detail panel">
       </div>
     </div>
   </div>
@@ -139,19 +159,20 @@
   <div class="container">
     <div class="kicker">Get started</div>
     <h2>Three steps from download to managing your fleet.</h2>
-    <p class="lede">No installers and no modules to import. Just a binary.</p>
+    <p class="lede">One command gets you a working install on any platform — no manual setup.</p>
     <div class="steps">
       <div class="step">
         <div class="num">1</div>
-        <h3>Download and extract</h3>
-        <p>Grab the zip for your OS and architecture, extract it, and put it wherever you keep your
-        tools. We recommend <code>%LOCALAPPDATA%\Programs\W365CLI</code> on Windows.</p>
+        <h3>Install</h3>
+        <p>On Windows, run the one-liner or download the installer — it adds <code>w365cli</code> to
+        your PATH automatically, no admin rights needed. On macOS, paste the install command into
+        Terminal.</p>
       </div>
       <div class="step">
         <div class="num">2</div>
         <h3>Sign in once</h3>
-        <p>Run the binary and connect with your Microsoft Graph account. MSAL caches your session so
-        you won't need to sign in again on every launch.</p>
+        <p>Run <code>w365cli</code> and connect with your Microsoft Graph account. MSAL caches your
+        session so you won't need to sign in again on every launch.</p>
       </div>
       <div class="step">
         <div class="num">3</div>
@@ -169,7 +190,7 @@
     <h2>Everyday Cloud PC actions, right at your fingertips.</h2>
     <div class="stakes">
       <div class="stakes-col good">
-        <h4>With W365 CLI Native</h4>
+        <h4>With W365 CLI</h4>
         <ul>
           <li>Restart, resize, and reprovision in seconds, right from your terminal</li>
           <li>One keyboard-driven view of Cloud PCs, provisioning, reports, and licensing</li>
@@ -207,9 +228,9 @@
 
 <footer>
   <div class="container">
-    <div>© <span id="year"></span> Bradley Wyatt · W365 CLI Native</div>
+    <div>© <span id="year"></span> Bradley Wyatt · W365 CLI</div>
     <div class="foot-links">
-      <span class="version-pill" data-version-pill>v0.1.5</span>
+      <span class="version-pill" data-version-pill>v0.2.2</span>
       <a href="https://github.com/bwya77/W365-CLI-Native" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/bwya77/W365-CLI-Native/releases" target="_blank" rel="noopener">Releases</a>
       <a href="https://github.com/bwya77/W365-CLI-Native/issues" target="_blank" rel="noopener">Report an issue</a>
