@@ -931,16 +931,20 @@ internal sealed class W365CliApp
         RenderHomeStatusLine();
         AnsiConsole.WriteLine();
         RenderMainMenuDashboard(choices);
+        var isConnected = _session.IsConnected;
         var menuRows = new List<Markup>();
         for (var index = 0; index < choices.Count; index++)
         {
             var selected = index == selectedIndex;
-            var label = FormatMainMenuChoice(choices[index], selected);
+            var disabled = IsMenuChoiceDisabledWhenDisconnected(choices[index], isConnected);
+            var label = FormatMainMenuChoice(choices[index], selected, disabled);
             var expandMarker = choices[index].Children?.Count > 0
                 ? expandedIndex == index ? "v " : "  "
                 : "  ";
             menuRows.Add(new Markup(selected
-                ? $"[black on {AccentColor}]{expandMarker}{label}[/]"
+                ? disabled
+                    ? $"[#484f58 on #21262d]{expandMarker}{label}[/]"
+                    : $"[black on {AccentColor}]{expandMarker}{label}[/]"
                 : $"{expandMarker}{label}"));
 
             if (expandedIndex == index && choices[index].Children is { Count: > 0 } children)
@@ -948,9 +952,12 @@ internal sealed class W365CliApp
                 for (var childIndex = 0; childIndex < children.Count; childIndex++)
                 {
                     var childSelected = selected && selectedChildIndex == childIndex;
-                    var childLabel = FormatMainMenuChoice(children[childIndex], childSelected);
+                    var childDisabled = IsMenuChoiceDisabledWhenDisconnected(children[childIndex], isConnected);
+                    var childLabel = FormatMainMenuChoice(children[childIndex], childSelected, childDisabled);
                     menuRows.Add(new Markup(childSelected
-                        ? $"[black on {AccentColor}]  > {childLabel}[/]"
+                        ? childDisabled
+                            ? $"[#484f58 on #21262d]  > {childLabel}[/]"
+                            : $"[black on {AccentColor}]  > {childLabel}[/]"
                         : $"    {childLabel}"));
                 }
             }
@@ -962,7 +969,27 @@ internal sealed class W365CliApp
             .BorderStyle(new Style(Color.FromHex(AccentColor)))
             .Expand());
         AnsiConsole.WriteLine();
-        RenderTopNavAwareHint(topNavIndex, "[grey]Tab top nav | Up/Down move | Right expand | Enter select | Esc/B/Q collapse | P or Ctrl+K command palette[/]");
+        var hint = isConnected
+            ? "[grey]Tab top nav | Up/Down move | Right expand | Enter select | Esc/B/Q collapse | P or Ctrl+K command palette[/]"
+            : "[grey]Not connected — most areas are unavailable until you connect. Select Connection to sign in.[/]";
+        RenderTopNavAwareHint(topNavIndex, hint);
+    }
+
+    /// <summary>
+    /// Every main-menu area except Connection/About/Exit calls through to Microsoft Graph, so
+    /// they're all non-functional until the session is connected. Greying them out up front (via
+    /// this check) avoids the user drilling into a screen only to be prompted to connect there —
+    /// the same connection gate the screens already enforce internally (EnsureConnectedAsync)
+    /// still applies as a fallback if they select one anyway.
+    /// </summary>
+    private static bool IsMenuChoiceDisabledWhenDisconnected(MenuChoice choice, bool isConnected)
+    {
+        if (isConnected)
+        {
+            return false;
+        }
+
+        return choice.Key is not ("Connection" or "About" or "Exit");
     }
 
     private void RenderTip()
@@ -1078,8 +1105,13 @@ internal sealed class W365CliApp
         }
     }
 
-    private static string FormatMainMenuChoice(MenuChoice choice, bool selected = false)
+    private static string FormatMainMenuChoice(MenuChoice choice, bool selected = false, bool disabled = false)
     {
+        if (disabled)
+        {
+            return $"[{MutedColor}]{Markup.Escape(Fit(choice.Title, 22))}[/] [{MutedColor}]{Markup.Escape(choice.Description)}[/]";
+        }
+
         var descriptionColor = selected ? TextColor : MutedColor;
         return $"[{TextColor}]{Markup.Escape(Fit(choice.Title, 22))}[/] [{descriptionColor}]{Markup.Escape(choice.Description)}[/]";
     }
