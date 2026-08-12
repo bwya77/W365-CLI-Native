@@ -47,13 +47,21 @@ Write-Host ""
 
 # --- Resolve latest release asset -----------------------------------------
 Write-Host "Looking up latest release..."
-try {
-    $release = Invoke-RestMethod `
-        -Uri "https://api.github.com/repos/$repo/releases/latest" `
-        -Headers @{ 'User-Agent' = 'W365CLI-Installer'; 'Accept' = 'application/vnd.github+json' } `
-        -ErrorAction Stop
-} catch {
-    throw "Couldn't reach GitHub: $($_.Exception.Message)"
+$maxApiAttempts = 3
+$release = $null
+for ($attempt = 1; $attempt -le $maxApiAttempts; $attempt++) {
+    try {
+        $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/$repo/releases/latest" `
+            -Headers @{ 'User-Agent' = 'W365CLI-Installer'; 'Accept' = 'application/vnd.github+json' } `
+            -ErrorAction Stop
+        break
+    } catch {
+        if ($attempt -eq $maxApiAttempts) {
+            throw "Couldn't reach GitHub: $($_.Exception.Message)"
+        }
+        Start-Sleep -Seconds (2 * $attempt)
+    }
 }
 
 $asset = $release.assets | Where-Object {
@@ -68,9 +76,27 @@ if (-not $asset) {
 # --- Download -------------------------------------------------------------
 $tempPath = Join-Path $env:TEMP $asset.name
 Write-Host "Downloading $($release.tag_name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempPath -UseBasicParsing
 
-if (-not (Test-Path $tempPath) -or (Get-Item $tempPath).Length -lt 500KB) {
+# GitHub's release-asset CDN occasionally returns a transient 503; retry a few times with a
+# short backoff before giving up, instead of failing on the first blip.
+$maxAttempts = 5
+$downloaded = $false
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempPath -UseBasicParsing -ErrorAction Stop
+        $downloaded = $true
+        break
+    } catch {
+        if ($attempt -eq $maxAttempts) {
+            throw "Download failed after $maxAttempts attempts: $($_.Exception.Message)"
+        }
+        $delaySeconds = 2 * $attempt
+        Write-Host "Download attempt $attempt failed ($($_.Exception.Message)); retrying in ${delaySeconds}s..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $delaySeconds
+    }
+}
+
+if (-not $downloaded -or -not (Test-Path $tempPath) -or (Get-Item $tempPath).Length -lt 500KB) {
     throw "Download failed or file is too small."
 }
 
