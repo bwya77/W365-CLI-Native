@@ -226,6 +226,12 @@ jobs:
           shasum -a 256 ./artifacts/release/*.zip |
             sed 's#./artifacts/release/##' > ./artifacts/release/SHA256SUMS-macos.txt
 
+      # Notarization requires an active (paid) Apple Developer Program membership — a valid
+      # signing certificate alone is not enough, and Apple's notarization service rejects
+      # submissions from a lapsed account. Treat notarization as best-effort: attempt it, but if
+      # it fails for any reason (lapsed membership, network issue, etc.) log a clear warning and
+      # ship the signed-but-unnotarized zip rather than failing the whole release. The moment the
+      # membership is renewed, this step starts succeeding again with no further changes needed.
       - name: Notarize macOS zips
         if: env.HAS_APPLE_SIGNING == 'true'
         env:
@@ -242,13 +248,16 @@ jobs:
               --wait 2>&1) || true
             echo "$output"
             submission_id=$(echo "$output" | grep "id:" | head -1 | awk '{print $2}')
-            if echo "$output" | grep -q "status: Invalid"; then
-              echo "Notarization failed. Fetching log..."
-              xcrun notarytool log "$submission_id" \
-                --apple-id "$APPLE_ID" \
-                --password "$APPLE_ID_PASSWORD" \
-                --team-id "$APPLE_TEAM_ID"
-              exit 1
+            if echo "$output" | grep -q "status: Accepted"; then
+              echo "Notarization succeeded for $zip"
+            else
+              echo "::warning::Notarization did not succeed for $zip (this is expected if the Apple Developer Program membership has lapsed — signing still applies, the zip will just ship unnotarized). See the log above for details."
+              if [ -n "$submission_id" ]; then
+                xcrun notarytool log "$submission_id" \
+                  --apple-id "$APPLE_ID" \
+                  --password "$APPLE_ID_PASSWORD" \
+                  --team-id "$APPLE_TEAM_ID" || true
+              fi
             fi
           done
 
