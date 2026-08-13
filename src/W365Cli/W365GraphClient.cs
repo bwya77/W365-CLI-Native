@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
@@ -109,11 +110,9 @@ internal sealed class W365GraphClient
     /// </summary>
     public async Task RemoveGroupMemberAsync(string groupId, string userId)
     {
-        using var request = new HttpRequestMessage(
+        using var response = await SendWithRetryAsync(() => new HttpRequestMessage(
             HttpMethod.Delete,
-            $"https://graph.microsoft.com/v1.0/groups/{Uri.EscapeDataString(groupId)}/members/{Uri.EscapeDataString(userId)}/$ref");
-        await AuthorizeAsync(request);
-        using var response = await _httpClient.SendAsync(request);
+            $"https://graph.microsoft.com/v1.0/groups/{Uri.EscapeDataString(groupId)}/members/{Uri.EscapeDataString(userId)}/$ref"));
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync();
@@ -231,9 +230,8 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<CloudPcDiskSpace>> GetCloudPcDiskSpacesAsync(IReadOnlyList<CloudPcSummary>? cloudPcs = null)
     {
         cloudPcs ??= await GetCloudPcsAsync();
-        var results = new List<CloudPcDiskSpace>();
 
-        foreach (var cloudPc in cloudPcs)
+        var results = await ConcurrencyHelper.MapWithConcurrencyAsync(cloudPcs, maxConcurrency: 5, async cloudPc =>
         {
             ManagedDeviceDiskInfo? managedDevice = null;
             string? error = null;
@@ -260,7 +258,7 @@ internal sealed class W365GraphClient
                 ? Math.Round((freeGb.Value / totalGb.Value) * 100, 1)
                 : null;
 
-            results.Add(new CloudPcDiskSpace
+            return new CloudPcDiskSpace
             {
                 CloudPcId = cloudPc.Id,
                 CloudPcName = cloudPc.Name,
@@ -273,8 +271,8 @@ internal sealed class W365GraphClient
                 PercentFree = percentFree,
                 LastSyncDateTime = managedDevice?.LastSyncDateTime,
                 Error = error
-            });
-        }
+            };
+        });
 
         return results
             .OrderBy(item => item.PercentFree ?? double.MaxValue)
@@ -377,9 +375,7 @@ internal sealed class W365GraphClient
 
     public async Task DeleteProvisioningPolicyAsync(string policyId)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Delete, $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}");
-        await AuthorizeAsync(request);
-        using var response = await _httpClient.SendAsync(request);
+        using var response = await SendWithRetryAsync(() => new HttpRequestMessage(HttpMethod.Delete, $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}"));
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync();
@@ -693,9 +689,7 @@ internal sealed class W365GraphClient
         var errors = new List<string>();
         foreach (var relativeUri in attempts)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Delete, relativeUri);
-            await AuthorizeAsync(request);
-            using var response = await _httpClient.SendAsync(request);
+            using var response = await SendWithRetryAsync(() => new HttpRequestMessage(HttpMethod.Delete, relativeUri));
             if (response.IsSuccessStatusCode)
             {
                 return;
@@ -771,12 +765,7 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<GraphTableRow>> GetSignInStatusRowsAsync()
     {
         var cloudPcs = await GetCloudPcsAsync();
-        var rows = new List<GraphTableRow>();
-        foreach (var cloudPc in cloudPcs)
-        {
-            rows.Add(await GetSignInStatusRowAsync(cloudPc));
-        }
-
+        var rows = await ConcurrencyHelper.MapWithConcurrencyAsync(cloudPcs, maxConcurrency: 5, GetSignInStatusRowAsync);
         return rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
@@ -883,12 +872,11 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<GraphTableRow>> GetLaunchDetailRowsAsync()
     {
         var cloudPcs = await GetCloudPcsAsync();
-        var rows = new List<GraphTableRow>();
-        foreach (var cloudPc in cloudPcs)
+        var rows = await ConcurrencyHelper.MapWithConcurrencyAsync(cloudPcs, maxConcurrency: 5, async cloudPc =>
         {
             if (string.IsNullOrWhiteSpace(cloudPc.UserPrincipalName))
             {
-                rows.Add(new GraphTableRow(
+                return new GraphTableRow(
                     cloudPc.Name,
                     "Status: Skipped | Reason: No user principal name",
                     new Dictionary<string, string>
@@ -897,8 +885,7 @@ internal sealed class W365GraphClient
                         ["Cloud PC ID"] = cloudPc.Id,
                         ["Status"] = "Skipped",
                         ["Reason"] = "No user principal name"
-                    }));
-                continue;
+                    });
             }
 
             try
@@ -914,16 +901,30 @@ internal sealed class W365GraphClient
                     fields["Status"] = "Available";
                     var status = "Available";
                     var switchCompatible = FormatBoolean(GetFirst(fields, "windows365SwitchCompatible"));
-                    rows.Add(new GraphTableRow(
+                    return new GraphTableRow(
                         cloudPc.Name,
                         JoinSummary($"Status: {status}", $"Switch compatible: {switchCompatible}"),
-                        fields));
+                        fields);
                 }
+
+                // Graph returned a non-object body (e.g. empty) — treat the same as "no launch
+                // detail available" rather than silently dropping the Cloud PC from the list.
+                return new GraphTableRow(
+                    cloudPc.Name,
+                    "Status: Unavailable | Reason: No launch detail returned",
+                    new Dictionary<string, string>
+                    {
+                        ["Cloud PC"] = cloudPc.Name,
+                        ["Cloud PC ID"] = cloudPc.Id,
+                        ["User"] = cloudPc.UserPrincipalName,
+                        ["Status"] = "Unavailable",
+                        ["Reason"] = "No launch detail returned"
+                    });
             }
             catch (HttpRequestException ex)
             {
                 var reason = FormatLaunchDetailError(ex);
-                rows.Add(new GraphTableRow(
+                return new GraphTableRow(
                     cloudPc.Name,
                     $"Status: Unavailable | Reason: {reason}",
                     new Dictionary<string, string>
@@ -933,9 +934,9 @@ internal sealed class W365GraphClient
                         ["User"] = cloudPc.UserPrincipalName,
                         ["Status"] = "Unavailable",
                         ["Reason"] = reason
-                    }));
+                    });
             }
-        }
+        });
 
         return rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
     }
@@ -1028,19 +1029,23 @@ internal sealed class W365GraphClient
 
         while (!string.IsNullOrWhiteSpace(next))
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, next);
-            if (includeConsistencyLevel)
+            var currentUri = next;
+            using var response = await SendWithRetryAsync(() =>
             {
-                request.Headers.Add("ConsistencyLevel", "eventual");
-            }
+                var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                if (includeConsistencyLevel)
+                {
+                    request.Headers.Add("ConsistencyLevel", "eventual");
+                }
 
-            if (includeUnknownEnumMembers)
-            {
-                request.Headers.Add("Prefer", "include-unknown-enum-members");
-            }
+                if (includeUnknownEnumMembers)
+                {
+                    request.Headers.Add("Prefer", "include-unknown-enum-members");
+                }
 
-            await AuthorizeAsync(request);
-            using var response = await _httpClient.SendAsync(request);
+                return request;
+            });
+
             if (!response.IsSuccessStatusCode)
             {
                 var errorBody = await response.Content.ReadAsStringAsync();
@@ -1062,14 +1067,7 @@ internal sealed class W365GraphClient
 
     private async Task<T?> GetAsync<T>(string relativeUri)
     {
-        if (_accessTokenProvider is null)
-        {
-            throw new InvalidOperationException("Not connected to Microsoft Graph.");
-        }
-
-        using var request = new HttpRequestMessage(HttpMethod.Get, relativeUri);
-        await AuthorizeAsync(request);
-        using var response = await _httpClient.SendAsync(request);
+        using var response = await SendWithRetryAsync(() => new HttpRequestMessage(HttpMethod.Get, relativeUri));
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync();
@@ -1103,12 +1101,10 @@ internal sealed class W365GraphClient
             throw new InvalidOperationException("Not connected to Microsoft Graph.");
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri)
+        using var response = await SendWithRetryAsync(() => new HttpRequestMessage(HttpMethod.Post, relativeUri)
         {
             Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), System.Text.Encoding.UTF8, "application/json")
-        };
-        await AuthorizeAsync(request);
-        using var response = await _httpClient.SendAsync(request);
+        });
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync();
@@ -1118,19 +1114,12 @@ internal sealed class W365GraphClient
 
     private async Task<string> PostJsonForStringAsync(string relativeUri, object body)
     {
-        if (_accessTokenProvider is null)
-        {
-            throw new InvalidOperationException("Not connected to Microsoft Graph.");
-        }
-
         var requestJson = JsonSerializer.Serialize(body, JsonOptions);
-        using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri)
+        using var response = await SendWithRetryAsync(() => new HttpRequestMessage(HttpMethod.Post, relativeUri)
         {
-            Content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json")
-        };
-        request.Headers.Add("Prefer", "include-unknown-enum-members");
-        await AuthorizeAsync(request);
-        using var response = await _httpClient.SendAsync(request);
+            Content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json"),
+            Headers = { { "Prefer", "include-unknown-enum-members" } }
+        });
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync();
@@ -1152,6 +1141,86 @@ internal sealed class W365GraphClient
     {
         var token = await _accessTokenProvider!();
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+
+    /// <summary>
+    /// Sends a Graph request with retry/backoff for throttling (429) and transient upstream
+    /// errors (502/503/504) — Graph throttles aggressively on list-heavy tenants, and without
+    /// this a single throttled call surfaces as a raw error instead of quietly retrying.
+    ///
+    /// Takes a factory rather than a single HttpRequestMessage because request messages (and any
+    /// StringContent body) can only be sent once — retrying requires building a fresh message
+    /// each attempt. Honors the Retry-After header when Graph provides one (mandatory on 429,
+    /// often present on 503), falling back to exponential backoff with jitter otherwise. The
+    /// final attempt's response (success or failure) is returned to the caller un-disposed for
+    /// its own `using`; only the intermediate retried-away responses are disposed here.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendWithRetryAsync(Func<HttpRequestMessage> requestFactory)
+    {
+        if (_accessTokenProvider is null)
+        {
+            throw new InvalidOperationException("Not connected to Microsoft Graph.");
+        }
+
+        const int maxAttempts = 4;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            using var request = requestFactory();
+            await AuthorizeAsync(request);
+            var response = await _httpClient.SendAsync(request);
+
+            if (attempt >= maxAttempts || !IsRetryableStatus(response.StatusCode))
+            {
+                return response;
+            }
+
+            var delay = GetRetryDelay(response, attempt);
+            response.Dispose();
+            await Task.Delay(delay);
+        }
+
+        // Unreachable — the loop always returns or retries within maxAttempts.
+        throw new InvalidOperationException("Retry loop exited without a response.");
+    }
+
+    private static bool IsRetryableStatus(HttpStatusCode statusCode)
+    {
+        return statusCode is HttpStatusCode.TooManyRequests // 429 — throttled
+            or HttpStatusCode.ServiceUnavailable // 503
+            or HttpStatusCode.BadGateway // 502
+            or HttpStatusCode.GatewayTimeout; // 504
+    }
+
+    /// <summary>
+    /// Honors Graph's Retry-After header (either a delta-seconds or an absolute date) when
+    /// present, capped at 30s so an interactive CLI session never hangs unreasonably long
+    /// waiting on a single retry. Falls back to exponential backoff with jitter (~1s, 2s, 4s
+    /// for attempts 1/2/3) when no Retry-After is given, which happens on some 502/503/504s that
+    /// aren't a formal throttling response.
+    /// </summary>
+    private static TimeSpan GetRetryDelay(HttpResponseMessage response, int attempt)
+    {
+        var cap = TimeSpan.FromSeconds(30);
+        if (response.Headers.RetryAfter is { } retryAfter)
+        {
+            if (retryAfter.Delta is { } delta && delta > TimeSpan.Zero)
+            {
+                return delta > cap ? cap : delta;
+            }
+
+            if (retryAfter.Date is { } date)
+            {
+                var wait = date - DateTimeOffset.UtcNow;
+                if (wait > TimeSpan.Zero)
+                {
+                    return wait > cap ? cap : wait;
+                }
+            }
+        }
+
+        var baseDelayMs = Math.Pow(2, attempt - 1) * 1000;
+        var jitterMs = Random.Shared.Next(0, 250);
+        return TimeSpan.FromMilliseconds(baseDelayMs + jitterMs);
     }
 
     private static double? ToGb(long? bytes)
@@ -1220,22 +1289,21 @@ internal sealed class W365GraphClient
 
     private async Task<IReadOnlyDictionary<string, string>> ResolveGroupNamesAsync(IReadOnlyList<string> groupIds)
     {
-        var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var groupId in groupIds)
+        var resolved = await ConcurrencyHelper.MapWithConcurrencyAsync(groupIds, maxConcurrency: 5, async groupId =>
         {
             try
             {
                 var group = await GetAsync<JsonElement>($"groups/{Uri.EscapeDataString(groupId)}?$select=id,displayName");
                 var name = group.ValueKind == JsonValueKind.Object ? GetString(group, "displayName") : null;
-                output[groupId] = string.IsNullOrWhiteSpace(name) ? groupId : name;
+                return (groupId, name: string.IsNullOrWhiteSpace(name) ? groupId : name);
             }
             catch (HttpRequestException)
             {
-                output[groupId] = groupId;
+                return (groupId, name: groupId);
             }
-        }
+        });
 
-        return output;
+        return resolved.ToDictionary(pair => pair.groupId, pair => pair.name, StringComparer.OrdinalIgnoreCase);
     }
 
     private static Dictionary<string, object?> BuildProvisioningPolicyCreateBody(ProvisioningPolicySummary policy, string displayName)

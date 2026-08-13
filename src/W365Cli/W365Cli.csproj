@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>W365Cli</AssemblyName>
-    <VersionPrefix>0.3.9</VersionPrefix>
+    <VersionPrefix>0.4.0</VersionPrefix>
     <Authors>Bradley Wyatt</Authors>
     <RepositoryUrl>https://github.com/bwya77/W365-CLI-Native</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
