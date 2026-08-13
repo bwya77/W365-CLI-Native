@@ -925,11 +925,20 @@ internal sealed class W365CliApp
 
     private void RenderMainMenu(IReadOnlyList<MenuChoice> choices, int selectedIndex, int expandedIndex, int selectedChildIndex, int topNavIndex)
     {
+        var compact = IsCompactLayout();
         RenderHeader(focusedTopNavIndex: topNavIndex);
-        RenderTip();
-        AnsiConsole.WriteLine();
+        if (!compact)
+        {
+            RenderTip();
+            AnsiConsole.WriteLine();
+        }
+
         RenderHomeStatusLine();
-        AnsiConsole.WriteLine();
+        if (!compact)
+        {
+            AnsiConsole.WriteLine();
+        }
+
         RenderMainMenuDashboard(choices);
         var isConnected = _session.IsConnected;
         var menuRows = new List<Markup>();
@@ -1191,11 +1200,42 @@ internal sealed class W365CliApp
         AnsiConsole.MarkupLine(hint);
     }
 
+    /// <summary>
+    /// The full home screen (top nav + banner + tip + status + main menu panel) needs roughly
+    /// 34-36 rows to render without clipping. Windows Terminal's default profile height (and many
+    /// other terminals' defaults) is shorter than that, which silently scrolls the top of the
+    /// frame out of view on every redraw — the user never sees it cut off "once", it's cut off
+    /// every single time. Rather than picking one arbitrary width, react to the terminal's actual
+    /// reported height and switch to a shorter layout that fits, keyed off <see cref="CompactRowsThreshold"/>.
+    /// </summary>
+    private const int CompactRowsThreshold = 34;
+
+    private static bool IsCompactLayout()
+    {
+        try
+        {
+            return Console.WindowHeight > 0 && Console.WindowHeight < CompactRowsThreshold;
+        }
+        catch
+        {
+            // Console.WindowHeight can throw when output is redirected (e.g. piped/non-interactive) —
+            // fall back to the full layout in that case since there's no terminal size to react to.
+            return false;
+        }
+    }
+
     private void RenderHeader(string? activeNav = "Home", int focusedTopNavIndex = -1)
     {
         AnsiConsole.Clear();
         UpdateStatusBarSnapshot();
         RenderTopNav(activeNav, focusedTopNavIndex);
+
+        if (IsCompactLayout())
+        {
+            AnsiConsole.MarkupLine($"[bold {AccentColor}]W365 CLI[/] [{MutedColor}]v{GetCurrentVersion()} | Bradley Wyatt[/]");
+            return;
+        }
+
         AnsiConsole.Write(new Panel(new Rows(
                 new Markup($"[{AccentColor}]██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗[/]"),
                 new Markup($"[{AccentColor}]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]"),
