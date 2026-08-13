@@ -1534,28 +1534,14 @@ internal sealed class W365CliApp
             File.SetUnixFileMode(stagingPath, ExecutablePermissions);
             File.Move(stagingPath, processPath, overwrite: true);
 
-            TimedMessage($"[green]Updated to {Markup.Escape(release.TagName)}.[/]", 1000);
-
-            var restartNow = AskYesNo("Restart W365 CLI now to use the new version?");
-            if (!restartNow)
-            {
-                AnsiConsole.MarkupLine("[grey]Run 'w365cli' again whenever you like to use the new version.[/]");
-                WaitForAnyKey("[grey]Press any key to continue.[/]");
-                return;
-            }
-
-            try
-            {
-                Process.Start(new ProcessStartInfo(processPath) { UseShellExecute = false });
-            }
-            catch (Exception ex)
-            {
-                AnsiConsole.MarkupLine($"[yellow]Couldn't relaunch automatically:[/] [grey]{Markup.Escape(ex.Message)}[/]");
-                AnsiConsole.MarkupLine("[grey]Run 'w365cli' again to use the new version.[/]");
-                WaitForAnyKey();
-                return;
-            }
-
+            // Deliberately not auto-relaunching here: spawning a new w365cli and exiting this one
+            // tears down the controlling terminal/pty out from under the new process on macOS
+            // (e.g. when launched from a Finder-opened Terminal window), which crashes the new
+            // process with an Input/output error the moment it tries to read a key. Exiting
+            // cleanly and asking the user to reopen it themselves avoids that entirely.
+            AnsiConsole.MarkupLine($"[green]Updated to {Markup.Escape(release.TagName)}.[/]");
+            AnsiConsole.MarkupLine("[grey]Run 'w365cli' again to use the new version.[/]");
+            WaitForAnyKey("[grey]Press any key to exit.[/]");
             try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort cleanup */ }
             cleanUpTempDir = false;
             Environment.Exit(0);
