@@ -1006,10 +1006,21 @@ internal sealed class W365CliApp
             .Padding(0, 0, 0, 0));
     }
 
+    private static void RenderHomeStatusLine()
+    {
+        var transient = statusMessage is not null &&
+            statusMessageAt is not null &&
+            DateTimeOffset.Now - statusMessageAt < TimeSpan.FromSeconds(6)
+                ? $"  [{MutedColor}]|[/]  {statusMessage}"
+                : string.Empty;
+
+        AnsiConsole.MarkupLine($"Graph {statusBarConnection}  [{MutedColor}]|[/]  Tenant [{TextColor}]{Markup.Escape(statusBarTenant)}[/]{transient}");
+    }
+
     /// <summary>
-    /// Connection/tenant now render in the persistent bottom bar (<see cref="RenderBottomBar"/>)
-    /// on every screen, so this prints only the transient status message (e.g. "Disconnected.")
-    /// when one is active, instead of repeating Graph/Tenant a second time above the bottom bar.
+    /// Connection/tenant/version already appear as dot-status lines in the home header
+    /// (<see cref="RenderHeader"/>), so this prints only the transient status message
+    /// (e.g. "Disconnected.") on the home screen when one is active.
     /// </summary>
     private static void RenderTransientStatusLineIfAny()
     {
@@ -1262,54 +1273,6 @@ internal sealed class W365CliApp
         }
 
         AnsiConsole.WriteLine();
-    }
-
-    /// <summary>
-    /// Footer bar mirroring the top nav's full-width inverse-color style — but actually pinned to
-    /// the last row of the terminal window (via Console.SetCursorPosition), not just printed
-    /// after whatever content came before it. Since every screen fully clears and redraws from
-    /// scratch on each render (see RenderHeader's AnsiConsole.Clear()), re-reading
-    /// Console.WindowWidth/WindowHeight here always reflects the terminal's *current* size —
-    /// there's no cross-platform "resize changed" event in System.Console to subscribe to, but
-    /// none is needed: any resize the user makes is picked up automatically on the very next
-    /// redraw (the next key press/action), which is exactly the same mechanism the top nav
-    /// already relies on for its own width. Used on non-home screens that don't show the header's
-    /// dot-status lines.
-    /// </summary>
-    private static void RenderBottomBar()
-    {
-        var connected = statusBarConnection.Contains("CONNECTED", StringComparison.Ordinal) &&
-            !statusBarConnection.Contains("NOT CONNECTED", StringComparison.Ordinal);
-        var connectionWord = connected ? "CONNECTED" : "NOT CONNECTED";
-        var tenantText = statusBarTenant;
-
-        var prefix = $"  v{GetCurrentVersion()}   Graph: ";
-        var suffix = $"   Tenant: {tenantText}  ";
-        var plainLength = prefix.Length + connectionWord.Length + suffix.Length;
-        var width = Math.Max(plainLength, Console.WindowWidth - 1);
-        var pad = new string(' ', Math.Max(0, width - plainLength));
-        var connectionColor = connected ? "#3fb950" : "#ff7b72";
-
-        try
-        {
-            var bottomRow = Console.WindowHeight - 1;
-            if (bottomRow >= 0)
-            {
-                Console.SetCursorPosition(0, bottomRow);
-            }
-        }
-        catch
-        {
-            // Redirected/non-interactive output (e.g. piped) has no real cursor to position —
-            // fall through and just print inline instead of pinning to the bottom.
-        }
-
-        // Markup (not MarkupLine) so we don't emit a trailing newline that could scroll the
-        // buffer up by one line and un-pin the bar we just positioned.
-        AnsiConsole.Markup(
-            $"[{TextColor} on {SurfaceColor}]{Markup.Escape(prefix)}[/]" +
-            $"[bold {connectionColor} on {SurfaceColor}]{connectionWord}[/]" +
-            $"[{TextColor} on {SurfaceColor}]{Markup.Escape(suffix)}{pad}[/]");
     }
 
     private async Task ShowConnectionAsync()
@@ -6217,8 +6180,7 @@ internal sealed class W365CliApp
 
     private static void RenderStatusBar()
     {
-        RenderTransientStatusLineIfAny();
-        RenderBottomBar();
+        RenderHomeStatusLine();
     }
 
     private static bool IsActionHistoryHotkey(ConsoleKeyInfo key)
