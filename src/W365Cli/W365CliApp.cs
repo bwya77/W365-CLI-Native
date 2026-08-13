@@ -1534,17 +1534,19 @@ internal sealed class W365CliApp
             File.SetUnixFileMode(stagingPath, ExecutablePermissions);
             File.Move(stagingPath, processPath, overwrite: true);
 
-            // Deliberately not auto-relaunching here: spawning a new w365cli and exiting this one
-            // tears down the controlling terminal/pty out from under the new process on macOS
-            // (e.g. when launched from a Finder-opened Terminal window), which crashes the new
-            // process with an Input/output error the moment it tries to read a key. Exiting
-            // cleanly and asking the user to reopen it themselves avoids that entirely.
-            AnsiConsole.MarkupLine($"[green]Updated to {Markup.Escape(release.TagName)}.[/]");
-            AnsiConsole.MarkupLine("[grey]Run 'w365cli' again to use the new version.[/]");
-            WaitForAnyKey("[grey]Press any key to exit.[/]");
+            // Deliberately not exiting/relaunching here. Forcing this process to exit (via
+            // Environment.Exit or by spawning a replacement and killing this one) can leave the
+            // terminal's tty/termios settings in a bad state on macOS — since Console.ReadKey's
+            // raw-mode handling doesn't get a chance to clean up on an abrupt exit — which then
+            // makes the *next* process launched in that same terminal window crash with an
+            // Input/output error the moment it tries to read a key. The binary on disk is already
+            // updated; this session just keeps running the old in-memory build until the user
+            // exits normally and reopens w365cli themselves.
             try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort cleanup */ }
             cleanUpTempDir = false;
-            Environment.Exit(0);
+            AnsiConsole.MarkupLine($"[green]Updated to {Markup.Escape(release.TagName)}.[/]");
+            AnsiConsole.MarkupLine("[grey]The new version will be used the next time you quit and reopen w365cli.[/]");
+            WaitForAnyKey();
         }
         catch (Exception ex)
         {
