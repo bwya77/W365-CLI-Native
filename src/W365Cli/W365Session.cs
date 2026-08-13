@@ -44,6 +44,12 @@ internal sealed class W365Session
     public string? TenantName { get; private set; }
 
     /// <summary>
+    /// The signed-in account's UPN (e.g. "alice@contoso.com"), from MSAL's cached account —
+    /// surfaced in the header's "Signed in as" line. Null when not connected.
+    /// </summary>
+    public string? SignedInUserUpn => _currentAuthentication?.Account?.Username;
+
+    /// <summary>
     /// Any permissions from <see cref="RequiredScopes"/> that are NOT present in the granted token
     /// scopes after connecting — meaning they likely haven't been added to the app registration
     /// and/or admin-consented in this tenant yet. Empty when everything the app needs is granted.

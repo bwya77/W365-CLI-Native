@@ -927,13 +927,7 @@ internal sealed class W365CliApp
     {
         var compact = IsCompactLayout();
         RenderHeader(focusedTopNavIndex: topNavIndex);
-        if (!compact)
-        {
-            RenderTip();
-            AnsiConsole.WriteLine();
-        }
-
-        RenderHomeStatusLine();
+        RenderTip();
         if (!compact)
         {
             AnsiConsole.WriteLine();
@@ -982,6 +976,7 @@ internal sealed class W365CliApp
             ? "[grey]Tab top nav | Up/Down move | Right expand | Enter select | Esc/B/Q collapse | P or Ctrl+K command palette[/]"
             : "[grey]Not connected — most areas are unavailable until you connect. Select Connection to sign in.[/]";
         RenderTopNavAwareHint(topNavIndex, hint);
+        RenderTransientStatusLineIfAny();
     }
 
     /// <summary>
@@ -1011,15 +1006,19 @@ internal sealed class W365CliApp
             .Padding(0, 0, 0, 0));
     }
 
-    private static void RenderHomeStatusLine()
+    /// <summary>
+    /// Connection/tenant now render in the persistent bottom bar (<see cref="RenderBottomBar"/>)
+    /// on every screen, so this prints only the transient status message (e.g. "Disconnected.")
+    /// when one is active, instead of repeating Graph/Tenant a second time above the bottom bar.
+    /// </summary>
+    private static void RenderTransientStatusLineIfAny()
     {
-        var transient = statusMessage is not null &&
+        if (statusMessage is not null &&
             statusMessageAt is not null &&
-            DateTimeOffset.Now - statusMessageAt < TimeSpan.FromSeconds(6)
-                ? $"  [{MutedColor}]|[/]  {statusMessage}"
-                : string.Empty;
-
-        AnsiConsole.MarkupLine($"Graph {statusBarConnection}  [{MutedColor}]|[/]  Tenant [{TextColor}]{Markup.Escape(statusBarTenant)}[/]{transient}");
+            DateTimeOffset.Now - statusMessageAt < TimeSpan.FromSeconds(6))
+        {
+            AnsiConsole.MarkupLine(statusMessage);
+        }
     }
 
     private async Task ShowCommandPaletteAsync()
@@ -1207,8 +1206,8 @@ internal sealed class W365CliApp
     /// frame out of view on every redraw — the user never sees it cut off "once", it's cut off
     /// every single time. Rather than picking one arbitrary width, react to the terminal's actual
     /// reported height and switch to a shorter layout that fits, keyed off <see cref="CompactRowsThreshold"/>.
-    /// The ASCII banner itself is never removed — the compact layout only drops surrounding
-    /// chrome (panel borders, blank spacer lines, the tip box) to reclaim vertical space.
+    /// The ASCII banner and tip box are never removed — the compact layout only drops blank
+    /// spacer lines between them to reclaim a few rows.
     /// </summary>
     private const int CompactRowsThreshold = 34;
 
@@ -1232,43 +1231,85 @@ internal sealed class W365CliApp
         UpdateStatusBarSnapshot();
         RenderTopNav(activeNav, focusedTopNavIndex);
 
-        var banner = new[]
-        {
-            $"[{AccentColor}]██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗[/]",
-            $"[{AccentColor}]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]",
-            $"[{AccentColor}]██║ █╗ ██║ █████╔╝███████╗ ███████╗    ██║     ██║     ██║[/]",
-            $"[{AccentColor}]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]",
-            $"[{AccentColor}]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]",
-            $"[{AccentColor}] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]"
-        };
+        const string BannerLine = "██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗";
+        AnsiConsole.MarkupLine($"[{AccentColor}]{BannerLine}[/]");
+        AnsiConsole.MarkupLine($"[{AccentColor}]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]");
+        AnsiConsole.MarkupLine($"[{AccentColor}]██║ █╗ ██║ █████╔╝███████╗ ███████╗    ██║     ██║     ██║[/]");
+        AnsiConsole.MarkupLine($"[{AccentColor}]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]");
+        AnsiConsole.MarkupLine($"[{AccentColor}]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]");
+        AnsiConsole.MarkupLine($"[{AccentColor}] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]");
 
-        if (IsCompactLayout())
-        {
-            // Keep the ASCII banner even in compact mode — it's the app's identity, not just
-            // decoration. Save vertical space instead by dropping the panel border and the blank
-            // spacer lines around it; a bare banner + version line is 7 rows instead of 10.
-            foreach (var line in banner)
-            {
-                AnsiConsole.MarkupLine(line);
-            }
+        // Right-aligned under the banner's own width (not the full terminal width) — sits at the
+        // bottom-right corner of the ASCII art itself rather than stretching across the screen.
+        var versionText = $"v{GetCurrentVersion()}";
+        var versionPad = new string(' ', Math.Max(0, BannerLine.Length - versionText.Length));
+        AnsiConsole.MarkupLine($"{versionPad}[{MutedColor}]{Markup.Escape(versionText)}[/]");
+        AnsiConsole.WriteLine();
 
-            AnsiConsole.MarkupLine($"[{MutedColor}]v{GetCurrentVersion()} | Bradley Wyatt[/]");
-            return;
+        var connected = _session.IsConnected;
+        var connectionDot = connected ? $"[{GreenColor}]●[/]" : "[red]●[/]";
+        var connectionText = connected ? "Connected to Microsoft Graph" : "Not connected to Microsoft Graph";
+        AnsiConsole.MarkupLine($"{connectionDot} {connectionText}");
+
+        if (connected)
+        {
+            var identity = _session.SignedInUserUpn ?? _session.TenantName ?? "signed-in account";
+            AnsiConsole.MarkupLine($"[{GreenColor}]●[/] Signed in as: [{TextColor}]{Markup.Escape(identity)}[/]");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine("[grey]●[/] Not signed in");
         }
 
-        AnsiConsole.Write(new Panel(new Rows(
-                new Markup(banner[0]),
-                new Markup(banner[1]),
-                new Markup(banner[2]),
-                new Markup(banner[3]),
-                new Markup(banner[4]),
-                new Markup(banner[5]),
-                new Markup(""),
-                new Markup($"[{MutedColor}]Version: v{GetCurrentVersion()} | Author: Bradley Wyatt[/]")))
-            .Border(BoxBorder.Rounded)
-            .BorderStyle(new Style(Color.FromHex(AccentColor)))
-            .Expand());
         AnsiConsole.WriteLine();
+    }
+
+    /// <summary>
+    /// Footer bar mirroring the top nav's full-width inverse-color style — but actually pinned to
+    /// the last row of the terminal window (via Console.SetCursorPosition), not just printed
+    /// after whatever content came before it. Since every screen fully clears and redraws from
+    /// scratch on each render (see RenderHeader's AnsiConsole.Clear()), re-reading
+    /// Console.WindowWidth/WindowHeight here always reflects the terminal's *current* size —
+    /// there's no cross-platform "resize changed" event in System.Console to subscribe to, but
+    /// none is needed: any resize the user makes is picked up automatically on the very next
+    /// redraw (the next key press/action), which is exactly the same mechanism the top nav
+    /// already relies on for its own width. Used on non-home screens that don't show the header's
+    /// dot-status lines.
+    /// </summary>
+    private static void RenderBottomBar()
+    {
+        var connected = statusBarConnection.Contains("CONNECTED", StringComparison.Ordinal) &&
+            !statusBarConnection.Contains("NOT CONNECTED", StringComparison.Ordinal);
+        var connectionWord = connected ? "CONNECTED" : "NOT CONNECTED";
+        var tenantText = statusBarTenant;
+
+        var prefix = $"  v{GetCurrentVersion()}   Graph: ";
+        var suffix = $"   Tenant: {tenantText}  ";
+        var plainLength = prefix.Length + connectionWord.Length + suffix.Length;
+        var width = Math.Max(plainLength, Console.WindowWidth - 1);
+        var pad = new string(' ', Math.Max(0, width - plainLength));
+        var connectionColor = connected ? "#3fb950" : "#ff7b72";
+
+        try
+        {
+            var bottomRow = Console.WindowHeight - 1;
+            if (bottomRow >= 0)
+            {
+                Console.SetCursorPosition(0, bottomRow);
+            }
+        }
+        catch
+        {
+            // Redirected/non-interactive output (e.g. piped) has no real cursor to position —
+            // fall through and just print inline instead of pinning to the bottom.
+        }
+
+        // Markup (not MarkupLine) so we don't emit a trailing newline that could scroll the
+        // buffer up by one line and un-pin the bar we just positioned.
+        AnsiConsole.Markup(
+            $"[{TextColor} on {SurfaceColor}]{Markup.Escape(prefix)}[/]" +
+            $"[bold {connectionColor} on {SurfaceColor}]{connectionWord}[/]" +
+            $"[{TextColor} on {SurfaceColor}]{Markup.Escape(suffix)}{pad}[/]");
     }
 
     private async Task ShowConnectionAsync()
@@ -6176,7 +6217,8 @@ internal sealed class W365CliApp
 
     private static void RenderStatusBar()
     {
-        RenderHomeStatusLine();
+        RenderTransientStatusLineIfAny();
+        RenderBottomBar();
     }
 
     private static bool IsActionHistoryHotkey(ConsoleKeyInfo key)
