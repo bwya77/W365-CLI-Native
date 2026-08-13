@@ -1006,21 +1006,11 @@ internal sealed class W365CliApp
             .Padding(0, 0, 0, 0));
     }
 
-    private static void RenderHomeStatusLine()
-    {
-        var transient = statusMessage is not null &&
-            statusMessageAt is not null &&
-            DateTimeOffset.Now - statusMessageAt < TimeSpan.FromSeconds(6)
-                ? $"  [{MutedColor}]|[/]  {statusMessage}"
-                : string.Empty;
-
-        AnsiConsole.MarkupLine($"Graph {statusBarConnection}  [{MutedColor}]|[/]  Tenant [{TextColor}]{Markup.Escape(statusBarTenant)}[/]{transient}");
-    }
-
     /// <summary>
     /// Connection/tenant/version already appear as dot-status lines in the home header
-    /// (<see cref="RenderHeader"/>), so this prints only the transient status message
-    /// (e.g. "Disconnected.") on the home screen when one is active.
+    /// (<see cref="RenderHeader"/>). Per explicit feedback, no Graph/Tenant status line should
+    /// appear on any other screen either — this only prints a transient status message
+    /// (e.g. "Disconnected.") when one is active, and nothing otherwise.
     /// </summary>
     private static void RenderTransientStatusLineIfAny()
     {
@@ -6180,7 +6170,7 @@ internal sealed class W365CliApp
 
     private static void RenderStatusBar()
     {
-        RenderHomeStatusLine();
+        RenderTransientStatusLineIfAny();
     }
 
     private static bool IsActionHistoryHotkey(ConsoleKeyInfo key)
