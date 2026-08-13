@@ -127,22 +127,21 @@ On startup, the CLI tries to silently restore the cached Microsoft Graph session
 Connection > Connect
 ```
 
-## App registration
+## Permissions
 
-The default public client app ID is built in:
+W365 CLI ships with a built-in, multi-tenant Entra app registration — there's nothing to set up
+or register yourself. The first time you connect from a new tenant, if the required permissions
+haven't been consented to yet, the CLI detects that automatically and offers to open the admin
+consent page for you; a Global Admin (or Privileged Role Admin) approves it once, and you're set.
+
+The built-in app ID is:
 
 ```text
 9d497858-c200-402c-a363-279a5800d730
 ```
 
-The app registration must be configured as a public client (the "Mobile and desktop
-applications" platform in Entra) with this redirect URI:
-
-```text
-http://localhost
-```
-
-Recommended delegated Microsoft Graph permissions:
+It's configured as a public client ("Mobile and desktop applications" platform in Entra) with a
+`http://localhost` redirect URI, and requests these delegated Microsoft Graph permissions:
 
 ```text
 CloudPC.ReadWrite.All
@@ -161,14 +160,20 @@ email
 `GroupMember.ReadWrite.All` is required for the "Manage group members" feature (add/remove
 members of a provisioning policy's assigned Entra group). `User.Read.All` is used to search the
 directory when adding a member. If you only need read-only features, `Group.Read.All` alone is
-enough and `GroupMember.ReadWrite.All` can be omitted.
+enough and `GroupMember.ReadWrite.All` can be omitted from the consent grant.
 
-You can override the client or tenant during development:
+### Running your own app registration instead
+
+If you'd rather not use the built-in multi-tenant app (for example, to scope permissions
+yourself or run fully isolated within a single tenant), you can point the CLI at your own app
+registration:
 
 ```powershell
 $env:W365CLI_CLIENT_ID = '<client-id>'
 $env:W365CLI_TENANT_ID = '<tenant-id>'
 ```
+
+Your app registration needs the same public client configuration and permissions listed above.
 
 ## Navigation
 
