@@ -1207,6 +1207,8 @@ internal sealed class W365CliApp
     /// frame out of view on every redraw — the user never sees it cut off "once", it's cut off
     /// every single time. Rather than picking one arbitrary width, react to the terminal's actual
     /// reported height and switch to a shorter layout that fits, keyed off <see cref="CompactRowsThreshold"/>.
+    /// The ASCII banner itself is never removed — the compact layout only drops surrounding
+    /// chrome (panel borders, blank spacer lines, the tip box) to reclaim vertical space.
     /// </summary>
     private const int CompactRowsThreshold = 34;
 
@@ -1230,19 +1232,37 @@ internal sealed class W365CliApp
         UpdateStatusBarSnapshot();
         RenderTopNav(activeNav, focusedTopNavIndex);
 
+        var banner = new[]
+        {
+            $"[{AccentColor}]██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗[/]",
+            $"[{AccentColor}]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]",
+            $"[{AccentColor}]██║ █╗ ██║ █████╔╝███████╗ ███████╗    ██║     ██║     ██║[/]",
+            $"[{AccentColor}]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]",
+            $"[{AccentColor}]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]",
+            $"[{AccentColor}] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]"
+        };
+
         if (IsCompactLayout())
         {
-            AnsiConsole.MarkupLine($"[bold {AccentColor}]W365 CLI[/] [{MutedColor}]v{GetCurrentVersion()} | Bradley Wyatt[/]");
+            // Keep the ASCII banner even in compact mode — it's the app's identity, not just
+            // decoration. Save vertical space instead by dropping the panel border and the blank
+            // spacer lines around it; a bare banner + version line is 7 rows instead of 10.
+            foreach (var line in banner)
+            {
+                AnsiConsole.MarkupLine(line);
+            }
+
+            AnsiConsole.MarkupLine($"[{MutedColor}]v{GetCurrentVersion()} | Bradley Wyatt[/]");
             return;
         }
 
         AnsiConsole.Write(new Panel(new Rows(
-                new Markup($"[{AccentColor}]██╗    ██╗██████╗  ██████╗ ███████╗     ██████╗██╗     ██╗[/]"),
-                new Markup($"[{AccentColor}]██║    ██║╚════██╗██╔════╝ ██╔════╝    ██╔════╝██║     ██║[/]"),
-                new Markup($"[{AccentColor}]██║ █╗ ██║ █████╔╝███████╗ ███████╗    ██║     ██║     ██║[/]"),
-                new Markup($"[{AccentColor}]██║███╗██║ ╚═══██╗██╔═══██╗╚════██║    ██║     ██║     ██║[/]"),
-                new Markup($"[{AccentColor}]╚███╔███╔╝██████╔╝╚██████╔╝███████║    ╚██████╗███████╗██║[/]"),
-                new Markup($"[{AccentColor}] ╚══╝╚══╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝╚══════╝╚═╝[/]"),
+                new Markup(banner[0]),
+                new Markup(banner[1]),
+                new Markup(banner[2]),
+                new Markup(banner[3]),
+                new Markup(banner[4]),
+                new Markup(banner[5]),
                 new Markup(""),
                 new Markup($"[{MutedColor}]Version: v{GetCurrentVersion()} | Author: Bradley Wyatt[/]")))
             .Border(BoxBorder.Rounded)
