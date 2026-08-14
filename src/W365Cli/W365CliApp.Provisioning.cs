@@ -942,11 +942,21 @@ internal sealed partial class W365CliApp
 
             var maxAvailableUnits = selectedPlan.AvailableCount;
             var maxDedicatedFromExistingUnits = unusedDedicatedSlots;
-            var unitCountPrompt = new TextPrompt<int>(
-                isSharedByEntraGroup
-                    ? "Number of license units to reserve for this group (1 unit = 1 shared Cloud PC):"
-                    : $"Number of Cloud PCs to provision for this group (up to {unusedDedicatedSlots} may already be covered by existing unused capacity; beyond that, each additional group of up to 3 needs 1 new license unit):")
-                .DefaultValue(1);
+            string promptLabel;
+            if (isSharedByEntraGroup)
+            {
+                promptLabel = "Number of shared Cloud PCs to reserve for this group (each one reserves 1 license unit):";
+            }
+            else if (unusedDedicatedSlots > 0)
+            {
+                promptLabel = $"Number of dedicated Cloud PCs to provision for this group ({unusedDedicatedSlots} already covered by existing spare capacity; every 3 beyond that reserves 1 new license unit):";
+            }
+            else
+            {
+                promptLabel = "Number of dedicated Cloud PCs to provision for this group (every 3 reserves 1 license unit):";
+            }
+
+            var unitCountPrompt = new TextPrompt<int>(promptLabel).DefaultValue(1);
             var cloudPcOrUnitCount = AnsiConsole.Prompt(unitCountPrompt);
 
             if (isSharedByEntraGroup)
@@ -962,6 +972,10 @@ internal sealed partial class W365CliApp
                 // translated back into units here.
                 var cloudPcsNeedingNewUnits = Math.Max(0, cloudPcOrUnitCount - maxDedicatedFromExistingUnits);
                 allotmentLicensesCount = (int)Math.Ceiling(cloudPcsNeedingNewUnits / 3.0);
+                if (allotmentLicensesCount > 0)
+                {
+                    AnsiConsole.MarkupLine($"[grey]This will reserve {allotmentLicensesCount} new license unit(s) for this group.[/]");
+                }
             }
 
             if (maxAvailableUnits.HasValue && allotmentLicensesCount > maxAvailableUnits.Value)
