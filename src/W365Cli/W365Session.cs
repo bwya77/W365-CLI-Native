@@ -209,10 +209,10 @@ internal sealed class W365Session
     }
 
     /// <summary>
-    /// On WSL, hands the sign-in URL off to the Windows side via cmd.exe's "start" (the same
-    /// interop trick tools like wslview use) instead of relying on MSAL's Linux browser-detection,
-    /// which has nothing to find in a typical WSL distro. Returns null on every other platform so
-    /// MSAL's normal (working) browser-launch behavior is left untouched.
+    /// On WSL, hands the sign-in URL off to the Windows side by launching explorer.exe directly
+    /// (present on every WSL install via interop) instead of relying on MSAL's Linux browser-
+    /// detection, which has nothing to find in a typical WSL distro. Returns null on every other
+    /// platform so MSAL's normal (working) browser-launch behavior is left untouched.
     /// </summary>
     private static SystemWebViewOptions? CreateWslSystemWebViewOptions()
     {
@@ -225,24 +225,25 @@ internal sealed class W365Session
         {
             OpenBrowserAsync = url =>
             {
-                // ArgumentList quotes each element using normal Win32 argv rules (only wraps in
-                // quotes if it contains a space) -- but cmd.exe re-parses whatever raw command
-                // line it receives using its OWN rules, where an unquoted "&" is a command
-                // separator. OAuth authorize URLs are full of "&"-separated query parameters, so
-                // an unquoted URL gets silently truncated at the first "&", dropping later params
-                // like client_id/redirect_uri entirely (which is exactly what caused AADSTS900144).
-                // Building the raw Arguments string ourselves, with the URL explicitly wrapped in
-                // double quotes, keeps cmd.exe from splitting it. The empty "" before it is the
-                // window-title argument "start" expects, so it doesn't mistake the quoted URL for
-                // the title and open a blank cmd window instead.
-                var escapedUrl = url.ToString().Replace("\"", "\"\"");
+                // Deliberately NOT going through cmd.exe here. cmd.exe re-parses whatever raw
+                // command line it receives using its own rules -- an unquoted "&" is a command
+                // separator (silently truncates the URL, dropping later query params), and "%" is
+                // an environment-variable delimiter even inside quotes (silently eats any "%...%"
+                // span that doesn't match a real variable name, expanding it to nothing). OAuth
+                // authorize URLs are full of both "&"-separated query params AND percent-encoded
+                // "%XX" sequences, so cmd.exe mangles them no matter how carefully they're quoted
+                // -- that's what caused AADSTS900144 twice in a row. Launching explorer.exe
+                // directly (no shell in the loop at all) hands the URL to CreateProcess as a
+                // single argv element with zero re-parsing, and explorer.exe forwards URL
+                // arguments straight to the default browser. Verified byte-for-byte against a
+                // synthetic URL containing both "&" and "%...%" sequences.
                 var startInfo = new ProcessStartInfo
                 {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c start \"\" \"{escapedUrl}\"",
+                    FileName = "explorer.exe",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 };
+                startInfo.ArgumentList.Add(url.ToString());
 
                 using var process = Process.Start(startInfo);
                 return Task.CompletedTask;
