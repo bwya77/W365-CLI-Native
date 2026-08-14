@@ -816,6 +816,34 @@ internal sealed partial class W365CliApp
         var enableSso = AskYesNo("Enable single sign-on?", defaultToYes: false);
         var localAdmin = AskYesNo("Enable local admin?", defaultToYes: false);
 
+        // Only offered for Flex Shared -- Graph documents userSettingsPersistenceConfiguration as
+        // exclusive to sharedByEntraGroup policies.
+        bool? userSettingsPersistenceEnabled = null;
+        string? userSettingsPersistenceStorageSizeCategory = null;
+        if (isSharedByEntraGroup)
+        {
+            userSettingsPersistenceEnabled = AskYesNo(
+                "Enable user settings persistence (saves user app settings between Cloud PC sessions)?",
+                defaultToYes: false);
+
+            if (userSettingsPersistenceEnabled == true)
+            {
+                var storageSizeChoice = PromptChoice(
+                    RenderPolicyWizardContext,
+                    "User settings persistence storage size",
+                    ["4 GB", "8 GB", "16 GB", "32 GB", "64 GB", "Back"],
+                    "Back");
+                userSettingsPersistenceStorageSizeCategory = storageSizeChoice switch
+                {
+                    "8 GB" => "eightGB",
+                    "16 GB" => "sixteenGB",
+                    "32 GB" => "thirtyTwoGB",
+                    "64 GB" => "sixtyFourGB",
+                    _ => "fourGB"
+                };
+            }
+        }
+
         var (assignGroupId, _) = await PromptForEntraGroupAsync(
             required: isSharedByEntraGroup,
             reasonIfRequired: "Windows 365 Flex Shared policies need a group assignment to actually provision any Cloud PCs.");
@@ -836,7 +864,9 @@ internal sealed partial class W365CliApp
                 enableSso,
                 localAdmin,
                 assignGroupId,
-                userExperienceType),
+                userExperienceType,
+                userSettingsPersistenceEnabled,
+                userSettingsPersistenceStorageSizeCategory),
             "Policy",
             displayName);
     }

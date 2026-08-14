@@ -590,7 +590,9 @@ internal sealed class W365GraphClient
         bool enableSingleSignOn,
         bool localAdminEnabled,
         string? assignGroupId,
-        string? userExperienceType = null)
+        string? userExperienceType = null,
+        bool? userSettingsPersistenceEnabled = null,
+        string? userSettingsPersistenceStorageSizeCategory = null)
     {
         var domainJoinConfiguration = new Dictionary<string, object?>
         {
@@ -608,6 +610,10 @@ internal sealed class W365GraphClient
             ["displayName"] = displayName,
             ["description"] = description ?? string.Empty,
             ["provisioningType"] = provisioningType,
+            // Explicitly sending userExperienceType (rather than only when it's the non-default
+            // "cloudApp") matches a captured, working Windows 365 admin portal payload for a real
+            // sharedByEntraGroup policy, which always includes it even for the default "cloudPc".
+            ["userExperienceType"] = userExperienceType ?? "cloudPc",
             ["imageId"] = imageId,
             ["imageDisplayName"] = imageDisplayName,
             ["imageType"] = imageType,
@@ -617,13 +623,18 @@ internal sealed class W365GraphClient
             ["localAdminEnabled"] = localAdminEnabled
         };
 
-        // Cloud Apps-only access (userExperienceType=cloudApp) requires provisioningType to be
-        // sharedByEntraGroup — Graph rejects any other combination. Only sending this property
-        // when it's the non-default "cloudApp" keeps the request body identical to before for
-        // every existing full-desktop policy (the default is already cloudPc).
-        if (string.Equals(userExperienceType, "cloudApp", StringComparison.OrdinalIgnoreCase))
+        // userSettingsPersistenceConfiguration is documented as "only available for
+        // sharedByEntraGroup" with a default of null — but a captured working portal payload for a
+        // real sharedByEntraGroup policy always includes it (even when the feature is disabled),
+        // so it's sent explicitly here for that provisioning type to match the shape Graph
+        // actually seems to expect, rather than trusting the documented "optional" default.
+        if (string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase))
         {
-            body["userExperienceType"] = "cloudApp";
+            body["userSettingsPersistenceConfiguration"] = new Dictionary<string, object?>
+            {
+                ["userSettingsPersistenceEnabled"] = userSettingsPersistenceEnabled ?? false,
+                ["userSettingsPersistenceStorageSizeCategory"] = userSettingsPersistenceStorageSizeCategory ?? "fourGB"
+            };
         }
 
         var created = await PostJsonForElementAsync("deviceManagement/virtualEndpoint/provisioningPolicies", body);
