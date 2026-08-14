@@ -1,7 +1,7 @@
 (function () {
   const REPO = "bwya77/W365-CLI-Native";
   const API_LATEST = `https://api.github.com/repos/${REPO}/releases/latest`;
-  const FALLBACK_TAG = "v0.5.15";
+  const FALLBACK_TAG = "v0.5.16";
 
   const ASSET_LABELS = {
     "w365-win-x64.zip": "Windows x64 (portable)",

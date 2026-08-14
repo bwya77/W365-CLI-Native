@@ -627,9 +627,13 @@ internal sealed class W365GraphClient
         // sharedByEntraGroup" with a default of null — but a captured working portal payload for a
         // real sharedByEntraGroup policy always includes it (even when the feature is disabled),
         // so it's sent explicitly here for that provisioning type to match the shape Graph
-        // actually seems to expect, rather than trusting the documented "optional" default.
+        // actually seems to expect, rather than trusting the documented "optional" default. That
+        // same captured payload also has a TOP-LEVEL userSettingsPersistenceEnabled boolean in
+        // addition to the nested config object's own field of the same name -- an undocumented
+        // duplicate the portal apparently still sends, so it's included here too.
         if (string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase))
         {
+            body["userSettingsPersistenceEnabled"] = userSettingsPersistenceEnabled ?? false;
             body["userSettingsPersistenceConfiguration"] = new Dictionary<string, object?>
             {
                 ["userSettingsPersistenceEnabled"] = userSettingsPersistenceEnabled ?? false,
