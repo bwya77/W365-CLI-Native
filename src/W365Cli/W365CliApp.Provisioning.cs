@@ -657,8 +657,6 @@ internal sealed partial class W365CliApp
             provisioningType = "dedicated";
         }
 
-        var licenseLabel = flexModeChoice is null ? licenseTypeChoice : $"{licenseTypeChoice} ({flexModeChoice})";
-
         // "Access only apps" (Cloud Apps) is only valid for Windows 365 Flex in Shared mode —
         // Graph requires provisioningType=sharedByEntraGroup for userExperienceType=cloudApp, so
         // every other combination stays full-desktop without even asking.
@@ -677,42 +675,6 @@ internal sealed partial class W365CliApp
             }
 
             userExperienceType = experienceChoice.Contains("Cloud Apps", StringComparison.OrdinalIgnoreCase) ? "cloudApp" : "cloudPc";
-        }
-
-        // sharedByEntraGroup requires a purchased Frontline "shared" service plan SKU in the
-        // tenant -- without one, Graph rejects policy creation with a generic, unhelpful
-        // "400 badRequest: malformed or incorrect" and no further detail. Checking servicePlans'
-        // provisioningType up front turns that into a clear, specific warning before the user
-        // spends time picking an image/region/naming template only to hit a vague failure at the
-        // very end.
-        if (!string.Equals(provisioningType, "dedicated", StringComparison.OrdinalIgnoreCase))
-        {
-            IReadOnlyList<CloudPcServicePlan> servicePlans;
-            try
-            {
-                servicePlans = await AnsiConsole.Status()
-                    .Spinner(Spinner.Known.Dots)
-                    .StartAsync("Checking available licenses...", async _ => await _session.Graph.GetCloudPcServicePlansAsync());
-            }
-            catch
-            {
-                servicePlans = [];
-            }
-
-            var hasMatchingPlan = servicePlans.Any(plan =>
-                string.Equals(plan.ProvisioningType, provisioningType, StringComparison.OrdinalIgnoreCase));
-
-            if (servicePlans.Count > 0 && !hasMatchingPlan)
-            {
-                var proceed = AskYesNo(
-                    $"No purchased \"{licenseLabel}\" license was found in this tenant, so Graph will likely reject this with a generic 400 error. Continue anyway?",
-                    defaultToYes: false);
-                if (!proceed)
-                {
-                    TimedMessage("[yellow]Create policy cancelled.[/]");
-                    return;
-                }
-            }
         }
 
         IReadOnlyList<GraphTableRow> images;
@@ -768,9 +730,26 @@ internal sealed partial class W365CliApp
             return;
         }
 
+        // %USERNAME:x% is only valid "for Windows 365 Enterprise and Windows 365 Flex Dedicated
+        // devices" per Microsoft's own documentation — Flex Shared Cloud PCs aren't tied to one
+        // fixed user, so the macro doesn't apply there, and a captured working portal payload for
+        // a real Flex Shared policy confirms this: it sends cloudPcNamingTemplate as null rather
+        // than a %USERNAME%-based template. Defaulting to a %USERNAME% template regardless of
+        // provisioning type risked Graph rejecting the create outright for Flex Shared policies.
+        var isSharedByEntraGroup = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
         var namingTemplate = AnsiConsole.Prompt(
             new TextPrompt<string>("Cloud PC naming template:")
-                .DefaultValue("CPC-%USERNAME:5%-%RAND:5%"));
+                .DefaultValue(isSharedByEntraGroup ? "CPC-%RAND:10%" : "CPC-%USERNAME:5%-%RAND:5%"));
+
+        if (isSharedByEntraGroup && namingTemplate.Contains("%USERNAME", StringComparison.OrdinalIgnoreCase))
+        {
+            AnsiConsole.MarkupLine("[yellow]%USERNAME% isn't supported for Windows 365 Flex Shared policies — removing it from the naming template.[/]");
+            namingTemplate = System.Text.RegularExpressions.Regex.Replace(namingTemplate, "%USERNAME(:\\d+)?%", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim('-');
+            if (string.IsNullOrWhiteSpace(namingTemplate) || !namingTemplate.Contains("%RAND", StringComparison.OrdinalIgnoreCase))
+            {
+                namingTemplate = "CPC-%RAND:10%";
+            }
+        }
 
         IReadOnlyList<GraphTableRow> regions;
         try
@@ -837,7 +816,6 @@ internal sealed partial class W365CliApp
         var enableSso = AskYesNo("Enable single sign-on?", defaultToYes: false);
         var localAdmin = AskYesNo("Enable local admin?", defaultToYes: false);
 
-        var isSharedByEntraGroup = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
         var (assignGroupId, _) = await PromptForEntraGroupAsync(
             required: isSharedByEntraGroup,
             reasonIfRequired: "Windows 365 Flex Shared policies need a group assignment to actually provision any Cloud PCs.");
