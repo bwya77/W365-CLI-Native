@@ -1674,6 +1674,11 @@ internal sealed partial class W365CliApp
                 return;
             }
 
+            if (HandleConflictError(ex, action, target))
+            {
+                return;
+            }
+
             ShowActionResult("Failed", action, target, "[red]Action failed.[/]", ex.Message);
         }
     }
@@ -1735,6 +1740,41 @@ internal sealed partial class W365CliApp
     {
         return ex.Message.Contains("423", StringComparison.Ordinal) ||
             ex.Message.Contains("Locked", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsConflictError(Exception ex)
+    {
+        return ex.Message.Contains("409", StringComparison.Ordinal) ||
+            ex.Message.Contains("Conflict", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// When a Graph call fails with a 409 Conflict, shows a clear explanation instead of a bare
+    /// "Action failed" — this almost always means the Cloud PC's actual state has moved on since
+    /// this screen last refreshed (e.g. it powered on/off, or finished a transition) between when
+    /// its status was fetched and when the action was submitted, so the action no longer applies to
+    /// its current state. This is inherently a staleness race, not a bug to retry blindly against —
+    /// refreshing first is what actually resolves it.
+    /// </summary>
+    private static bool HandleConflictError(Exception ex, string action, string target)
+    {
+        if (!IsConflictError(ex))
+        {
+            return false;
+        }
+
+        AnsiConsole.Clear();
+        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(action)} couldn't run — the Cloud PC's state doesn't match what this screen last showed (409 Conflict).[/]");
+        AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(target)}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]This usually means the Cloud PC's power/provisioning state changed since this list was loaded — for example it already turned on, is mid-transition, or another action is already in flight.[/]");
+        AnsiConsole.MarkupLine("[grey]Refresh (R) to see its current state, then try again.[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Fit(ex.Message, Math.Max(40, Console.WindowWidth - 4)))}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Press any key to return...[/]");
+        ReadNavigationKey(intercept: true);
+        return true;
     }
 
     /// <summary>
