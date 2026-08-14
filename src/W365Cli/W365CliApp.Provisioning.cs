@@ -885,13 +885,15 @@ internal sealed partial class W365CliApp
                 return;
             }
 
-            // frontLineServicePlans reports capacity in raw LICENSE UNITS, not Cloud PC count.
-            // Each unit covers 1 shared Cloud PC in Shared mode (sharedByEntraGroup), but up to 3
-            // dedicated Cloud PCs in Dedicated mode (sharedByUser) -- this ratio is exactly what
-            // Microsoft's own Windows 365 Flex capacity-planning tooling uses internally. Showing
-            // "Available" as a raw unit count without that context is exactly what caused this
-            // confusion, so the picker now also shows what that unit count actually buys.
-            var unitsToCloudPcRatio = isSharedByEntraGroup ? 1 : 3;
+            // frontLineServicePlans reports totalCount/usedCount/available already expressed in
+            // DEDICATED-Cloud-PC-equivalent units -- confirmed directly against a real tenant: 5
+            // purchased raw licenses reported totalCount=15 (5*3), not 5. So 1 available unit here
+            // = 1 dedicated Cloud PC directly (no multiplication needed), while 1 SHARED Cloud PC
+            // consumes a whole raw license = 3 of these units (matches the observed 400 when only
+            // 1 unit remained -- not enough for even one more shared Cloud PC, which needs 3).
+            // Getting this backwards (multiplying for dedicated, not dividing for shared) is
+            // exactly what caused a misleading "Max dedicated PCs: 3" / "Max shared PCs: 1" display
+            // when only 1 unit was actually left (correct values: 1 and 0 respectively).
             var planHeader = Row("License", 44, "Units avail.", 14, "Total units", 12, isSharedByEntraGroup ? "Max shared PCs" : "Max dedicated PCs", 18);
             var selectedPlan = SelectFromTable(
                 "Select Windows 365 Flex license",
@@ -901,7 +903,9 @@ internal sealed partial class W365CliApp
                     plan.Name, 44,
                     plan.AvailableCount?.ToString() ?? "-", 14,
                     plan.TotalCount?.ToString() ?? "-", 12,
-                    plan.AvailableCount.HasValue ? (plan.AvailableCount.Value * unitsToCloudPcRatio).ToString() : "-", 18));
+                    plan.AvailableCount.HasValue
+                        ? (isSharedByEntraGroup ? (plan.AvailableCount.Value / 3).ToString() : plan.AvailableCount.Value.ToString())
+                        : "-", 18));
             if (selectedPlan is null)
             {
                 TimedMessage("[yellow]Create policy cancelled.[/]");
@@ -959,7 +963,12 @@ internal sealed partial class W365CliApp
                 }
             }
 
-            var maxAvailableUnits = selectedPlan.AvailableCount;
+            // maxAvailableUnits must be RAW LICENSE UNITS (what we actually send to Graph as
+            // allotmentLicensesCount), not the raw "available" figure from the plan -- that figure
+            // is already expressed in dedicated-Cloud-PC-equivalent units (see note above), so it
+            // needs dividing by 3 to get real reservable raw units regardless of which Flex mode is
+            // being assigned (1 shared Cloud PC still costs a full raw unit = 3 of those units).
+            var maxAvailableUnits = selectedPlan.AvailableCount.HasValue ? selectedPlan.AvailableCount.Value / 3 : (int?)null;
             var maxDedicatedFromExistingUnits = unusedDedicatedSlots;
             var cloudPcTypeLabel = isSharedByEntraGroup ? "shared" : "dedicated";
             var memberCountHint = groupMemberCount.HasValue ? $" [[group has {groupMemberCount.Value}]]" : string.Empty;
