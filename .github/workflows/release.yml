@@ -284,3 +284,67 @@ jobs:
             artifacts/release/w365-osx-arm64.zip
             artifacts/release/SHA256SUMS-macos.txt
           generate_release_notes: true
+
+  linux:
+    name: Linux
+    needs: macos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev"
+          fi
+          assembly_version="${version%%-*}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "assemblyVersion=$assembly_version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Linux
+        shell: bash
+        run: |
+          for rid in linux-x64 linux-arm64; do
+            dotnet publish ./src/W365Cli/W365Cli.csproj \
+              --configuration Release \
+              --runtime "$rid" \
+              --self-contained true \
+              -p:PublishSingleFile=true \
+              -p:PublishTrimmed=false \
+              -p:Version=${{ steps.version.outputs.version }} \
+              -p:AssemblyVersion=${{ steps.version.outputs.assemblyVersion }} \
+              -p:FileVersion=${{ steps.version.outputs.assemblyVersion }} \
+              --output "./artifacts/w365-$rid"
+            chmod +x "./artifacts/w365-$rid/W365Cli"
+          done
+
+      # tar (not zip) preserves the executable bit natively on extraction, matching how the
+      # binary is normally distributed on Linux — no post-extract chmod +x required by callers.
+      - name: Package Linux
+        shell: bash
+        run: |
+          mkdir -p ./artifacts/release
+          for rid in linux-x64 linux-arm64; do
+            tar -czf "./artifacts/release/w365-$rid.tar.gz" -C "./artifacts/w365-$rid" .
+          done
+          sha256sum ./artifacts/release/w365-linux-*.tar.gz |
+            sed 's#./artifacts/release/##' > ./artifacts/release/SHA256SUMS-linux.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/release/w365-linux-x64.tar.gz
+            artifacts/release/w365-linux-arm64.tar.gz
+            artifacts/release/SHA256SUMS-linux.txt
+          generate_release_notes: true

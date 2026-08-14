@@ -4,7 +4,7 @@
 [![Release](https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml/badge.svg)](https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/bwya77/W365-CLI-Native?label=release)](https://github.com/bwya77/W365-CLI-Native/releases/latest)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
 
 <p align="center">
   <img src="docs/images/MainUI.png" width="820" alt="W365 CLI main menu">
@@ -93,6 +93,24 @@ curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/uninsta
 Add `--purge-path` to also remove the PATH line the installer added to your shell profile
 (`~/.zshrc` or `~/.bash_profile`).
 
+### Linux (recommended: install script)
+
+Same one-line install script as macOS — it detects the OS and architecture automatically (no
+`sudo` required — installs to `~/.local/bin/w365cli` and adds it to your PATH):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.sh | bash
+```
+
+Open a new terminal and type `w365cli` to get started. To uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/uninstall.sh | bash
+```
+
+Add `--purge-path` to also remove the PATH line the installer added to your shell profile
+(`~/.bashrc`, `~/.zshrc`, or `~/.profile`).
+
 ### Portable (no install)
 
 Download the latest release:
@@ -109,8 +127,13 @@ Download the package for your platform, extract it, and run the binary:
 | Windows ARM64 | `w365-win-arm64.zip` | `W365Cli.exe` |
 | macOS Intel | `w365-osx-x64.zip` | `W365Cli` |
 | macOS Apple Silicon | `w365-osx-arm64.zip` | `W365Cli` |
+| Linux x64 | `w365-linux-x64.tar.gz` | `W365Cli` |
+| Linux ARM64 | `w365-linux-arm64.tar.gz` | `W365Cli` |
 
-On macOS, the MSAL token cache is stored with Keychain protection.
+On macOS, the MSAL token cache is stored with Keychain protection. On Linux, it's stored via the
+system keyring (GNOME Keyring/KWallet through libsecret) when one is available; if no keyring
+daemon is running (common on headless servers/minimal containers), it falls back to a plain,
+user-only-readable file instead of failing sign-in.
 
 If you extract a portable package instead of using an installer/install script, add the
 extracted folder to your PATH manually if you want to launch the CLI from any terminal.
@@ -273,8 +296,9 @@ version is available:
 - **Windows** — downloads the matching installer and, if you agree, runs it silently
   (`/VERYSILENT /NORESTART`); W365 CLI closes for a few seconds while it updates, then reopen it.
   If you'd rather update later, the installer is saved locally and you can double-click it anytime.
-- **macOS** — downloads the matching build and replaces the installed `w365cli` binary in place
-  (an atomic rename, safe even while it's running), then offers to restart into the new version.
+- **macOS and Linux** — downloads the matching build and replaces the installed `w365cli` binary
+  in place (an atomic rename, safe even while it's running). The new version is used the next
+  time you quit and reopen `w365cli`.
 
 Release builds are published as GitHub Release assets:
 
@@ -285,13 +309,17 @@ w365-win-x64.zip
 w365-win-arm64.zip
 w365-osx-x64.zip
 w365-osx-arm64.zip
+w365-linux-x64.tar.gz
+w365-linux-arm64.tar.gz
 SHA256SUMS-windows.txt
 SHA256SUMS-macos.txt
+SHA256SUMS-linux.txt
 ```
 
 Windows release binaries and installers are signed with Azure Trusted Signing before packaging.
 macOS release binaries are signed and notarized when the Apple Developer signing secrets are
-available.
+available. Linux release binaries are not signed (no equivalent code-signing convention for
+Linux CLI binaries); verify integrity with `SHA256SUMS-linux.txt` if desired.
 
 ## Development
 

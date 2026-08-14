@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Uninstalls W365 CLI from macOS.
+# Uninstalls W365 CLI from macOS or Linux.
 #
 # Removes ~/.local/bin/w365cli. The PATH line added to your shell profile by install.sh is left
 # in place (harmless once the binary is gone) unless you pass --purge-path.
@@ -37,7 +37,10 @@ fi
 
 if [ "$PURGE_PATH" -eq 1 ]; then
   path_line='export PATH="$HOME/.local/bin:$PATH"'
-  for rc_file in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+  # .bashrc covers Linux (non-login interactive shells); .bash_profile covers macOS Terminal.app
+  # (login shells). Both are checked regardless of OS since it's harmless to look at a file that
+  # doesn't exist or doesn't contain the line.
+  for rc_file in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile"; do
     if [ -f "$rc_file" ] && grep -qF "$path_line" "$rc_file" 2>/dev/null; then
       # Remove the marker comment line and the export line added by install.sh, leaving
       # everything else in the file untouched.

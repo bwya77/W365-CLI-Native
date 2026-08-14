@@ -1,13 +1,15 @@
 (function () {
   const REPO = "bwya77/W365-CLI-Native";
   const API_LATEST = `https://api.github.com/repos/${REPO}/releases/latest`;
-  const FALLBACK_TAG = "v0.4.0";
+  const FALLBACK_TAG = "v0.5.0";
 
   const ASSET_LABELS = {
     "w365-win-x64.zip": "Windows x64 (portable)",
     "w365-win-arm64.zip": "Windows ARM64 (portable)",
     "w365-osx-x64.zip": "macOS Intel",
     "w365-osx-arm64.zip": "macOS Apple Silicon",
+    "w365-linux-x64.tar.gz": "Linux x64",
+    "w365-linux-arm64.tar.gz": "Linux ARM64",
   };
 
   function detectPlatform() {
@@ -15,6 +17,9 @@
     const platform = navigator.platform || "";
     const isMac = /Mac/i.test(platform) || /Macintosh/i.test(ua);
     const isWin = /Win/i.test(platform) || /Windows/i.test(ua);
+    // Android UAs also contain "Linux", so explicitly exclude Android/mobile before matching —
+    // otherwise every Android visitor would be mis-detected as a desktop Linux user.
+    const isLinux = !isMac && !isWin && (/Linux/i.test(platform) || /Linux/i.test(ua)) && !/Android/i.test(ua);
 
     // Best-effort arch detection. Apple Silicon Macs still often report "MacIntel"
     // so we check for indicators of Rosetta/ARM where possible.
@@ -27,15 +32,20 @@
     if (isWin && /ARM/i.test(ua)) {
       arch = "arm64";
     }
+    if (isLinux && /aarch64|arm64/i.test(ua)) {
+      arch = "arm64";
+    }
 
     if (isWin) return { os: "windows", arch, label: arch === "arm64" ? "Windows ARM64" : "Windows x64" };
     if (isMac) return { os: "macos", arch, label: arch === "arm64" ? "macOS (Apple Silicon)" : "macOS (Intel)" };
+    if (isLinux) return { os: "linux", arch, label: arch === "arm64" ? "Linux ARM64" : "Linux x64" };
     return { os: "other", arch: "x64", label: "your platform" };
   }
 
   function zipAssetKeyFor(os, arch) {
     if (os === "windows") return arch === "arm64" ? "w365-win-arm64.zip" : "w365-win-x64.zip";
     if (os === "macos") return arch === "arm64" ? "w365-osx-arm64.zip" : "w365-osx-x64.zip";
+    if (os === "linux") return arch === "arm64" ? "w365-linux-arm64.tar.gz" : "w365-linux-x64.tar.gz";
     return null;
   }
 
@@ -116,7 +126,7 @@
       t.addEventListener("click", () => activate(t.getAttribute("data-os-tab")));
     });
 
-    activate(defaultOs === "macos" ? "macos" : "windows");
+    activate(defaultOs === "macos" || defaultOs === "linux" ? defaultOs : "windows");
   }
 
   function setupCmdToggle() {
@@ -276,14 +286,14 @@
     // hot-zone as a child element — the button's own click handler (attached once, below) reads
     // these data attributes at click time to decide what to do. primary-download-2 (final CTA)
     // has no caret, so it stays a plain anchor/onclick as before.
-    function copyMacCommandAndReveal() {
-      const codeEl = document.getElementById("cmd-macos");
+    function copyShellCommandAndReveal(osTab) {
+      const codeEl = document.getElementById(`cmd-${osTab}`);
       const text = codeEl ? codeEl.textContent : "";
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).catch(() => {});
       }
       if (setCmdBoxOpen) setCmdBoxOpen(true);
-      document.querySelector('[data-os-tab="macos"]')?.click();
+      document.querySelector(`[data-os-tab="${osTab}"]`)?.click();
       if (primaryLabel) {
         const original = primaryLabel.textContent;
         primaryLabel.textContent = "Copied! Paste into Terminal";
@@ -291,9 +301,9 @@
       }
     }
 
-    // Windows defaults to the installer (easiest, one click, no terminal needed); macOS has no
-    // double-click installer, so the primary action there is copying the install command instead
-    // of downloading a file directly.
+    // Windows defaults to the installer (easiest, one click, no terminal needed); macOS and
+    // Linux have no double-click installer, so the primary action there is copying the install
+    // command instead of downloading a file directly.
     if (detected.os === "windows") {
       const url = resolveInstaller(detected.arch);
       const label = `Download (${detected.arch === "arm64" ? "ARM64" : "x64"})`;
@@ -310,15 +320,17 @@
       if (navBtn) { navBtn.href = url; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Download";
       platformNote.textContent = `Detected ${detected.label}. Need a different variant? Use the arrow on the button.`;
-    } else if (detected.os === "macos") {
+    } else if (detected.os === "macos" || detected.os === "linux") {
+      const osTab = detected.os;
       if (primaryBtn) {
-        primaryBtn.dataset.action = "copy-mac-command";
+        primaryBtn.dataset.action = "copy-shell-command";
+        primaryBtn.dataset.osTab = osTab;
         primaryBtn.dataset.href = "";
       }
       if (primaryLabel) primaryLabel.textContent = "Copy install command";
       const copyCommandForLink = (evt) => {
         evt.preventDefault();
-        copyMacCommandAndReveal();
+        copyShellCommandAndReveal(osTab);
       };
       if (primaryBtn2) {
         primaryBtn2.href = "#top";
@@ -327,7 +339,8 @@
       }
       if (navBtn) { navBtn.href = "#top"; navBtn.onclick = null; }
       if (navLabel) navLabel.textContent = "Get started";
-      platformNote.textContent = `Detected ${detected.label}. Paste the command below into Terminal.`;
+      const terminalName = detected.os === "macos" ? "Terminal" : "your terminal";
+      platformNote.textContent = `Detected ${detected.label}. Paste the command below into ${terminalName}.`;
     } else {
       const releasePage = `https://github.com/${REPO}/releases/latest`;
       if (primaryBtn) {
@@ -349,8 +362,8 @@
     // reach here (it calls stopPropagation), so this only fires for genuine "download" clicks.
     if (primaryBtn) {
       primaryBtn.addEventListener("click", () => {
-        if (primaryBtn.dataset.action === "copy-mac-command") {
-          copyMacCommandAndReveal();
+        if (primaryBtn.dataset.action === "copy-shell-command") {
+          copyShellCommandAndReveal(primaryBtn.dataset.osTab || "macos");
         } else if (primaryBtn.dataset.href) {
           window.location.href = primaryBtn.dataset.href;
         }

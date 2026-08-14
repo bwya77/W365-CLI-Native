@@ -35,7 +35,7 @@
 
 <header class="hero" id="top">
   <div class="container">
-    <div class="eyebrow"><span class="dot"></span> Free and open source &middot; <span data-version-pill>v0.4.0</span></div>
+    <div class="eyebrow"><span class="dot"></span> Free and open source &middot; <span data-version-pill>v0.5.0</span></div>
     <h1>A keyboard-first companion <span class="accent">for your Windows 365 fleet.</span></h1>
     <p class="subhead">
       W365 CLI is a fast command-line app for admins who want to browse, filter, and act on Cloud
@@ -58,6 +58,9 @@
           <a href="#" data-asset="w365-osx-x64.zip">macOS Intel (zip)</a>
           <a href="#" data-asset="w365-osx-arm64.zip">macOS Apple Silicon (zip)</a>
           <div class="download-menu-divider"></div>
+          <a href="#" data-asset="w365-linux-x64.tar.gz">Linux x64 (tar.gz)</a>
+          <a href="#" data-asset="w365-linux-arm64.tar.gz">Linux ARM64 (tar.gz)</a>
+          <div class="download-menu-divider"></div>
           <a href="https://github.com/bwya77/W365-CLI-Native/releases/latest" id="latest-release-link">All releases and checksums →</a>
         </div>
       </div>
@@ -70,6 +73,7 @@
       <div class="cmd-tabs">
         <button type="button" class="cmd-tab" data-os-tab="windows">Windows</button>
         <button type="button" class="cmd-tab" data-os-tab="macos">macOS</button>
+        <button type="button" class="cmd-tab" data-os-tab="linux">Linux</button>
       </div>
       <div class="cmd-panel" data-os-panel="windows">
         <code id="cmd-windows">irm https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.ps1 | iex</code>
@@ -78,6 +82,10 @@
       <div class="cmd-panel" data-os-panel="macos">
         <code id="cmd-macos">curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.sh | bash</code>
         <button class="copy-btn" data-copy-target="cmd-macos" type="button">Copy</button>
+      </div>
+      <div class="cmd-panel" data-os-panel="linux">
+        <code id="cmd-linux">curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.sh | bash</code>
+        <button class="copy-btn" data-copy-target="cmd-linux" type="button">Copy</button>
       </div>
       <p class="cmd-note">No admin rights or <code>sudo</code> required. Installs to your user
       profile and adds <code>w365cli</code> to your PATH automatically.</p>
@@ -244,7 +252,7 @@
   <div class="container">
     <div>© <span id="year"></span> Bradley Wyatt · W365 CLI</div>
     <div class="foot-links">
-      <span class="version-pill" data-version-pill>v0.4.0</span>
+      <span class="version-pill" data-version-pill>v0.5.0</span>
       <a href="https://github.com/bwya77/W365-CLI-Native" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/bwya77/W365-CLI-Native/releases" target="_blank" rel="noopener">Releases</a>
       <a href="https://github.com/bwya77/W365-CLI-Native/issues" target="_blank" rel="noopener">Report an issue</a>

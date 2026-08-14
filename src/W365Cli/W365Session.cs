@@ -227,14 +227,49 @@ internal sealed class W365Session
             "W365CliNative");
         Directory.CreateDirectory(cacheDirectory);
 
-        var storageBuilder = new StorageCreationPropertiesBuilder("w365cli-native.msalcache", cacheDirectory);
+        const string CacheFileName = "w365cli-native.msalcache";
+        var storageBuilder = new StorageCreationPropertiesBuilder(CacheFileName, cacheDirectory);
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
             storageBuilder = storageBuilder.WithMacKeyChain("com.bwya77.w365cli", "MSALCache");
         }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            // Uses the system's libsecret-compatible keyring (GNOME Keyring, KWallet via
+            // libsecret, etc.) when one is available. Not every Linux environment has a keyring
+            // daemon running (e.g. some headless servers or minimal containers), so this is
+            // verified below and falls back to a plain ACL-restricted file if it doesn't work,
+            // rather than silently storing tokens unencrypted with no protection at all.
+            storageBuilder = storageBuilder.WithLinuxKeyring(
+                schemaName: "com.bwya77.w365cli.tokencache",
+                collection: "default",
+                secretLabel: "W365 CLI MSAL token cache",
+                attribute1: new KeyValuePair<string, string>("Version", "1"),
+                attribute2: new KeyValuePair<string, string>("Product", "W365CLI"));
+        }
 
         var storageProperties = storageBuilder.Build();
         var cacheHelper = await MsalCacheHelper.CreateAsync(storageProperties);
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            try
+            {
+                cacheHelper.VerifyPersistence();
+            }
+            catch (MsalCachePersistenceException)
+            {
+                // No usable keyring on this machine — fall back to an unprotected, ACL-restricted
+                // file (readable only by the current user) instead of failing sign-in entirely.
+                // This matches MSAL's documented plain-text fallback pattern.
+                AnsiConsole.MarkupLine("[yellow]No secure keyring is available on this Linux machine — the sign-in cache will be stored in a plain, user-only-readable file instead.[/]");
+                var fallbackProperties = new StorageCreationPropertiesBuilder(CacheFileName + ".plaintext", cacheDirectory)
+                    .WithUnprotectedFile()
+                    .Build();
+                cacheHelper = await MsalCacheHelper.CreateAsync(fallbackProperties);
+            }
+        }
+
         cacheHelper.RegisterCache(application.UserTokenCache);
         return application;
     }

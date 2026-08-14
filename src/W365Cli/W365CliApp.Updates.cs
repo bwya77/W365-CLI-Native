@@ -60,6 +60,10 @@ internal sealed partial class W365CliApp
         {
             await DownloadAndInstallMacUpdateAsync(latestRelease);
         }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            await DownloadAndInstallLinuxUpdateAsync(latestRelease);
+        }
         else
         {
             AnsiConsole.MarkupLine("[yellow]Automatic updates aren't supported on this platform yet. Opening the release page instead.[/]");
@@ -85,6 +89,12 @@ internal sealed partial class W365CliApp
     private static GitHubReleaseAsset? FindMacZipAsset(GitHubReleaseInfo release)
     {
         var name = $"w365-osx-{GetCurrentOsArch()}.zip";
+        return release.Assets.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static GitHubReleaseAsset? FindLinuxTarAsset(GitHubReleaseInfo release)
+    {
+        var name = $"w365-linux-{GetCurrentOsArch()}.tar.gz";
         return release.Assets.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -171,13 +181,23 @@ internal sealed partial class W365CliApp
         Environment.Exit(0);
     }
 
+    /// <summary>
+    /// Shared download → extract → atomic-replace flow for macOS and Linux self-updates — the two
+    /// platforms only differ in archive format (zip vs tar.gz) and one macOS-only quarantine-flag
+    /// cleanup step, so this holds the common retry/error/messaging logic once instead of twice.
+    /// </summary>
     [System.Runtime.Versioning.SupportedOSPlatform("macos")]
-    private static async Task DownloadAndInstallMacUpdateAsync(GitHubReleaseInfo release)
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    private static async Task DownloadAndInstallUnixUpdateAsync(
+        GitHubReleaseInfo release,
+        GitHubReleaseAsset? asset,
+        string platformName,
+        Action<string, string> extractArchive,
+        Action<string>? afterExtract = null)
     {
-        var asset = FindMacZipAsset(release);
         if (asset is null)
         {
-            AnsiConsole.MarkupLine($"[yellow]Couldn't find a macOS build for this release ({Markup.Escape(GetCurrentOsArch())}). Opening the release page instead.[/]");
+            AnsiConsole.MarkupLine($"[yellow]Couldn't find a {Markup.Escape(platformName)} build for this release ({Markup.Escape(GetCurrentOsArch())}). Opening the release page instead.[/]");
             OpenUrl(release.HtmlUrl);
             WaitForAnyKey();
             return;
@@ -192,15 +212,15 @@ internal sealed partial class W365CliApp
         try
         {
             Directory.CreateDirectory(tempDir);
-            var zipPath = Path.Combine(tempDir, asset.Name);
+            var archivePath = Path.Combine(tempDir, asset.Name);
 
             await AnsiConsole.Status()
                 .Spinner(Spinner.Known.Dots)
-                .StartAsync($"Downloading {asset.Name}...", async _ => await DownloadFileAsync(asset.BrowserDownloadUrl, zipPath));
+                .StartAsync($"Downloading {asset.Name}...", async _ => await DownloadFileAsync(asset.BrowserDownloadUrl, archivePath));
 
             var extractDir = Path.Combine(tempDir, "extracted");
             Directory.CreateDirectory(extractDir);
-            System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, extractDir);
+            extractArchive(archivePath, extractDir);
 
             var newBinary = Directory.GetFiles(extractDir, "W365Cli", SearchOption.AllDirectories).FirstOrDefault();
             if (newBinary is null)
@@ -218,18 +238,7 @@ internal sealed partial class W365CliApp
                 UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
             File.SetUnixFileMode(newBinary, ExecutablePermissions);
 
-            // Best-effort: clear the quarantine flag in case this ever gets flagged (matches install.sh).
-            try
-            {
-                var xattrProcess = Process.Start(new ProcessStartInfo("xattr", $"-d com.apple.quarantine \"{newBinary}\"")
-                {
-                    UseShellExecute = false,
-                    RedirectStandardError = true,
-                    RedirectStandardOutput = true
-                });
-                xattrProcess?.WaitForExit(2000);
-            }
-            catch { /* best effort */ }
+            afterExtract?.Invoke(newBinary);
 
             if (!canReplaceInPlace || processPath is null)
             {
@@ -252,10 +261,11 @@ internal sealed partial class W365CliApp
 
             // Deliberately not exiting/relaunching here. Forcing this process to exit (via
             // Environment.Exit or by spawning a replacement and killing this one) can leave the
-            // terminal's tty/termios settings in a bad state on macOS — since Console.ReadKey's
-            // raw-mode handling doesn't get a chance to clean up on an abrupt exit — which then
-            // makes the *next* process launched in that same terminal window crash with an
-            // Input/output error the moment it tries to read a key. The binary on disk is already
+            // terminal's tty/termios settings in a bad state — since Console.ReadKey's raw-mode
+            // handling doesn't get a chance to clean up on an abrupt exit — which then makes the
+            // *next* process launched in that same terminal window crash with an Input/output
+            // error the moment it tries to read a key (observed in practice on macOS; the same
+            // termios mechanism applies on Linux terminals too). The binary on disk is already
             // updated; this session just keeps running the old in-memory build until the user
             // exits normally and reopens w365cli themselves.
             try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort cleanup */ }
@@ -276,7 +286,7 @@ internal sealed partial class W365CliApp
                     cleanUpTempDir = false;
                 }
 
-                await DownloadAndInstallMacUpdateAsync(release);
+                await DownloadAndInstallUnixUpdateAsync(release, asset, platformName, extractArchive, afterExtract);
                 return;
             }
 
@@ -291,6 +301,43 @@ internal sealed partial class W365CliApp
                 try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort cleanup */ }
             }
         }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
+    private static Task DownloadAndInstallMacUpdateAsync(GitHubReleaseInfo release)
+    {
+        var asset = FindMacZipAsset(release);
+        return DownloadAndInstallUnixUpdateAsync(
+            release,
+            asset,
+            "macOS",
+            extractArchive: (archivePath, extractDir) => System.IO.Compression.ZipFile.ExtractToDirectory(archivePath, extractDir),
+            afterExtract: newBinary =>
+            {
+                // Best-effort: clear the quarantine flag in case this ever gets flagged (matches install.sh).
+                try
+                {
+                    var xattrProcess = Process.Start(new ProcessStartInfo("xattr", $"-d com.apple.quarantine \"{newBinary}\"")
+                    {
+                        UseShellExecute = false,
+                        RedirectStandardError = true,
+                        RedirectStandardOutput = true
+                    });
+                    xattrProcess?.WaitForExit(2000);
+                }
+                catch { /* best effort */ }
+            });
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    private static Task DownloadAndInstallLinuxUpdateAsync(GitHubReleaseInfo release)
+    {
+        var asset = FindLinuxTarAsset(release);
+        return DownloadAndInstallUnixUpdateAsync(
+            release,
+            asset,
+            "Linux",
+            extractArchive: (archivePath, extractDir) => System.Formats.Tar.TarFile.ExtractToDirectory(archivePath, extractDir, overwriteFiles: true));
     }
 
     private bool IsUpdateAvailable()

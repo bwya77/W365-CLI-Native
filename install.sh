@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Installs W365 CLI for macOS.
+# Installs W365 CLI for macOS or Linux.
 #
-# Downloads the latest signed & notarized W365 CLI build from GitHub, installs it to
+# Downloads the latest W365 CLI build from GitHub (signed & notarized on macOS), installs it to
 # ~/.local/bin/w365cli (no sudo required), and adds ~/.local/bin to your PATH if it isn't
 # already there.
 #
@@ -26,20 +26,38 @@ for arg in "$@"; do
   esac
 done
 
-# --- Architecture detection -------------------------------------------------
-uname_arch="$(uname -m)"
-case "$uname_arch" in
-  arm64) arch="arm64" ;;
-  x86_64) arch="x64" ;;
+# --- OS and architecture detection ------------------------------------------
+uname_os="$(uname -s)"
+case "$uname_os" in
+  Darwin) os="macos" ;;
+  Linux) os="linux" ;;
   *)
-    echo "W365 CLI requires an Intel or Apple Silicon Mac. Detected: $uname_arch" >&2
+    echo "W365 CLI supports macOS and Linux. Detected: $uname_os" >&2
+    echo "For Windows, use install.ps1 instead: https://github.com/$REPO" >&2
     exit 1
     ;;
 esac
 
+uname_arch="$(uname -m)"
+case "$uname_arch" in
+  arm64|aarch64) arch="arm64" ;;
+  x86_64|amd64) arch="x64" ;;
+  *)
+    echo "W365 CLI requires an x64 or arm64 machine. Detected: $uname_arch" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$os" = "macos" ]; then
+  asset_name="w365-osx-$arch.zip"
+else
+  asset_name="w365-linux-$arch.tar.gz"
+fi
+
 echo ""
 echo "  W365 CLI"
 echo "  --------"
+echo "  OS           : $os"
 echo "  Architecture : $arch"
 echo ""
 
@@ -58,12 +76,11 @@ api_response="$(curl -fsSL \
 # grep doesn't work here — use "grep -o" to pull out just the matching key/value substrings
 # regardless of how the response is laid out.
 release_tag="$(printf '%s' "$api_response" | grep -o '"tag_name":"[^"]*"' | head -1 | sed -E 's/^"tag_name":"//; s/"$//')"
-asset_name="w365-osx-$arch.zip"
-download_url="$(printf '%s' "$api_response" | grep -o '"browser_download_url":"[^"]*"' | grep "$asset_name" | head -1 | sed -E 's/^"browser_download_url":"//; s/"$//')"
+download_url="$(printf '%s' "$api_response" | grep -o '"browser_download_url":"[^"]*"' | grep "$asset_name" | head -1 | sed -E 's/^"browser_download_url":"//; s/"$//')" || true
 
 if [ -z "$download_url" ]; then
   available="$(printf '%s' "$api_response" | grep -o '"browser_download_url":"[^"]*"' | sed -E 's#.*/##; s/"$//' | tr '\n' ' ')"
-  echo "Release ${release_tag:-latest} doesn't contain a W365 CLI build for $arch. Available: $available" >&2
+  echo "Release ${release_tag:-latest} doesn't contain a W365 CLI build for $os/$arch. Available: $available" >&2
   exit 1
 fi
 
@@ -71,18 +88,23 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-zip_path="$tmpdir/$asset_name"
+archive_path="$tmpdir/$asset_name"
 echo "Downloading ${release_tag:-latest}..."
-curl -fL --retry 5 --retry-delay 2 -o "$zip_path" "$download_url"
+curl -fL --retry 5 --retry-delay 2 -o "$archive_path" "$download_url"
 
-if [ ! -s "$zip_path" ]; then
+if [ ! -s "$archive_path" ]; then
   echo "Download failed or file is empty." >&2
   exit 1
 fi
 
 extract_dir="$tmpdir/extracted"
 mkdir -p "$extract_dir"
-unzip -q "$zip_path" -d "$extract_dir"
+if [ "$os" = "macos" ]; then
+  unzip -q "$archive_path" -d "$extract_dir"
+else
+  # Linux releases ship as tar.gz (preserves the executable bit on extraction, unlike zip).
+  tar -xzf "$archive_path" -C "$extract_dir"
+fi
 
 source_bin="$(find "$extract_dir" -type f -name 'W365Cli' -print -quit)"
 if [ -z "$source_bin" ]; then
@@ -96,10 +118,13 @@ dest_bin="$INSTALL_DIR/$BIN_NAME"
 cp "$source_bin" "$dest_bin"
 chmod +x "$dest_bin"
 
-# Defensive: if this file ever picks up a quarantine flag (e.g. downloaded via a browser instead
-# of curl), clear it. The binary is already signed and notarized in signed releases, so this does
-# not bypass Gatekeeper — it just avoids a redundant prompt for an already-trusted binary.
-xattr -dr com.apple.quarantine "$dest_bin" 2>/dev/null || true
+if [ "$os" = "macos" ]; then
+  # Defensive: if this file ever picks up a quarantine flag (e.g. downloaded via a browser
+  # instead of curl), clear it. The binary is already signed and notarized in signed releases, so
+  # this does not bypass Gatekeeper — it just avoids a redundant prompt for an already-trusted
+  # binary. xattr doesn't exist on Linux, so this only ever runs on macOS.
+  xattr -dr com.apple.quarantine "$dest_bin" 2>/dev/null || true
+fi
 
 echo ""
 echo "W365 CLI installed to $dest_bin"
@@ -115,7 +140,17 @@ if [ "$NO_PATH" -eq 0 ]; then
       shell_name="$(basename "${SHELL:-bash}")"
       case "$shell_name" in
         zsh) rc_file="$HOME/.zshrc" ;;
-        bash) rc_file="$HOME/.bash_profile" ;;
+        bash)
+          # macOS Terminal.app launches login shells (reads .bash_profile); most Linux desktop
+          # terminals launch non-login interactive shells (reads .bashrc). Pick whichever
+          # convention matches the OS we just detected so the PATH change actually takes effect
+          # the way each platform expects.
+          if [ "$os" = "macos" ]; then
+            rc_file="$HOME/.bash_profile"
+          else
+            rc_file="$HOME/.bashrc"
+          fi
+          ;;
         *) rc_file="$HOME/.profile" ;;
       esac
       path_line='export PATH="$HOME/.local/bin:$PATH"'
