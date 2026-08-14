@@ -130,13 +130,22 @@ echo ""
 echo "W365 CLI installed to $dest_bin"
 
 # --- PATH ---------------------------------------------------------------------
+# Track whether the CURRENT shell's PATH (not the rc file) already includes INSTALL_DIR — these
+# are two different things, and conflating them was a real bug: if a previous run of this script
+# already added the export line to the rc file, but the current shell was never restarted since,
+# grep would find the line "already there" and silently skip everything, while the shell running
+# right now still couldn't find w365cli. That hits anyone who reinstalls/upgrades/re-runs this
+# script without opening a fresh terminal in between — not just a one-off edge case.
 path_updated=0
+path_missing_from_shell=0
+rc_file=""
 if [ "$NO_PATH" -eq 0 ]; then
   case ":$PATH:" in
     *":$INSTALL_DIR:"*)
-      # Already on PATH (e.g. a prior install, or the user's shell already has it).
+      # Current shell's PATH already has it — nothing to do.
       ;;
     *)
+      path_missing_from_shell=1
       shell_name="$(basename "${SHELL:-bash}")"
       case "$shell_name" in
         zsh) rc_file="$HOME/.zshrc" ;;
@@ -155,7 +164,7 @@ if [ "$NO_PATH" -eq 0 ]; then
       esac
       path_line='export PATH="$HOME/.local/bin:$PATH"'
       if [ -f "$rc_file" ] && grep -qF "$path_line" "$rc_file" 2>/dev/null; then
-        : # Already added previously.
+        : # Line already present from a prior run — the CURRENT shell just hasn't reloaded it yet.
       else
         printf '\n# Added by W365 CLI installer\n%s\n' "$path_line" >> "$rc_file"
         path_updated=1
@@ -166,10 +175,13 @@ if [ "$NO_PATH" -eq 0 ]; then
 fi
 
 echo ""
-if [ "$path_updated" -eq 1 ]; then
-  echo "Open a new terminal (or run 'source $rc_file') and type 'w365cli' to get started."
-elif [ "$NO_PATH" -eq 1 ]; then
+if [ "$NO_PATH" -eq 1 ]; then
   echo "Run it with: $dest_bin"
+elif [ "$path_missing_from_shell" -eq 1 ]; then
+  # Whether we just edited the rc file this run or it was already there from an earlier attempt,
+  # this shell's PATH doesn't have it loaded yet either way — 'source' fixes it immediately in
+  # this same window, no need to close and reopen the terminal.
+  echo "Run 'source $rc_file' to use w365cli right now in this terminal (or just open a new one)."
 else
   echo "Type 'w365cli' to get started."
 fi
