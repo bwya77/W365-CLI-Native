@@ -350,6 +350,15 @@ internal sealed record CloudPcServicePlan
     [JsonPropertyName("type")]
     public string? Type { get; init; }
 
+    /// <summary>
+    /// Which cloudPcProvisioningType (dedicated/sharedByUser/sharedByEntraGroup/reserve) this
+    /// purchased service plan actually licenses. Distinct from <see cref="Type"/>, which is only
+    /// the enterprise/business plan tier -- this is the field that determines whether the tenant
+    /// has a Frontline "shared" SKU available at all for a given provisioning policy type.
+    /// </summary>
+    [JsonPropertyName("provisioningType")]
+    public string? ProvisioningType { get; init; }
+
     [JsonPropertyName("vCpuCount")]
     public int? VCpuCount { get; init; }
 

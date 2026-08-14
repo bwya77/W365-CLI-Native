@@ -629,6 +629,42 @@ internal sealed partial class W365CliApp
             _ => "dedicated"
         };
 
+        // sharedByUser/sharedByEntraGroup require a purchased Frontline "shared" service plan SKU
+        // in the tenant -- without one, Graph rejects policy creation with a generic, unhelpful
+        // "400 badRequest: malformed or incorrect" and no further detail. Checking servicePlans'
+        // provisioningType up front turns that into a clear, specific warning before the user
+        // spends time picking an image/region/naming template only to hit a vague failure at the
+        // very end.
+        if (!string.Equals(provisioningType, "dedicated", StringComparison.OrdinalIgnoreCase))
+        {
+            IReadOnlyList<CloudPcServicePlan> servicePlans;
+            try
+            {
+                servicePlans = await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Checking available licenses...", async _ => await _session.Graph.GetCloudPcServicePlansAsync());
+            }
+            catch
+            {
+                servicePlans = [];
+            }
+
+            var hasMatchingPlan = servicePlans.Any(plan =>
+                string.Equals(plan.ProvisioningType, provisioningType, StringComparison.OrdinalIgnoreCase));
+
+            if (servicePlans.Count > 0 && !hasMatchingPlan)
+            {
+                var proceed = AskYesNo(
+                    $"No purchased \"{provisioningTypeChoice}\" license was found in this tenant, so Graph will likely reject this with a generic 400 error. Continue anyway?",
+                    defaultToYes: false);
+                if (!proceed)
+                {
+                    TimedMessage("[yellow]Create policy cancelled.[/]");
+                    return;
+                }
+            }
+        }
+
         IReadOnlyList<GraphTableRow> images;
         try
         {
