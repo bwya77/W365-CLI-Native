@@ -963,12 +963,7 @@ internal sealed partial class W365CliApp
                 }
             }
 
-            // maxAvailableUnits must be RAW LICENSE UNITS (what we actually send to Graph as
-            // allotmentLicensesCount), not the raw "available" figure from the plan -- that figure
-            // is already expressed in dedicated-Cloud-PC-equivalent units (see note above), so it
-            // needs dividing by 3 to get real reservable raw units regardless of which Flex mode is
-            // being assigned (1 shared Cloud PC still costs a full raw unit = 3 of those units).
-            var maxAvailableUnits = selectedPlan.AvailableCount.HasValue ? selectedPlan.AvailableCount.Value / 3 : (int?)null;
+            var availableUnits = selectedPlan.AvailableCount;
             var maxDedicatedFromExistingUnits = unusedDedicatedSlots;
             var cloudPcTypeLabel = isSharedByEntraGroup ? "shared" : "dedicated";
             var memberCountHint = groupMemberCount.HasValue ? $" [[group has {groupMemberCount.Value}]]" : string.Empty;
@@ -1011,31 +1006,55 @@ internal sealed partial class W365CliApp
             if (isSharedByEntraGroup)
             {
                 allotmentLicensesCount = cloudPcOrUnitCount;
+
+                // Each shared Cloud PC consumes a full raw license = 3 of the plan's available
+                // units (those units are reported in dedicated-Cloud-PC-equivalent terms, so a
+                // shared Cloud PC's real cost has to be converted back into that same currency to
+                // compare fairly) -- confirmed directly against a real tenant's own math (5
+                // licenses = 15 available units; a used count not evenly divisible by 3 means no
+                // whole shared Cloud PC can be made from what's left).
+                if (availableUnits.HasValue)
+                {
+                    var maxSharedCloudPcs = availableUnits.Value / 3;
+                    if (cloudPcOrUnitCount > maxSharedCloudPcs)
+                    {
+                        var proceedAnyway = AskYesNo(
+                            $"Only enough capacity remains for {maxSharedCloudPcs} shared Cloud PC(s) on this license, but this needs {cloudPcOrUnitCount}. Continue anyway?",
+                            defaultToYes: false);
+                        if (!proceedAnyway)
+                        {
+                            TimedMessage("[yellow]Create policy cancelled.[/]");
+                            return;
+                        }
+                    }
+                }
             }
             else
             {
-                // For Dedicated, the user enters how many Cloud PCs they actually want -- convert
-                // to reserved license units, crediting already-unused capacity from existing
-                // policies first before reserving any brand-new units. allotmentLicensesCount is
-                // still what Graph's assign call expects, so the requested Cloud PC count is
-                // translated back into units here.
+                // For Dedicated, the plan's available units directly track remaining provisionable
+                // dedicated Cloud PCs 1-for-1 (confirmed against a real tenant: available=1 allowed
+                // exactly 1 more dedicated Cloud PC, not 1 whole 3-slot session) -- so the capacity
+                // check compares actual NEW Cloud PCs needed (after crediting existing spare
+                // capacity) directly against available units, not against the derived session/unit
+                // count sent to Graph as allotmentLicensesCount (that's a billing/reservation
+                // grouping, not the thing this availability check is really about).
                 var cloudPcsNeedingNewUnits = Math.Max(0, cloudPcOrUnitCount - maxDedicatedFromExistingUnits);
                 allotmentLicensesCount = (int)Math.Ceiling(cloudPcsNeedingNewUnits / 3.0);
                 if (allotmentLicensesCount > 0)
                 {
                     AnsiConsole.MarkupLine($"[grey]This will reserve {allotmentLicensesCount} new license unit(s) for this group.[/]");
                 }
-            }
 
-            if (maxAvailableUnits.HasValue && allotmentLicensesCount > maxAvailableUnits.Value)
-            {
-                var proceedAnyway = AskYesNo(
-                    $"Only {maxAvailableUnits.Value} license unit(s) are available in this plan, but this needs {allotmentLicensesCount}. Continue anyway?",
-                    defaultToYes: false);
-                if (!proceedAnyway)
+                if (availableUnits.HasValue && cloudPcsNeedingNewUnits > availableUnits.Value)
                 {
-                    TimedMessage("[yellow]Create policy cancelled.[/]");
-                    return;
+                    var proceedAnyway = AskYesNo(
+                        $"Only {availableUnits.Value} more dedicated Cloud PC(s) can be provisioned on this license, but this needs {cloudPcsNeedingNewUnits} beyond existing spare capacity. Continue anyway?",
+                        defaultToYes: false);
+                    if (!proceedAnyway)
+                    {
+                        TimedMessage("[yellow]Create policy cancelled.[/]");
+                        return;
+                    }
                 }
             }
         }
