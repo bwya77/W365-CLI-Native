@@ -225,18 +225,24 @@ internal sealed class W365Session
         {
             OpenBrowserAsync = url =>
             {
+                // ArgumentList quotes each element using normal Win32 argv rules (only wraps in
+                // quotes if it contains a space) -- but cmd.exe re-parses whatever raw command
+                // line it receives using its OWN rules, where an unquoted "&" is a command
+                // separator. OAuth authorize URLs are full of "&"-separated query parameters, so
+                // an unquoted URL gets silently truncated at the first "&", dropping later params
+                // like client_id/redirect_uri entirely (which is exactly what caused AADSTS900144).
+                // Building the raw Arguments string ourselves, with the URL explicitly wrapped in
+                // double quotes, keeps cmd.exe from splitting it. The empty "" before it is the
+                // window-title argument "start" expects, so it doesn't mistake the quoted URL for
+                // the title and open a blank cmd window instead.
+                var escapedUrl = url.ToString().Replace("\"", "\"\"");
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = "cmd.exe",
+                    Arguments = $"/c start \"\" \"{escapedUrl}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 };
-                // Empty "" title argument makes cmd's start treat the URL as the target even when
-                // it contains characters (like &) that would otherwise be misparsed as the title.
-                startInfo.ArgumentList.Add("/c");
-                startInfo.ArgumentList.Add("start");
-                startInfo.ArgumentList.Add("");
-                startInfo.ArgumentList.Add(url.ToString());
 
                 using var process = Process.Start(startInfo);
                 return Task.CompletedTask;
