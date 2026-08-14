@@ -1480,37 +1480,27 @@ internal sealed partial class W365CliApp
 
     private async Task ShowSnapshotActionMenuAsync(CloudPcSummary cloudPc, CloudPcSnapshot snapshot)
     {
-        // Microsoft Graph only documents a delete/purge API for "imported" snapshots
-        // (cloudPCSnapshot: purgeImportedSnapshot) -- regular automatic/manual snapshots are
-        // managed entirely by the Cloud PC service and expire on their own, with no user-facing
-        // delete API at all. Offering "Delete" for those just guarantees a confusing 404/400 from
-        // Graph, so only show it when the snapshot is actually deletable.
-        var canDelete = string.Equals(snapshot.SnapshotType, "imported", StringComparison.OrdinalIgnoreCase);
-        var choices = canDelete
-            ? new[] { "Restore from this snapshot", "Delete this snapshot", "Back" }
-            : ["Restore from this snapshot", "Back"];
-
+        // Microsoft Graph documents no delete API at all for snapshots returned by
+        // retrieveSnapshots (the only listing this app uses) -- automatic, manual, AND retention
+        // snapshotType values are every one of them fully service-managed and expire on their own
+        // per expirationDateTime. "Imported" snapshots (cloudPCSnapshot: purgeImportedSnapshot) are
+        // an entirely separate, unrelated feature this app doesn't implement (a different import
+        // flow via cloudPCSnapshot: importSnapshot) -- "imported" isn't even a valid
+        // cloudPcSnapshotType value, so a snapshot from this list can never match it. There's
+        // simply no "Delete" action to offer here.
         var action = PromptChoice(
             () =>
             {
                 AnsiConsole.MarkupLine($"[grey]Cloud PC:[/] {Markup.Escape(cloudPc.Name)}");
-                if (!canDelete)
-                {
-                    AnsiConsole.MarkupLine("[grey]This is a service-managed snapshot -- it can't be deleted and will expire automatically. Only imported snapshots can be deleted.[/]");
-                }
+                AnsiConsole.MarkupLine("[grey]Cloud PC snapshots are fully service-managed -- there's no delete action; they expire automatically based on retention policy.[/]");
             },
             "[#58a6ff]Snapshot action[/]",
-            choices,
+            ["Restore from this snapshot", "Back"],
             "Back");
 
-        switch (action)
+        if (action == "Restore from this snapshot")
         {
-            case "Restore from this snapshot":
-                await ConfirmAndRunAsync("Restore", cloudPc.Name, async () => await _session.Graph.RestoreSnapshotAsync(cloudPc.Id, snapshot.SnapshotId), "Cloud PC", cloudPc.Name);
-                break;
-            case "Delete this snapshot":
-                await ConfirmAndRunAsync("Delete snapshot", snapshot.SnapshotId, async () => await _session.Graph.PurgeImportedSnapshotAsync(snapshot.SnapshotId), "Cloud PC", cloudPc.Name);
-                break;
+            await ConfirmAndRunAsync("Restore", cloudPc.Name, async () => await _session.Graph.RestoreSnapshotAsync(cloudPc.Id, snapshot.SnapshotId), "Cloud PC", cloudPc.Name);
         }
     }
 
