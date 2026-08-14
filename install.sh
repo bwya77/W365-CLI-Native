@@ -139,6 +139,7 @@ echo "W365 CLI installed to $dest_bin"
 path_updated=0
 path_missing_from_shell=0
 rc_file=""
+rc_files=""
 if [ "$NO_PATH" -eq 0 ]; then
   case ":$PATH:" in
     *":$INSTALL_DIR:"*)
@@ -148,28 +149,41 @@ if [ "$NO_PATH" -eq 0 ]; then
       path_missing_from_shell=1
       shell_name="$(basename "${SHELL:-bash}")"
       case "$shell_name" in
-        zsh) rc_file="$HOME/.zshrc" ;;
+        zsh) rc_files="$HOME/.zshrc" ;;
         bash)
-          # macOS Terminal.app launches login shells (reads .bash_profile); most Linux desktop
-          # terminals launch non-login interactive shells (reads .bashrc). Pick whichever
-          # convention matches the OS we just detected so the PATH change actually takes effect
-          # the way each platform expects.
+          # macOS Terminal.app launches login shells (reads .bash_profile). Most Linux desktop
+          # terminals launch non-login interactive shells (reads .bashrc) -- but WSL / Windows
+          # Terminal launches LOGIN shells, and bash's login-shell startup reads ONLY the first
+          # of .bash_profile / .bash_login / .profile it finds, completely skipping .bashrc (and
+          # the other two) if that file exists. Some distro images (including stock Ubuntu-on-WSL
+          # setups we've seen in the wild) ship with an empty ~/.bash_profile stub, which silently
+          # shadows .profile and therefore .bashrc for every login shell -- so our .bashrc edit
+          # never takes effect no matter how many new terminals you open. Always update .bashrc
+          # (covers non-login shells) and ALSO update .bash_profile when it exists (covers login
+          # shells wherever that stub is present), so the PATH change works either way.
           if [ "$os" = "macos" ]; then
             rc_file="$HOME/.bash_profile"
+            rc_files="$rc_file"
           else
             rc_file="$HOME/.bashrc"
+            rc_files="$rc_file"
+            if [ -f "$HOME/.bash_profile" ]; then
+              rc_files="$rc_files $HOME/.bash_profile"
+            fi
           fi
           ;;
-        *) rc_file="$HOME/.profile" ;;
+        *) rc_file="$HOME/.profile"; rc_files="$rc_file" ;;
       esac
       path_line='export PATH="$HOME/.local/bin:$PATH"'
-      if [ -f "$rc_file" ] && grep -qF "$path_line" "$rc_file" 2>/dev/null; then
-        : # Line already present from a prior run — the CURRENT shell just hasn't reloaded it yet.
-      else
-        printf '\n# Added by W365 CLI installer\n%s\n' "$path_line" >> "$rc_file"
-        path_updated=1
-        echo "Added ~/.local/bin to your PATH in $rc_file"
-      fi
+      for f in $rc_files; do
+        if [ -f "$f" ] && grep -qF "$path_line" "$f" 2>/dev/null; then
+          : # Line already present from a prior run — the CURRENT shell just hasn't reloaded it yet.
+        else
+          printf '\n# Added by W365 CLI installer\n%s\n' "$path_line" >> "$f"
+          path_updated=1
+          echo "Added ~/.local/bin to your PATH in $f"
+        fi
+      done
       ;;
   esac
 fi
