@@ -12,6 +12,12 @@
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/bwya77/W365-CLI-Native</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- Self-contained Linux builds otherwise require libicu on the target machine (missing by
+         default on minimal Ubuntu/WSL images), crashing on startup with "Couldn't find a valid
+         ICU package installed on the system." This is a keyboard/table-driven admin CLI with no
+         locale-sensitive formatting needs, so invariant globalization removes that dependency
+         entirely on every platform without changing any user-visible behavior. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
