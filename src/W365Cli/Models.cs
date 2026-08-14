@@ -65,6 +65,21 @@ internal sealed record GroupMemberSummary
         : UserPrincipalName ?? Id;
 }
 
+internal sealed record EntraGroupSummary
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; init; }
+
+    [JsonPropertyName("mailNickname")]
+    public string? MailNickname { get; init; }
+
+    [JsonIgnore]
+    public string Name => !string.IsNullOrWhiteSpace(DisplayName) ? DisplayName! : Id;
+}
+
 internal sealed record CloudPcSharedDeviceDetail
 {
     [JsonPropertyName("assignedToUserPrincipalName")]

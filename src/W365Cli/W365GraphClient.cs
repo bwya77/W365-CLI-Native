@@ -77,6 +77,22 @@ internal sealed class W365GraphClient
     }
 
     /// <summary>
+    /// Searches Entra groups by display name prefix, for picking which group a provisioning
+    /// policy (or other assignment) targets instead of requiring the user to paste a raw object
+    /// ID. Uses advanced query ($count + ConsistencyLevel eventual) to match SearchUsersAsync's
+    /// pattern, since startswith() filters need it for reliable paging/counting.
+    /// </summary>
+    public async Task<IReadOnlyList<EntraGroupSummary>> SearchGroupsAsync(string query)
+    {
+        var escaped = query.Replace("'", "''", StringComparison.Ordinal);
+        var filter = Uri.EscapeDataString($"startswith(displayName,'{escaped}') or startswith(mailNickname,'{escaped}')");
+        var select = Uri.EscapeDataString("id,displayName,mailNickname");
+        return await GetPagedAsync<EntraGroupSummary>(
+            $"https://graph.microsoft.com/v1.0/groups?$filter={filter}&$select={select}&$top=25&$count=true",
+            includeConsistencyLevel: true);
+    }
+
+    /// <summary>
     /// Searches directory users by display name or UPN prefix, for picking someone to add to a
     /// provisioning policy's assigned Entra group. Uses advanced query ($count + ConsistencyLevel
     /// eventual) since the filter combines startswith() across two properties with "or".
@@ -566,7 +582,8 @@ internal sealed class W365GraphClient
         string cloudPcNamingTemplate,
         bool enableSingleSignOn,
         bool localAdminEnabled,
-        string? assignGroupId)
+        string? assignGroupId,
+        string? userExperienceType = null)
     {
         var domainJoinConfiguration = new Dictionary<string, object?>
         {
@@ -592,6 +609,15 @@ internal sealed class W365GraphClient
             ["enableSingleSignOn"] = enableSingleSignOn,
             ["localAdminEnabled"] = localAdminEnabled
         };
+
+        // Cloud Apps-only access (userExperienceType=cloudApp) requires provisioningType to be
+        // sharedByEntraGroup — Graph rejects any other combination. Only sending this property
+        // when it's the non-default "cloudApp" keeps the request body identical to before for
+        // every existing full-desktop policy (the default is already cloudPc).
+        if (string.Equals(userExperienceType, "cloudApp", StringComparison.OrdinalIgnoreCase))
+        {
+            body["userExperienceType"] = "cloudApp";
+        }
 
         var created = await PostJsonForElementAsync("deviceManagement/virtualEndpoint/provisioningPolicies", body);
         var createdId = GetString(created, "id");

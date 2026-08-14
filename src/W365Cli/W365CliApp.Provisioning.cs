@@ -605,32 +605,82 @@ internal sealed partial class W365CliApp
 
         var description = AnsiConsole.Prompt(new TextPrompt<string>("Description [[optional]]:").AllowEmpty());
 
-        var provisioningTypeChoice = PromptChoice(
-            () =>
-            {
-                RenderBreadcrumb("Provisioning", "Create policy");
-                AnsiConsole.MarkupLine($"[grey]Name:[/] {Markup.Escape(displayName)}");
-                AnsiConsole.WriteLine();
-            },
-            "Provisioning type",
-            ["Dedicated", "Shared by user", "Shared by Entra group", "Back"],
+        void RenderPolicyWizardContext()
+        {
+            RenderBreadcrumb("Provisioning", "Create policy");
+            AnsiConsole.MarkupLine($"[grey]Name:[/] {Markup.Escape(displayName)}");
+            AnsiConsole.WriteLine();
+        }
+
+        // Mirrors the Windows 365 admin portal's own wizard structure (License type, then Flex
+        // mode, then Experience) instead of exposing raw Graph provisioningType enum names —
+        // "Dedicated"/"Shared by user"/"Shared by Entra group" reads as three unrelated options
+        // when it's really "which license, and if Flex, which mode."
+        var licenseTypeChoice = PromptChoice(
+            RenderPolicyWizardContext,
+            "License type",
+            ["Enterprise", "Windows 365 Flex", "Reserve", "Back"],
             "Back");
-        if (provisioningTypeChoice == "Back")
+        if (licenseTypeChoice == "Back")
         {
             TimedMessage("[yellow]Create policy cancelled.[/]");
             return;
         }
 
-        var provisioningType = provisioningTypeChoice switch
+        string provisioningType;
+        string? flexModeChoice = null;
+        if (licenseTypeChoice == "Windows 365 Flex")
         {
-            "Dedicated" => "dedicated",
-            "Shared by user" => "sharedByUser",
-            "Shared by Entra group" => "sharedByEntraGroup",
-            _ => "dedicated"
-        };
+            flexModeChoice = PromptChoice(
+                RenderPolicyWizardContext,
+                "Windows 365 Flex mode",
+                ["Dedicated", "Shared", "Back"],
+                "Back");
+            if (flexModeChoice == "Back")
+            {
+                TimedMessage("[yellow]Create policy cancelled.[/]");
+                return;
+            }
 
-        // sharedByUser/sharedByEntraGroup require a purchased Frontline "shared" service plan SKU
-        // in the tenant -- without one, Graph rejects policy creation with a generic, unhelpful
+            // Flex Dedicated is still Graph's plain "dedicated" provisioningType -- the Enterprise
+            // vs. Flex distinction is entirely about which purchased license SKU the assigned
+            // group draws from, which Graph resolves automatically; it isn't a separate value in
+            // the policy body. Flex Shared is what Graph calls "sharedByEntraGroup".
+            provisioningType = flexModeChoice == "Shared" ? "sharedByEntraGroup" : "dedicated";
+        }
+        else if (licenseTypeChoice == "Reserve")
+        {
+            provisioningType = "reserve";
+        }
+        else
+        {
+            provisioningType = "dedicated";
+        }
+
+        var licenseLabel = flexModeChoice is null ? licenseTypeChoice : $"{licenseTypeChoice} ({flexModeChoice})";
+
+        // "Access only apps" (Cloud Apps) is only valid for Windows 365 Flex in Shared mode —
+        // Graph requires provisioningType=sharedByEntraGroup for userExperienceType=cloudApp, so
+        // every other combination stays full-desktop without even asking.
+        var userExperienceType = "cloudPc";
+        if (string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase))
+        {
+            var experienceChoice = PromptChoice(
+                RenderPolicyWizardContext,
+                "Experience",
+                ["Access a full Cloud PC desktop", "Access only apps (Cloud Apps)", "Back"],
+                "Back");
+            if (experienceChoice == "Back")
+            {
+                TimedMessage("[yellow]Create policy cancelled.[/]");
+                return;
+            }
+
+            userExperienceType = experienceChoice.Contains("Cloud Apps", StringComparison.OrdinalIgnoreCase) ? "cloudApp" : "cloudPc";
+        }
+
+        // sharedByEntraGroup requires a purchased Frontline "shared" service plan SKU in the
+        // tenant -- without one, Graph rejects policy creation with a generic, unhelpful
         // "400 badRequest: malformed or incorrect" and no further detail. Checking servicePlans'
         // provisioningType up front turns that into a clear, specific warning before the user
         // spends time picking an image/region/naming template only to hit a vague failure at the
@@ -655,7 +705,7 @@ internal sealed partial class W365CliApp
             if (servicePlans.Count > 0 && !hasMatchingPlan)
             {
                 var proceed = AskYesNo(
-                    $"No purchased \"{provisioningTypeChoice}\" license was found in this tenant, so Graph will likely reject this with a generic 400 error. Continue anyway?",
+                    $"No purchased \"{licenseLabel}\" license was found in this tenant, so Graph will likely reject this with a generic 400 error. Continue anyway?",
                     defaultToYes: false);
                 if (!proceed)
                 {
@@ -787,9 +837,10 @@ internal sealed partial class W365CliApp
         var enableSso = AskYesNo("Enable single sign-on?", defaultToYes: false);
         var localAdmin = AskYesNo("Enable local admin?", defaultToYes: false);
 
-        var assignGroupId = AnsiConsole.Prompt(
-            new TextPrompt<string>("Assign to Entra group ID [[optional — paste the group's object ID]]:")
-                .AllowEmpty());
+        var isSharedByEntraGroup = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
+        var (assignGroupId, _) = await PromptForEntraGroupAsync(
+            required: isSharedByEntraGroup,
+            reasonIfRequired: "Windows 365 Flex Shared policies need a group assignment to actually provision any Cloud PCs.");
 
         await ConfirmAndRunAsync(
             "Create policy",
@@ -806,9 +857,75 @@ internal sealed partial class W365CliApp
                 namingTemplate,
                 enableSso,
                 localAdmin,
-                string.IsNullOrWhiteSpace(assignGroupId) ? null : assignGroupId.Trim()),
+                assignGroupId,
+                userExperienceType),
             "Policy",
             displayName);
+    }
+
+    /// <summary>
+    /// Search-and-pick flow for choosing an Entra group, replacing a raw object-ID paste box that
+    /// gave users no way to actually find the group they wanted. Loops on empty results or "Back"
+    /// from the picker (returning to the search prompt, not aborting the whole wizard) until a
+    /// group is chosen or the user explicitly skips (only allowed when not required).
+    /// </summary>
+    private async Task<(string? Id, string? Name)> PromptForEntraGroupAsync(bool required, string reasonIfRequired)
+    {
+        while (true)
+        {
+            var searchTerm = AnsiConsole.Prompt(
+                new TextPrompt<string>(required
+                    ? "Search for the Entra group to assign this policy to:"
+                    : "Search for an Entra group to assign now [[optional — leave blank to skip]]:")
+                    .AllowEmpty());
+
+            if (string.IsNullOrWhiteSpace(searchTerm))
+            {
+                if (!required)
+                {
+                    return (null, null);
+                }
+
+                var skipAnyway = AskYesNo($"{reasonIfRequired} Continue without assigning a group now?", defaultToYes: false);
+                if (skipAnyway)
+                {
+                    return (null, null);
+                }
+
+                continue;
+            }
+
+            IReadOnlyList<EntraGroupSummary> groups;
+            try
+            {
+                groups = await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Searching groups...", async _ => await _session.Graph.SearchGroupsAsync(searchTerm.Trim()));
+            }
+            catch (Exception ex)
+            {
+                ShowActionResult("Failed", "Search groups", searchTerm, "[red]Failed to search Entra groups.[/]", ex.Message);
+                continue;
+            }
+
+            if (groups.Count == 0)
+            {
+                TimedMessage("[yellow]No matching groups found. Try a different search term.[/]");
+                continue;
+            }
+
+            var groupHeader = Row("Group", 50, "Mail nickname", 30);
+            var selectedGroup = SelectFromTable(
+                "Select Entra group",
+                groupHeader,
+                groups,
+                group => Row(group.Name, 50, group.MailNickname ?? "-", 30));
+
+            if (selectedGroup is not null)
+            {
+                return (selectedGroup.Id, selectedGroup.Name);
+            }
+        }
     }
 
     private async Task ReprovisionProvisioningPolicyCloudPcsAsync(ProvisioningPolicySummary policy)
