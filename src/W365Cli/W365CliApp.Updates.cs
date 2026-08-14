@@ -337,7 +337,27 @@ internal sealed partial class W365CliApp
             release,
             asset,
             "Linux",
-            extractArchive: (archivePath, extractDir) => System.Formats.Tar.TarFile.ExtractToDirectory(archivePath, extractDir, overwriteFiles: true));
+            extractArchive: ExtractTarGz);
+    }
+
+    /// <summary>
+    /// TarFile.ExtractToDirectory(string sourceFileName, ...) reads the file as a PLAIN tar
+    /// stream -- it does NOT auto-decompress gzip despite happily accepting a .tar.gz path with no
+    /// error at the call site. Feeding it our gzip-compressed release archive directly meant it was
+    /// parsing raw gzip magic bytes as if they were tar header fields, which is why every Linux
+    /// self-update failed with a misleading "InvalidDataException: Unable to parse number" caught
+    /// by the generic handler and mislabeled as a "transient network hiccup" -- the download itself
+    /// was always fine. Manually decompressing via GZipStream first and handing THAT stream to the
+    /// Stream-accepting ExtractToDirectory overload is what actually works. Verified against a real
+    /// downloaded release asset: the string-path overload threw on both plain, ustar, and pax tar
+    /// variants of the same gzip wrapper, while gunzip-then-extract succeeded immediately.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    private static void ExtractTarGz(string archivePath, string extractDir)
+    {
+        using var fileStream = File.OpenRead(archivePath);
+        using var gzipStream = new System.IO.Compression.GZipStream(fileStream, System.IO.Compression.CompressionMode.Decompress);
+        System.Formats.Tar.TarFile.ExtractToDirectory(gzipStream, extractDir, overwriteFiles: true);
     }
 
     private bool IsUpdateAvailable()
