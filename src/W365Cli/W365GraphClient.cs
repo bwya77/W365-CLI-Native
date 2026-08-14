@@ -77,6 +77,27 @@ internal sealed class W365GraphClient
     }
 
     /// <summary>
+    /// Fast member-count lookup for a group, without pulling every member's details — matches the
+    /// same $count endpoint the Windows 365 admin portal calls right after picking a group in the
+    /// Flex assignment wizard, so the CLI can show the same "your group has N members" context.
+    /// Returns null if the count can't be determined (best-effort only; never blocks the wizard).
+    /// </summary>
+    public async Task<int?> GetGroupMemberCountAsync(string groupId)
+    {
+        try
+        {
+            var countText = await GetRawStringAsync(
+                $"https://graph.microsoft.com/v1.0/groups/{Uri.EscapeDataString(groupId)}/members/microsoft.graph.user/$count",
+                includeConsistencyLevel: true);
+            return int.TryParse(countText, out var count) ? count : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Searches Entra groups by display name prefix, for picking which group a provisioning
     /// policy (or other assignment) targets instead of requiring the user to paste a raw object
     /// ID. Uses advanced query ($count + ConsistencyLevel eventual) to match SearchUsersAsync's
@@ -1223,6 +1244,33 @@ internal sealed class W365GraphClient
         }
 
         return JsonSerializer.Deserialize<T>(content, JsonOptions);
+    }
+
+    /// <summary>
+    /// For endpoints that return a plain non-JSON body, like Graph's /$count suffix (returns just
+    /// a bare number as text/plain, not JSON) -- $count also requires ConsistencyLevel: eventual
+    /// per Graph's own requirements for count queries.
+    /// </summary>
+    private async Task<string> GetRawStringAsync(string relativeUri, bool includeConsistencyLevel = false)
+    {
+        using var response = await SendWithRetryAsync(() =>
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, relativeUri);
+            if (includeConsistencyLevel)
+            {
+                request.Headers.Add("ConsistencyLevel", "eventual");
+            }
+
+            return request;
+        });
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"{(int)response.StatusCode} {response.ReasonPhrase}: {ExtractGraphErrorMessage(errorBody)}");
+        }
+
+        return await response.Content.ReadAsStringAsync();
     }
 
     private async Task<IReadOnlyList<GraphTableRow>> GetJsonRowsAsync(string relativeUri, params string[] summaryFields)

@@ -911,6 +911,25 @@ internal sealed partial class W365CliApp
             frontLineServicePlanId = selectedPlan.Id;
             allotmentDisplayName = AnsiConsole.Ask<string>("Assignment name [[shown to end users in the Windows app]]:");
 
+            // Matches the Windows 365 admin portal's own Flex assignment step, which shows the
+            // target group's member count right alongside the Cloud PC/session count input as
+            // context for how many are actually needed. Best-effort only -- a failed lookup here
+            // shouldn't block the wizard, it just means this context line is skipped.
+            int? groupMemberCount = null;
+            try
+            {
+                groupMemberCount = await _session.Graph.GetGroupMemberCountAsync(assignGroupId!);
+            }
+            catch
+            {
+                // Best-effort only.
+            }
+
+            if (groupMemberCount.HasValue)
+            {
+                AnsiConsole.MarkupLine($"[grey]This group has {groupMemberCount.Value} member(s).[/]");
+            }
+
             // Dedicated (sharedByUser) licenses cover up to 3 Cloud PCs per reserved unit, but a
             // policy that only ended up provisioning 1 Cloud PC from a unit still has that unit's
             // other 2 slots sitting unused -- capacity frontLineServicePlans' own totalCount/
@@ -942,22 +961,43 @@ internal sealed partial class W365CliApp
 
             var maxAvailableUnits = selectedPlan.AvailableCount;
             var maxDedicatedFromExistingUnits = unusedDedicatedSlots;
+            var cloudPcTypeLabel = isSharedByEntraGroup ? "shared" : "dedicated";
+            var memberCountHint = groupMemberCount.HasValue ? $" [[group has {groupMemberCount.Value}]]" : string.Empty;
             string promptLabel;
             if (isSharedByEntraGroup)
             {
-                promptLabel = "Number of shared Cloud PCs to reserve for this group (each one reserves 1 license unit):";
+                promptLabel = $"Number of {cloudPcTypeLabel} Cloud PCs to reserve for this group{memberCountHint} (each one reserves 1 license unit):";
             }
             else if (unusedDedicatedSlots > 0)
             {
-                promptLabel = $"Number of dedicated Cloud PCs to provision for this group ({unusedDedicatedSlots} already covered by existing spare capacity; every 3 beyond that reserves 1 new license unit):";
+                promptLabel = $"Number of {cloudPcTypeLabel} Cloud PCs to provision for this group{memberCountHint} ({unusedDedicatedSlots} already covered by existing spare capacity; every 3 beyond that reserves 1 new license unit):";
             }
             else
             {
-                promptLabel = "Number of dedicated Cloud PCs to provision for this group (every 3 reserves 1 license unit):";
+                promptLabel = $"Number of {cloudPcTypeLabel} Cloud PCs to provision for this group{memberCountHint} (every 3 reserves 1 license unit):";
             }
 
-            var unitCountPrompt = new TextPrompt<int>(promptLabel).DefaultValue(1);
-            var cloudPcOrUnitCount = AnsiConsole.Prompt(unitCountPrompt);
+            // Matches the portal's own validation ("must be larger than 0 and cannot exceed the
+            // group's member count") -- there's no reason to provision more Cloud PCs than the
+            // group actually has members to use them, and it must be a positive number.
+            int cloudPcOrUnitCount;
+            while (true)
+            {
+                cloudPcOrUnitCount = AnsiConsole.Prompt(new TextPrompt<int>(promptLabel).DefaultValue(1));
+                if (cloudPcOrUnitCount <= 0)
+                {
+                    AnsiConsole.MarkupLine("[red]Enter a number greater than 0.[/]");
+                    continue;
+                }
+
+                if (groupMemberCount.HasValue && cloudPcOrUnitCount > groupMemberCount.Value)
+                {
+                    AnsiConsole.MarkupLine($"[red]This group only has {groupMemberCount.Value} member(s) — enter a number no greater than that.[/]");
+                    continue;
+                }
+
+                break;
+            }
 
             if (isSharedByEntraGroup)
             {
