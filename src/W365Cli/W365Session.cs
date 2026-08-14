@@ -89,15 +89,12 @@ internal sealed class W365Session
         try
         {
             _application = await CreateApplicationAsync();
-            var interactiveBuilder = _application
-                .AcquireTokenInteractive(_scopes)
-                .WithPrompt(Prompt.SelectAccount);
-            if (CreateWslSystemWebViewOptions() is { } wslOptions)
-            {
-                interactiveBuilder = interactiveBuilder.WithSystemWebViewOptions(wslOptions);
-            }
-
-            _currentAuthentication = await interactiveBuilder.ExecuteAsync();
+            _currentAuthentication = IsRunningInWsl()
+                ? await AcquireTokenViaDeviceCodeAsync()
+                : await _application
+                    .AcquireTokenInteractive(_scopes)
+                    .WithPrompt(Prompt.SelectAccount)
+                    .ExecuteAsync();
 
             ConfigureConnectedGraph();
             UpdateMissingPermissionFlag();
@@ -140,15 +137,12 @@ internal sealed class W365Session
         try
         {
             _application ??= await CreateApplicationAsync();
-            var interactiveBuilder = _application
-                .AcquireTokenInteractive(_scopes)
-                .WithPrompt(Prompt.Consent);
-            if (CreateWslSystemWebViewOptions() is { } wslOptions)
-            {
-                interactiveBuilder = interactiveBuilder.WithSystemWebViewOptions(wslOptions);
-            }
-
-            _currentAuthentication = await interactiveBuilder.ExecuteAsync();
+            _currentAuthentication = IsRunningInWsl()
+                ? await AcquireTokenViaDeviceCodeAsync()
+                : await _application
+                    .AcquireTokenInteractive(_scopes)
+                    .WithPrompt(Prompt.Consent)
+                    .ExecuteAsync();
 
             ConfigureConnectedGraph();
             UpdateMissingPermissionFlag();
@@ -159,6 +153,49 @@ internal sealed class W365Session
             return false;
         }
     }
+
+    /// <summary>
+    /// Sign-in path for WSL. The normal interactive flow relies on Microsoft redirecting the
+    /// browser back to a loopback HTTP listener the app spins up locally -- but that listener runs
+    /// inside the WSL2 Linux VM while the browser we launch (via explorer.exe interop) is the
+    /// user's real Windows browser. WSL2's automatic localhost port-forwarding is supposed to
+    /// bridge that gap, but in practice it's unreliable (VPN adapters, firewall rules, and
+    /// IPv4/IPv6 loopback mismatches all break it) -- which is exactly what happened here: sign-in
+    /// completed fine in the browser, but the app never saw the redirect and hung forever. Device
+    /// code flow sidesteps the whole problem: no listener, no redirect back to WSL at all -- just
+    /// a short code the user enters on a Microsoft page, polled from here until they finish.
+    /// </summary>
+    private async Task<AuthenticationResult> AcquireTokenViaDeviceCodeAsync()
+    {
+        if (_application is null)
+        {
+            throw new InvalidOperationException("Not connected to Microsoft Graph.");
+        }
+
+        return await _application
+            .AcquireTokenWithDeviceCode(_scopes, deviceCodeResult =>
+            {
+                AnsiConsole.MarkupLine("[yellow]WSL detected — using device sign-in instead of a browser redirect (the WSL↔Windows loopback isn't reliable for this).[/]");
+                AnsiConsole.MarkupLine(Markup.Escape(deviceCodeResult.Message));
+
+                // deviceCodeResult.VerificationUrl is a short, plain microsoft.com/devicelogin
+                // link with no query-string encoding to worry about, so the same explorer.exe
+                // launch used elsewhere for WSL is safe here -- best-effort only; if it fails the
+                // user still has the URL printed above to open by hand.
+                try
+                {
+                    OpenUrlOnWindowsSide(deviceCodeResult.VerificationUrl);
+                }
+                catch
+                {
+                    // Best-effort only — the printed URL/code above still let the user sign in manually.
+                }
+
+                return Task.CompletedTask;
+            })
+            .ExecuteAsync();
+    }
+
 
     /// <summary>
     /// Best-effort URL that lets a tenant administrator grant admin consent for this app
@@ -209,46 +246,23 @@ internal sealed class W365Session
     }
 
     /// <summary>
-    /// On WSL, hands the sign-in URL off to the Windows side by launching explorer.exe directly
-    /// (present on every WSL install via interop) instead of relying on MSAL's Linux browser-
-    /// detection, which has nothing to find in a typical WSL distro. Returns null on every other
-    /// platform so MSAL's normal (working) browser-launch behavior is left untouched.
+    /// On WSL, hands a URL off to the Windows side by launching explorer.exe directly (present on
+    /// every WSL install via interop), which forwards it to the default Windows browser. Used only
+    /// for the plain, unencoded device-code verification link -- deliberately not going through
+    /// cmd.exe, since cmd.exe re-parses whatever raw command line it receives using its own rules
+    /// (an unquoted "&" is a command separator, and "%" is an environment-variable delimiter even
+    /// inside quotes), which silently mangles anything with query-string encoding.
     /// </summary>
-    private static SystemWebViewOptions? CreateWslSystemWebViewOptions()
+    private static void OpenUrlOnWindowsSide(string url)
     {
-        if (!IsRunningInWsl())
+        var startInfo = new ProcessStartInfo
         {
-            return null;
-        }
-
-        return new SystemWebViewOptions
-        {
-            OpenBrowserAsync = url =>
-            {
-                // Deliberately NOT going through cmd.exe here. cmd.exe re-parses whatever raw
-                // command line it receives using its own rules -- an unquoted "&" is a command
-                // separator (silently truncates the URL, dropping later query params), and "%" is
-                // an environment-variable delimiter even inside quotes (silently eats any "%...%"
-                // span that doesn't match a real variable name, expanding it to nothing). OAuth
-                // authorize URLs are full of both "&"-separated query params AND percent-encoded
-                // "%XX" sequences, so cmd.exe mangles them no matter how carefully they're quoted
-                // -- that's what caused AADSTS900144 twice in a row. Launching explorer.exe
-                // directly (no shell in the loop at all) hands the URL to CreateProcess as a
-                // single argv element with zero re-parsing, and explorer.exe forwards URL
-                // arguments straight to the default browser. Verified byte-for-byte against a
-                // synthetic URL containing both "&" and "%...%" sequences.
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                startInfo.ArgumentList.Add(url.ToString());
-
-                using var process = Process.Start(startInfo);
-                return Task.CompletedTask;
-            },
+            FileName = "explorer.exe",
+            UseShellExecute = false,
+            CreateNoWindow = true,
         };
+        startInfo.ArgumentList.Add(url);
+        using var process = Process.Start(startInfo);
     }
 
     private void UpdateMissingPermissionFlag()
