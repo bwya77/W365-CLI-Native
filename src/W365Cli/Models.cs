@@ -390,6 +390,39 @@ internal sealed record CloudPcServicePlan
     public string Name => string.IsNullOrWhiteSpace(DisplayName) ? Id : DisplayName;
 }
 
+/// <summary>
+/// A Windows 365 Flex ("Frontline") shared-license pool, from
+/// deviceManagement/virtualEndpoint/frontLineServicePlans. Undocumented in the official Graph API
+/// reference as of this writing, but confirmed via captured browser network traffic from the real
+/// Windows 365 admin portal: this is what the portal queries to show available license capacity
+/// when assigning a sharedByEntraGroup provisioning policy to a group, and totalCount/usedCount
+/// are what determine how many Cloud PCs (allotmentLicensesCount) can still be reserved for a new
+/// assignment.
+/// </summary>
+internal sealed record FrontLineServicePlan
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; init; }
+
+    [JsonPropertyName("usedCount")]
+    public int? UsedCount { get; init; }
+
+    [JsonPropertyName("totalCount")]
+    public int? TotalCount { get; init; }
+
+    [JsonPropertyName("allotmentLicensesCount")]
+    public int? AllotmentLicensesCount { get; init; }
+
+    [JsonIgnore]
+    public string Name => string.IsNullOrWhiteSpace(DisplayName) ? Id : DisplayName;
+
+    [JsonIgnore]
+    public int? AvailableCount => TotalCount.HasValue && UsedCount.HasValue ? TotalCount.Value - UsedCount.Value : null;
+}
+
 internal sealed record CloudPcRemoteActionResultRaw
 {
     [JsonPropertyName("actionName")]

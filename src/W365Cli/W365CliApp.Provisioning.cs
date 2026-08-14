@@ -730,18 +730,24 @@ internal sealed partial class W365CliApp
             return;
         }
 
-        // A captured working portal payload for a real Flex Shared policy sends
-        // cloudPcNamingTemplate as null rather than any custom template at all -- Flex Shared
-        // Cloud PCs aren't tied to one fixed user, so a custom naming template may not be
-        // supported for this provisioning type at all (not just the %USERNAME% macro). Skip the
-        // prompt entirely and send null, matching the portal exactly.
+        // %USERNAME:x% is only valid "for Windows 365 Enterprise and Windows 365 Flex Dedicated
+        // devices" per Microsoft's own documentation, and Flex Shared Cloud PCs aren't tied to
+        // one fixed user -- but a captured working portal payload for a real Flex Shared policy
+        // confirms cloudPcNamingTemplate itself IS still sent as a real %RAND%-based value (e.g.
+        // "CPC-%RAND:5%"), not null. Only the %USERNAME% macro is what doesn't apply here.
         var isSharedByEntraGroup = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
-        string? namingTemplate = null;
-        if (!isSharedByEntraGroup)
+        var namingTemplate = AnsiConsole.Prompt(
+            new TextPrompt<string>("Cloud PC naming template:")
+                .DefaultValue(isSharedByEntraGroup ? "CPC-%RAND:10%" : "CPC-%USERNAME:5%-%RAND:5%"));
+
+        if (isSharedByEntraGroup && namingTemplate.Contains("%USERNAME", StringComparison.OrdinalIgnoreCase))
         {
-            namingTemplate = AnsiConsole.Prompt(
-                new TextPrompt<string>("Cloud PC naming template:")
-                    .DefaultValue("CPC-%USERNAME:5%-%RAND:5%"));
+            AnsiConsole.MarkupLine("[yellow]%USERNAME% isn't supported for Windows 365 Flex Shared policies — removing it from the naming template.[/]");
+            namingTemplate = System.Text.RegularExpressions.Regex.Replace(namingTemplate, "%USERNAME(:\\d+)?%", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim('-');
+            if (string.IsNullOrWhiteSpace(namingTemplate) || !namingTemplate.Contains("%RAND", StringComparison.OrdinalIgnoreCase))
+            {
+                namingTemplate = "CPC-%RAND:10%";
+            }
         }
 
         IReadOnlyList<GraphTableRow> regions;
@@ -841,6 +847,65 @@ internal sealed partial class W365CliApp
             required: isSharedByEntraGroup,
             reasonIfRequired: "Windows 365 Flex Shared policies need a group assignment to actually provision any Cloud PCs.");
 
+        // Flex Shared assignments draw from a specific frontline license pool and reserve a fixed
+        // number of Cloud PCs from it -- Graph's assign call rejects the whole request without
+        // these (confirmed via a captured working portal payload), so this is mandatory whenever a
+        // group was actually chosen for a sharedByEntraGroup policy.
+        string? frontLineServicePlanId = null;
+        string? allotmentDisplayName = null;
+        int? allotmentLicensesCount = null;
+        if (isSharedByEntraGroup && !string.IsNullOrWhiteSpace(assignGroupId))
+        {
+            IReadOnlyList<FrontLineServicePlan> frontLineServicePlans;
+            try
+            {
+                frontLineServicePlans = await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Loading Windows 365 Flex license capacity...", async _ => await _session.Graph.GetFrontLineServicePlansAsync());
+            }
+            catch (Exception ex)
+            {
+                ShowActionResult("Failed", "Create policy", displayName, "[red]Failed to load Windows 365 Flex license capacity.[/]", ex.Message);
+                return;
+            }
+
+            if (frontLineServicePlans.Count == 0)
+            {
+                TimedMessage("[yellow]No Windows 365 Flex shared license plans were found in this tenant. Create policy cancelled.[/]");
+                return;
+            }
+
+            var planHeader = Row("License", 50, "Available", 12, "Total", 8);
+            var selectedPlan = SelectFromTable(
+                "Select Windows 365 Flex license",
+                planHeader,
+                frontLineServicePlans,
+                plan => Row(plan.Name, 50, plan.AvailableCount?.ToString() ?? "-", 12, plan.TotalCount?.ToString() ?? "-", 8));
+            if (selectedPlan is null)
+            {
+                TimedMessage("[yellow]Create policy cancelled.[/]");
+                return;
+            }
+
+            frontLineServicePlanId = selectedPlan.Id;
+            allotmentDisplayName = AnsiConsole.Ask<string>("Assignment name [[shown to end users in the Windows app]]:");
+
+            var maxAvailable = selectedPlan.AvailableCount;
+            var countPrompt = new TextPrompt<int>("Number of Cloud PCs to reserve for this group:").DefaultValue(1);
+            allotmentLicensesCount = AnsiConsole.Prompt(countPrompt);
+            if (maxAvailable.HasValue && allotmentLicensesCount > maxAvailable.Value)
+            {
+                var proceedAnyway = AskYesNo(
+                    $"Only {maxAvailable.Value} license(s) are available in this plan, but you entered {allotmentLicensesCount}. Continue anyway?",
+                    defaultToYes: false);
+                if (!proceedAnyway)
+                {
+                    TimedMessage("[yellow]Create policy cancelled.[/]");
+                    return;
+                }
+            }
+        }
+
         await ConfirmAndRunAsync(
             "Create policy",
             displayName,
@@ -859,7 +924,10 @@ internal sealed partial class W365CliApp
                 assignGroupId,
                 userExperienceType,
                 userSettingsPersistenceEnabled,
-                userSettingsPersistenceStorageSizeCategory),
+                userSettingsPersistenceStorageSizeCategory,
+                frontLineServicePlanId,
+                allotmentDisplayName,
+                allotmentLicensesCount),
             "Policy",
             displayName);
     }

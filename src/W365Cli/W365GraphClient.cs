@@ -340,6 +340,17 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    /// <summary>
+    /// Windows 365 Flex ("Frontline") shared-license capacity — used when picking a service
+    /// plan/license pool and remaining Cloud PC count for a sharedByEntraGroup provisioning policy
+    /// assignment. Endpoint confirmed via captured browser network traffic from the real admin
+    /// portal; not (yet) in the official Graph API reference.
+    /// </summary>
+    public async Task<IReadOnlyList<FrontLineServicePlan>> GetFrontLineServicePlansAsync()
+    {
+        return await GetPagedAsync<FrontLineServicePlan>("deviceManagement/virtualEndpoint/frontLineServicePlans");
+    }
+
     public async Task<IReadOnlyList<GraphTableRow>> GetServicePlanRowsAsync()
     {
         var plans = await GetCloudPcServicePlansAsync();
@@ -592,7 +603,10 @@ internal sealed class W365GraphClient
         string? assignGroupId,
         string? userExperienceType = null,
         bool? userSettingsPersistenceEnabled = null,
-        string? userSettingsPersistenceStorageSizeCategory = null)
+        string? userSettingsPersistenceStorageSizeCategory = null,
+        string? frontLineServicePlanId = null,
+        string? allotmentDisplayName = null,
+        int? allotmentLicensesCount = null)
     {
         var domainJoinConfiguration = new Dictionary<string, object?>
         {
@@ -622,25 +636,21 @@ internal sealed class W365GraphClient
             ["localAdminEnabled"] = localAdminEnabled
         };
 
-        // A captured working portal payload for a real sharedByEntraGroup policy sends
-        // cloudPcNamingTemplate as null rather than any custom template at all (not just avoiding
-        // %USERNAME%) -- Flex Shared Cloud PCs aren't tied to one user, so a custom naming
-        // template may not be supported for this provisioning type at all. Sent only when
-        // non-null/non-empty so sharedByEntraGroup callers can omit it entirely.
+        // Confirmed via a captured working portal payload: cloudPcNamingTemplate IS sent (as a
+        // real %RAND%-based value, not null) even for sharedByEntraGroup policies -- only the
+        // %USERNAME% macro is unsupported there, not the property itself.
         if (!string.IsNullOrWhiteSpace(cloudPcNamingTemplate))
         {
             body["cloudPcNamingTemplate"] = cloudPcNamingTemplate;
         }
 
         // userSettingsPersistenceConfiguration is documented as "only available for
-        // sharedByEntraGroup" with a default of null. Sent explicitly here for that provisioning
-        // type so the feature toggle in the wizard actually takes effect. NOTE: a captured payload
-        // also showed a top-level userSettingsPersistenceEnabled duplicate, but that capture may
-        // have come from Graph's response rather than the actual request body, and Graph read-only/
-        // response-only properties sent back on a create can trigger strict-schema validation
-        // rejections -- so it's deliberately NOT included here, only the documented nested config.
+        // sharedByEntraGroup" with a default of null. Sent explicitly here (plus the same-named
+        // top-level property, confirmed present in a captured working create request alongside
+        // the nested object) so the feature toggle in the wizard actually takes effect.
         if (string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase))
         {
+            body["userSettingsPersistenceEnabled"] = userSettingsPersistenceEnabled ?? false;
             body["userSettingsPersistenceConfiguration"] = new Dictionary<string, object?>
             {
                 ["userSettingsPersistenceEnabled"] = userSettingsPersistenceEnabled ?? false,
@@ -657,18 +667,44 @@ internal sealed class W365GraphClient
 
         if (!string.IsNullOrWhiteSpace(assignGroupId))
         {
+            var isSharedByEntraGroup = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
             var assignmentTarget = new Dictionary<string, object?>
             {
-                ["@odata.type"] = "#microsoft.graph.cloudPcManagementGroupAssignmentTarget",
                 ["groupId"] = assignGroupId
             };
+
+            if (isSharedByEntraGroup)
+            {
+                // Windows 365 Flex Shared assignments draw from a specific frontline license pool
+                // (servicePlanId) and reserve a fixed number of Cloud PCs from it
+                // (allotmentLicensesCount), with a friendly allotmentDisplayName shown in the end
+                // user's Windows app -- this whole shape is undocumented in the official Graph API
+                // reference, confirmed only via captured browser network traffic from the real
+                // admin portal. Deliberately no "@odata.type" here either, matching that capture
+                // exactly (unlike the dedicated/plain-group-assignment shape below, which does
+                // send @odata.type per the documented cloudPcManagementGroupAssignmentTarget).
+                assignmentTarget["servicePlanId"] = frontLineServicePlanId;
+                assignmentTarget["allotmentDisplayName"] = allotmentDisplayName ?? string.Empty;
+                assignmentTarget["allotmentLicensesCount"] = allotmentLicensesCount ?? 1;
+            }
+            else
+            {
+                assignmentTarget["@odata.type"] = "#microsoft.graph.cloudPcManagementGroupAssignmentTarget";
+            }
 
             var assignment = new Dictionary<string, object?>
             {
                 ["target"] = assignmentTarget
             };
 
-            if (string.Equals(provisioningType, "dedicated", StringComparison.OrdinalIgnoreCase))
+            // Confirmed via capture: sharedByEntraGroup assignments send an empty "id" string,
+            // not the "{policyId}_{groupId}" composite id used for dedicated assignments. Every
+            // other provisioning type omits "id" entirely, matching pre-existing behavior.
+            if (isSharedByEntraGroup)
+            {
+                assignment["id"] = string.Empty;
+            }
+            else if (string.Equals(provisioningType, "dedicated", StringComparison.OrdinalIgnoreCase))
             {
                 assignment["id"] = $"{createdId}_{assignGroupId}";
             }
