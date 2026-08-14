@@ -182,6 +182,35 @@ internal sealed partial class W365CliApp
     }
 
     /// <summary>
+    /// Resets the inherited terminal to sane defaults (via "stty sane") before force-exiting the
+    /// process. Console.ReadKey's raw-mode handling doesn't get a chance to clean up on an abrupt
+    /// Environment.Exit, which can otherwise leave the tty/termios settings in a bad state and make
+    /// the *next* process launched in that same terminal window crash with an Input/output error
+    /// the moment it tries to read a key. Running "stty sane" against the inherited console handles
+    /// (not redirected, so it operates on the real tty) fixes that regardless of whatever state
+    /// .NET left things in. Best-effort: proceeds with the exit even if stty isn't available.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    private static void RestoreTerminalAndExit(int exitCode)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("stty", "sane")
+            {
+                UseShellExecute = false
+            });
+            process?.WaitForExit(500);
+        }
+        catch
+        {
+            // Best effort only — proceed with exit regardless.
+        }
+
+        Environment.Exit(exitCode);
+    }
+
+    /// <summary>
     /// Shared download → extract → atomic-replace flow for macOS and Linux self-updates — the two
     /// platforms only differ in archive format (zip vs tar.gz) and one macOS-only quarantine-flag
     /// cleanup step, so this holds the common retry/error/messaging logic once instead of twice.
@@ -259,18 +288,26 @@ internal sealed partial class W365CliApp
             File.SetUnixFileMode(stagingPath, ExecutablePermissions);
             File.Move(stagingPath, processPath, overwrite: true);
 
-            // Deliberately not exiting/relaunching here. Forcing this process to exit (via
-            // Environment.Exit or by spawning a replacement and killing this one) can leave the
-            // terminal's tty/termios settings in a bad state — since Console.ReadKey's raw-mode
-            // handling doesn't get a chance to clean up on an abrupt exit — which then makes the
-            // *next* process launched in that same terminal window crash with an Input/output
-            // error the moment it tries to read a key (observed in practice on macOS; the same
-            // termios mechanism applies on Linux terminals too). The binary on disk is already
-            // updated; this session just keeps running the old in-memory build until the user
-            // exits normally and reopens w365cli themselves.
+            // Exiting immediately after replacing the binary used to risk leaving the terminal's
+            // tty/termios settings in a bad state -- Console.ReadKey's raw-mode handling doesn't
+            // get a chance to clean up on an abrupt exit, which could make the *next* process
+            // launched in that same terminal window crash with an Input/output error the moment
+            // it tries to read a key (observed in practice on macOS; the same termios mechanism
+            // applies on Linux terminals too). Running "stty sane" against the inherited terminal
+            // right before exiting resets it to sane defaults regardless of whatever state .NET
+            // left it in, so it's now safe to offer quitting immediately instead of making every
+            // user manually quit and reopen themselves to pick up the new version.
             try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort cleanup */ }
             cleanUpTempDir = false;
             AnsiConsole.MarkupLine($"[green]Updated to {Markup.Escape(release.TagName)}.[/]");
+
+            var quitNow = AskYesNo("Quit now to use the updated version?");
+            if (quitNow)
+            {
+                RestoreTerminalAndExit(0);
+                return;
+            }
+
             AnsiConsole.MarkupLine("[grey]The new version will be used the next time you quit and reopen w365cli.[/]");
             WaitForAnyKey();
         }
