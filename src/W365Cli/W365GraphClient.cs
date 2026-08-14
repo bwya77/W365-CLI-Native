@@ -586,7 +586,7 @@ internal sealed class W365GraphClient
         string imageType,
         string domainJoinType,
         string? regionName,
-        string cloudPcNamingTemplate,
+        string? cloudPcNamingTemplate,
         bool enableSingleSignOn,
         bool localAdminEnabled,
         string? assignGroupId,
@@ -618,22 +618,29 @@ internal sealed class W365GraphClient
             ["imageDisplayName"] = imageDisplayName,
             ["imageType"] = imageType,
             ["domainJoinConfigurations"] = new[] { domainJoinConfiguration },
-            ["cloudPcNamingTemplate"] = cloudPcNamingTemplate,
             ["enableSingleSignOn"] = enableSingleSignOn,
             ["localAdminEnabled"] = localAdminEnabled
         };
 
+        // A captured working portal payload for a real sharedByEntraGroup policy sends
+        // cloudPcNamingTemplate as null rather than any custom template at all (not just avoiding
+        // %USERNAME%) -- Flex Shared Cloud PCs aren't tied to one user, so a custom naming
+        // template may not be supported for this provisioning type at all. Sent only when
+        // non-null/non-empty so sharedByEntraGroup callers can omit it entirely.
+        if (!string.IsNullOrWhiteSpace(cloudPcNamingTemplate))
+        {
+            body["cloudPcNamingTemplate"] = cloudPcNamingTemplate;
+        }
+
         // userSettingsPersistenceConfiguration is documented as "only available for
-        // sharedByEntraGroup" with a default of null — but a captured working portal payload for a
-        // real sharedByEntraGroup policy always includes it (even when the feature is disabled),
-        // so it's sent explicitly here for that provisioning type to match the shape Graph
-        // actually seems to expect, rather than trusting the documented "optional" default. That
-        // same captured payload also has a TOP-LEVEL userSettingsPersistenceEnabled boolean in
-        // addition to the nested config object's own field of the same name -- an undocumented
-        // duplicate the portal apparently still sends, so it's included here too.
+        // sharedByEntraGroup" with a default of null. Sent explicitly here for that provisioning
+        // type so the feature toggle in the wizard actually takes effect. NOTE: a captured payload
+        // also showed a top-level userSettingsPersistenceEnabled duplicate, but that capture may
+        // have come from Graph's response rather than the actual request body, and Graph read-only/
+        // response-only properties sent back on a create can trigger strict-schema validation
+        // rejections -- so it's deliberately NOT included here, only the documented nested config.
         if (string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase))
         {
-            body["userSettingsPersistenceEnabled"] = userSettingsPersistenceEnabled ?? false;
             body["userSettingsPersistenceConfiguration"] = new Dictionary<string, object?>
             {
                 ["userSettingsPersistenceEnabled"] = userSettingsPersistenceEnabled ?? false,

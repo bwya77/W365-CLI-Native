@@ -730,25 +730,18 @@ internal sealed partial class W365CliApp
             return;
         }
 
-        // %USERNAME:x% is only valid "for Windows 365 Enterprise and Windows 365 Flex Dedicated
-        // devices" per Microsoft's own documentation — Flex Shared Cloud PCs aren't tied to one
-        // fixed user, so the macro doesn't apply there, and a captured working portal payload for
-        // a real Flex Shared policy confirms this: it sends cloudPcNamingTemplate as null rather
-        // than a %USERNAME%-based template. Defaulting to a %USERNAME% template regardless of
-        // provisioning type risked Graph rejecting the create outright for Flex Shared policies.
+        // A captured working portal payload for a real Flex Shared policy sends
+        // cloudPcNamingTemplate as null rather than any custom template at all -- Flex Shared
+        // Cloud PCs aren't tied to one fixed user, so a custom naming template may not be
+        // supported for this provisioning type at all (not just the %USERNAME% macro). Skip the
+        // prompt entirely and send null, matching the portal exactly.
         var isSharedByEntraGroup = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
-        var namingTemplate = AnsiConsole.Prompt(
-            new TextPrompt<string>("Cloud PC naming template:")
-                .DefaultValue(isSharedByEntraGroup ? "CPC-%RAND:10%" : "CPC-%USERNAME:5%-%RAND:5%"));
-
-        if (isSharedByEntraGroup && namingTemplate.Contains("%USERNAME", StringComparison.OrdinalIgnoreCase))
+        string? namingTemplate = null;
+        if (!isSharedByEntraGroup)
         {
-            AnsiConsole.MarkupLine("[yellow]%USERNAME% isn't supported for Windows 365 Flex Shared policies — removing it from the naming template.[/]");
-            namingTemplate = System.Text.RegularExpressions.Regex.Replace(namingTemplate, "%USERNAME(:\\d+)?%", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim('-');
-            if (string.IsNullOrWhiteSpace(namingTemplate) || !namingTemplate.Contains("%RAND", StringComparison.OrdinalIgnoreCase))
-            {
-                namingTemplate = "CPC-%RAND:10%";
-            }
+            namingTemplate = AnsiConsole.Prompt(
+                new TextPrompt<string>("Cloud PC naming template:")
+                    .DefaultValue("CPC-%USERNAME:5%-%RAND:5%"));
         }
 
         IReadOnlyList<GraphTableRow> regions;
