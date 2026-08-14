@@ -364,8 +364,17 @@ internal sealed class W365Session
             {
                 // No usable keyring on this machine — fall back to an unprotected, ACL-restricted
                 // file (readable only by the current user) instead of failing sign-in entirely.
-                // This matches MSAL's documented plain-text fallback pattern.
-                AnsiConsole.MarkupLine("[yellow]No secure keyring is available on this Linux machine — the sign-in cache will be stored in a plain, user-only-readable file instead.[/]");
+                // This matches MSAL's documented plain-text fallback pattern. Skip the warning on
+                // WSL specifically: WSL essentially never has a keyring daemon (no desktop session
+                // running libsecret/GNOME Keyring/KWallet) by design, so this isn't an actionable
+                // "go fix your machine" message there the way it is on a real Linux desktop — it
+                // would just print on every single launch forever with nothing the user can do
+                // about it.
+                if (!IsRunningInWsl())
+                {
+                    AnsiConsole.MarkupLine("[yellow]No secure keyring is available on this Linux machine — the sign-in cache will be stored in a plain, user-only-readable file instead.[/]");
+                }
+
                 var fallbackProperties = new StorageCreationPropertiesBuilder(CacheFileName + ".plaintext", cacheDirectory)
                     .WithUnprotectedFile()
                     .Build();
