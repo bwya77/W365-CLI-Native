@@ -673,33 +673,21 @@ internal sealed class W365GraphClient
         });
     }
 
-    public async Task DeleteSnapshotAsync(string cloudPcId, string snapshotId)
+    /// <summary>
+    /// Purges an imported Cloud PC snapshot. This is the ONLY snapshot-deletion API Microsoft
+    /// Graph documents for cloudPcSnapshot -- there's no generic DELETE for regular
+    /// automatic/manual snapshots at all; those are managed by the Cloud PC service and expire on
+    /// their own (see expirationDateTime). Calling this on anything but an "imported" snapshot
+    /// reliably 404s/400s (confirmed against a real tenant), which is exactly what the old
+    /// implementation's guesswork DELETE attempts hit. The caller is expected to have already
+    /// confirmed the snapshot's type is "imported" (see ShowSnapshotActionMenuAsync).
+    /// </summary>
+    public async Task PurgeImportedSnapshotAsync(string snapshotId)
     {
-        var escapedSnapshotId = Uri.EscapeDataString(snapshotId);
-        var attempts = new List<string>
+        await PostJsonAsync("deviceManagement/virtualEndpoint/snapshots/purgeImportedSnapshot", new
         {
-            $"deviceManagement/virtualEndpoint/snapshots/{escapedSnapshotId}"
-        };
-
-        if (!string.IsNullOrWhiteSpace(cloudPcId))
-        {
-            attempts.Add($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/snapshots/{escapedSnapshotId}");
-        }
-
-        var errors = new List<string>();
-        foreach (var relativeUri in attempts)
-        {
-            using var response = await SendWithRetryAsync(() => new HttpRequestMessage(HttpMethod.Delete, relativeUri));
-            if (response.IsSuccessStatusCode)
-            {
-                return;
-            }
-
-            var body = await response.Content.ReadAsStringAsync();
-            errors.Add($"{relativeUri} returned {(int)response.StatusCode} {response.ReasonPhrase}. {body}");
-        }
-
-        throw new HttpRequestException($"Snapshot delete failed. Attempted: {string.Join("; ", errors)}");
+            snapshotIds = new[] { snapshotId }
+        });
     }
 
     public async Task<IReadOnlyList<CloudPcRemoteActionResult>> GetCloudPcRemoteActionResultsAsync(CloudPcSummary cloudPc)

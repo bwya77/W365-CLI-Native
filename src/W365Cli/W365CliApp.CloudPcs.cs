@@ -1480,10 +1480,27 @@ internal sealed partial class W365CliApp
 
     private async Task ShowSnapshotActionMenuAsync(CloudPcSummary cloudPc, CloudPcSnapshot snapshot)
     {
+        // Microsoft Graph only documents a delete/purge API for "imported" snapshots
+        // (cloudPCSnapshot: purgeImportedSnapshot) -- regular automatic/manual snapshots are
+        // managed entirely by the Cloud PC service and expire on their own, with no user-facing
+        // delete API at all. Offering "Delete" for those just guarantees a confusing 404/400 from
+        // Graph, so only show it when the snapshot is actually deletable.
+        var canDelete = string.Equals(snapshot.SnapshotType, "imported", StringComparison.OrdinalIgnoreCase);
+        var choices = canDelete
+            ? new[] { "Restore from this snapshot", "Delete this snapshot", "Back" }
+            : ["Restore from this snapshot", "Back"];
+
         var action = PromptChoice(
-            () => AnsiConsole.MarkupLine($"[grey]Cloud PC:[/] {Markup.Escape(cloudPc.Name)}"),
+            () =>
+            {
+                AnsiConsole.MarkupLine($"[grey]Cloud PC:[/] {Markup.Escape(cloudPc.Name)}");
+                if (!canDelete)
+                {
+                    AnsiConsole.MarkupLine("[grey]This is a service-managed snapshot -- it can't be deleted and will expire automatically. Only imported snapshots can be deleted.[/]");
+                }
+            },
             "[#58a6ff]Snapshot action[/]",
-            ["Restore from this snapshot", "Delete this snapshot", "Back"],
+            choices,
             "Back");
 
         switch (action)
@@ -1492,7 +1509,7 @@ internal sealed partial class W365CliApp
                 await ConfirmAndRunAsync("Restore", cloudPc.Name, async () => await _session.Graph.RestoreSnapshotAsync(cloudPc.Id, snapshot.SnapshotId), "Cloud PC", cloudPc.Name);
                 break;
             case "Delete this snapshot":
-                await ConfirmAndRunAsync("Delete snapshot", snapshot.SnapshotId, async () => await _session.Graph.DeleteSnapshotAsync(cloudPc.Id, snapshot.SnapshotId), "Cloud PC", cloudPc.Name);
+                await ConfirmAndRunAsync("Delete snapshot", snapshot.SnapshotId, async () => await _session.Graph.PurgeImportedSnapshotAsync(snapshot.SnapshotId), "Cloud PC", cloudPc.Name);
                 break;
         }
     }
