@@ -1,6 +1,7 @@
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Extensions.Msal;
 using Spectre.Console;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace W365Cli;
@@ -88,10 +89,15 @@ internal sealed class W365Session
         try
         {
             _application = await CreateApplicationAsync();
-            _currentAuthentication = await _application
+            var interactiveBuilder = _application
                 .AcquireTokenInteractive(_scopes)
-                .WithPrompt(Prompt.SelectAccount)
-                .ExecuteAsync();
+                .WithPrompt(Prompt.SelectAccount);
+            if (CreateWslSystemWebViewOptions() is { } wslOptions)
+            {
+                interactiveBuilder = interactiveBuilder.WithSystemWebViewOptions(wslOptions);
+            }
+
+            _currentAuthentication = await interactiveBuilder.ExecuteAsync();
 
             ConfigureConnectedGraph();
             UpdateMissingPermissionFlag();
@@ -134,10 +140,15 @@ internal sealed class W365Session
         try
         {
             _application ??= await CreateApplicationAsync();
-            _currentAuthentication = await _application
+            var interactiveBuilder = _application
                 .AcquireTokenInteractive(_scopes)
-                .WithPrompt(Prompt.Consent)
-                .ExecuteAsync();
+                .WithPrompt(Prompt.Consent);
+            if (CreateWslSystemWebViewOptions() is { } wslOptions)
+            {
+                interactiveBuilder = interactiveBuilder.WithSystemWebViewOptions(wslOptions);
+            }
+
+            _currentAuthentication = await interactiveBuilder.ExecuteAsync();
 
             ConfigureConnectedGraph();
             UpdateMissingPermissionFlag();
@@ -160,6 +171,77 @@ internal sealed class W365Session
         var tenantSegment = string.IsNullOrWhiteSpace(TenantId) ? "common" : TenantId;
         var redirectUri = Uri.EscapeDataString("http://localhost");
         return $"https://login.microsoftonline.com/{tenantSegment}/adminconsent?client_id={_clientId}&redirect_uri={redirectUri}";
+    }
+
+    /// <summary>
+    /// True when running inside WSL. WSL has no xdg-open/gnome-open/kfmclient (and usually no
+    /// wslview either) by default, so MSAL's built-in Linux system-browser launcher fails with
+    /// "Unable to open a web page using xdg-open, gnome-open, kfmclient or wslview tools" even
+    /// though a real Windows browser is one hop away via interop.
+    /// </summary>
+    private static bool IsRunningInWsl()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WSL_DISTRO_NAME")))
+            {
+                return true;
+            }
+
+            const string VersionPath = "/proc/version";
+            if (File.Exists(VersionPath))
+            {
+                var versionText = File.ReadAllText(VersionPath);
+                return versionText.Contains("microsoft", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        catch
+        {
+            // Best-effort detection only — fall through to "not WSL" on any failure.
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// On WSL, hands the sign-in URL off to the Windows side via cmd.exe's "start" (the same
+    /// interop trick tools like wslview use) instead of relying on MSAL's Linux browser-detection,
+    /// which has nothing to find in a typical WSL distro. Returns null on every other platform so
+    /// MSAL's normal (working) browser-launch behavior is left untouched.
+    /// </summary>
+    private static SystemWebViewOptions? CreateWslSystemWebViewOptions()
+    {
+        if (!IsRunningInWsl())
+        {
+            return null;
+        }
+
+        return new SystemWebViewOptions
+        {
+            OpenBrowserAsync = url =>
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                // Empty "" title argument makes cmd's start treat the URL as the target even when
+                // it contains characters (like &) that would otherwise be misparsed as the title.
+                startInfo.ArgumentList.Add("/c");
+                startInfo.ArgumentList.Add("start");
+                startInfo.ArgumentList.Add("");
+                startInfo.ArgumentList.Add(url.ToString());
+
+                using var process = Process.Start(startInfo);
+                return Task.CompletedTask;
+            },
+        };
     }
 
     private void UpdateMissingPermissionFlag()
