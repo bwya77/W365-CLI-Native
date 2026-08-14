@@ -645,10 +645,14 @@ internal sealed class W365GraphClient
         }
 
         // userSettingsPersistenceConfiguration is documented as "only available for
-        // sharedByEntraGroup" with a default of null. Sent explicitly here (plus the same-named
-        // top-level property, confirmed present in a captured working create request alongside
-        // the nested object) so the feature toggle in the wizard actually takes effect.
-        if (string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase))
+        // sharedByEntraGroup" with a default of null -- but a captured working create payload for
+        // a real sharedByUser (Flex Dedicated) policy sends it too (disabled, but present), so
+        // it's sent for both Flex license modes, not just Shared. Plus the same-named top-level
+        // property, confirmed present in both captured working create requests alongside the
+        // nested object, is needed for the feature toggle in the wizard to actually take effect.
+        var isFlexLicense = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(provisioningType, "sharedByUser", StringComparison.OrdinalIgnoreCase);
+        if (isFlexLicense)
         {
             body["userSettingsPersistenceEnabled"] = userSettingsPersistenceEnabled ?? false;
             body["userSettingsPersistenceConfiguration"] = new Dictionary<string, object?>
@@ -667,22 +671,22 @@ internal sealed class W365GraphClient
 
         if (!string.IsNullOrWhiteSpace(assignGroupId))
         {
-            var isSharedByEntraGroup = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
             var assignmentTarget = new Dictionary<string, object?>
             {
                 ["groupId"] = assignGroupId
             };
 
-            if (isSharedByEntraGroup)
+            if (isFlexLicense)
             {
-                // Windows 365 Flex Shared assignments draw from a specific frontline license pool
-                // (servicePlanId) and reserve a fixed number of Cloud PCs from it
-                // (allotmentLicensesCount), with a friendly allotmentDisplayName shown in the end
-                // user's Windows app -- this whole shape is undocumented in the official Graph API
-                // reference, confirmed only via captured browser network traffic from the real
-                // admin portal. Deliberately no "@odata.type" here either, matching that capture
-                // exactly (unlike the dedicated/plain-group-assignment shape below, which does
-                // send @odata.type per the documented cloudPcManagementGroupAssignmentTarget).
+                // Both Windows 365 Flex modes (Dedicated=sharedByUser, Shared=sharedByEntraGroup)
+                // draw from a specific Frontline license pool (servicePlanId) and reserve a fixed
+                // number of license units from it (allotmentLicensesCount), with a friendly
+                // allotmentDisplayName shown in the end user's Windows app -- this whole shape is
+                // undocumented in the official Graph API reference, confirmed only via captured
+                // browser network traffic from the real admin portal for BOTH provisioning types.
+                // Deliberately no "@odata.type" here either, matching that capture exactly (unlike
+                // the plain Enterprise "dedicated" assignment shape below, which does send
+                // @odata.type per the documented cloudPcManagementGroupAssignmentTarget).
                 assignmentTarget["servicePlanId"] = frontLineServicePlanId;
                 assignmentTarget["allotmentDisplayName"] = allotmentDisplayName ?? string.Empty;
                 assignmentTarget["allotmentLicensesCount"] = allotmentLicensesCount ?? 1;
@@ -697,10 +701,11 @@ internal sealed class W365GraphClient
                 ["target"] = assignmentTarget
             };
 
-            // Confirmed via capture: sharedByEntraGroup assignments send an empty "id" string,
-            // not the "{policyId}_{groupId}" composite id used for dedicated assignments. Every
-            // other provisioning type omits "id" entirely, matching pre-existing behavior.
-            if (isSharedByEntraGroup)
+            // Confirmed via capture: both Flex modes' assignments send an empty "id" string, not
+            // the "{policyId}_{groupId}" composite id used for plain Enterprise "dedicated"
+            // assignments. Every other provisioning type omits "id" entirely, matching
+            // pre-existing behavior.
+            if (isFlexLicense)
             {
                 assignment["id"] = string.Empty;
             }

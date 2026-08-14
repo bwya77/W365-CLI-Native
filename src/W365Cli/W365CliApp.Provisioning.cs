@@ -642,11 +642,14 @@ internal sealed partial class W365CliApp
                 return;
             }
 
-            // Flex Dedicated is still Graph's plain "dedicated" provisioningType -- the Enterprise
-            // vs. Flex distinction is entirely about which purchased license SKU the assigned
-            // group draws from, which Graph resolves automatically; it isn't a separate value in
-            // the policy body. Flex Shared is what Graph calls "sharedByEntraGroup".
-            provisioningType = flexModeChoice == "Shared" ? "sharedByEntraGroup" : "dedicated";
+            // Confirmed via captured working portal payloads: Flex Dedicated is Graph's
+            // "sharedByUser" provisioningType, NOT plain "dedicated" -- "dedicated" is reserved
+            // for Enterprise (which draws from a dedicated-only license, not a shared/Frontline
+            // pool at all). Flex Shared is "sharedByEntraGroup". Both Flex modes draw from the
+            // same purchased Frontline "shared" service-plan pool, just with different per-user
+            // vs. per-group semantics -- which is why both need the license/allotment assignment
+            // step below, unlike plain Enterprise "dedicated".
+            provisioningType = flexModeChoice == "Shared" ? "sharedByEntraGroup" : "sharedByUser";
         }
         else if (licenseTypeChoice == "Reserve")
         {
@@ -736,6 +739,11 @@ internal sealed partial class W365CliApp
         // confirms cloudPcNamingTemplate itself IS still sent as a real %RAND%-based value (e.g.
         // "CPC-%RAND:5%"), not null. Only the %USERNAME% macro is what doesn't apply here.
         var isSharedByEntraGroup = string.Equals(provisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
+        // Both Flex modes (Dedicated=sharedByUser, Shared=sharedByEntraGroup) draw from the same
+        // purchased Frontline "shared" license pool and need the license/allotment assignment
+        // flow below -- confirmed via captured working payloads for BOTH provisioning types,
+        // unlike plain Enterprise "dedicated" which uses the classic group-only assignment.
+        var isFlexLicense = isSharedByEntraGroup || string.Equals(provisioningType, "sharedByUser", StringComparison.OrdinalIgnoreCase);
         var namingTemplate = AnsiConsole.Prompt(
             new TextPrompt<string>("Cloud PC naming template:")
                 .DefaultValue(isSharedByEntraGroup ? "CPC-%RAND:10%" : "CPC-%USERNAME:5%-%RAND:5%"));
@@ -815,11 +823,13 @@ internal sealed partial class W365CliApp
         var enableSso = AskYesNo("Enable single sign-on?", defaultToYes: false);
         var localAdmin = AskYesNo("Enable local admin?", defaultToYes: false);
 
-        // Only offered for Flex Shared -- Graph documents userSettingsPersistenceConfiguration as
-        // exclusive to sharedByEntraGroup policies.
+        // userSettingsPersistenceConfiguration is documented as "only available for
+        // sharedByEntraGroup", but a captured working portal payload for a real Flex Dedicated
+        // (sharedByUser) policy sends it too (disabled, but present) -- so it's offered for both
+        // Flex modes, not just Shared.
         bool? userSettingsPersistenceEnabled = null;
         string? userSettingsPersistenceStorageSizeCategory = null;
-        if (isSharedByEntraGroup)
+        if (isFlexLicense)
         {
             userSettingsPersistenceEnabled = AskYesNo(
                 "Enable user settings persistence (saves user app settings between Cloud PC sessions)?",
@@ -844,17 +854,17 @@ internal sealed partial class W365CliApp
         }
 
         var (assignGroupId, _) = await PromptForEntraGroupAsync(
-            required: isSharedByEntraGroup,
-            reasonIfRequired: "Windows 365 Flex Shared policies need a group assignment to actually provision any Cloud PCs.");
+            required: isFlexLicense,
+            reasonIfRequired: "Windows 365 Flex policies need a group assignment to actually provision any Cloud PCs.");
 
-        // Flex Shared assignments draw from a specific frontline license pool and reserve a fixed
-        // number of Cloud PCs from it -- Graph's assign call rejects the whole request without
-        // these (confirmed via a captured working portal payload), so this is mandatory whenever a
-        // group was actually chosen for a sharedByEntraGroup policy.
+        // Both Flex modes draw from a specific Frontline license pool and reserve capacity from
+        // it -- Graph's assign call rejects the whole request without these fields (confirmed via
+        // captured working portal payloads for BOTH sharedByUser and sharedByEntraGroup), so this
+        // is mandatory whenever a group was actually chosen for either Flex mode.
         string? frontLineServicePlanId = null;
         string? allotmentDisplayName = null;
         int? allotmentLicensesCount = null;
-        if (isSharedByEntraGroup && !string.IsNullOrWhiteSpace(assignGroupId))
+        if (isFlexLicense && !string.IsNullOrWhiteSpace(assignGroupId))
         {
             IReadOnlyList<FrontLineServicePlan> frontLineServicePlans;
             try
@@ -875,12 +885,23 @@ internal sealed partial class W365CliApp
                 return;
             }
 
-            var planHeader = Row("License", 50, "Available", 12, "Total", 8);
+            // frontLineServicePlans reports capacity in raw LICENSE UNITS, not Cloud PC count.
+            // Each unit covers 1 shared Cloud PC in Shared mode (sharedByEntraGroup), but up to 3
+            // dedicated Cloud PCs in Dedicated mode (sharedByUser) -- this ratio is exactly what
+            // Microsoft's own Windows 365 Flex capacity-planning tooling uses internally. Showing
+            // "Available" as a raw unit count without that context is exactly what caused this
+            // confusion, so the picker now also shows what that unit count actually buys.
+            var unitsToCloudPcRatio = isSharedByEntraGroup ? 1 : 3;
+            var planHeader = Row("License", 44, "Units avail.", 14, "Total units", 12, isSharedByEntraGroup ? "Max shared PCs" : "Max dedicated PCs", 18);
             var selectedPlan = SelectFromTable(
                 "Select Windows 365 Flex license",
                 planHeader,
                 frontLineServicePlans,
-                plan => Row(plan.Name, 50, plan.AvailableCount?.ToString() ?? "-", 12, plan.TotalCount?.ToString() ?? "-", 8));
+                plan => Row(
+                    plan.Name, 44,
+                    plan.AvailableCount?.ToString() ?? "-", 14,
+                    plan.TotalCount?.ToString() ?? "-", 12,
+                    plan.AvailableCount.HasValue ? (plan.AvailableCount.Value * unitsToCloudPcRatio).ToString() : "-", 18));
             if (selectedPlan is null)
             {
                 TimedMessage("[yellow]Create policy cancelled.[/]");
@@ -890,13 +911,17 @@ internal sealed partial class W365CliApp
             frontLineServicePlanId = selectedPlan.Id;
             allotmentDisplayName = AnsiConsole.Ask<string>("Assignment name [[shown to end users in the Windows app]]:");
 
-            var maxAvailable = selectedPlan.AvailableCount;
-            var countPrompt = new TextPrompt<int>("Number of Cloud PCs to reserve for this group:").DefaultValue(1);
-            allotmentLicensesCount = AnsiConsole.Prompt(countPrompt);
-            if (maxAvailable.HasValue && allotmentLicensesCount > maxAvailable.Value)
+            var maxAvailableUnits = selectedPlan.AvailableCount;
+            var unitCountPrompt = new TextPrompt<int>(
+                isSharedByEntraGroup
+                    ? "Number of license units to reserve for this group (1 unit = 1 shared Cloud PC):"
+                    : "Number of license units to reserve for this group (1 unit = up to 3 dedicated Cloud PCs):")
+                .DefaultValue(1);
+            allotmentLicensesCount = AnsiConsole.Prompt(unitCountPrompt);
+            if (maxAvailableUnits.HasValue && allotmentLicensesCount > maxAvailableUnits.Value)
             {
                 var proceedAnyway = AskYesNo(
-                    $"Only {maxAvailable.Value} license(s) are available in this plan, but you entered {allotmentLicensesCount}. Continue anyway?",
+                    $"Only {maxAvailableUnits.Value} license unit(s) are available in this plan, but you entered {allotmentLicensesCount}. Continue anyway?",
                     defaultToYes: false);
                 if (!proceedAnyway)
                 {
