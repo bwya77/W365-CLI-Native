@@ -321,8 +321,15 @@ internal sealed class W365GraphClient
 
     public async Task<IReadOnlyList<CloudPcServicePlan>> GetCloudPcServicePlansAsync()
     {
+        // provisioningType on cloudPcServicePlan is an evolvable enum -- sharedByUser,
+        // sharedByEntraGroup, and reserve only come back as their real string values with the
+        // Prefer: include-unknown-enum-members header; without it Graph collapses them all to
+        // "unknownFutureValue". Omitting this made the create-policy wizard's license pre-check
+        // wrongly report "no purchased Flex Shared license" for tenants that actually have one,
+        // since every sharedByEntraGroup plan looked identical to an unrecognized enum value.
         var plans = await GetPagedAsync<CloudPcServicePlan>(
-            "deviceManagement/virtualEndpoint/servicePlans");
+            "deviceManagement/virtualEndpoint/servicePlans",
+            includeUnknownEnumMembers: true);
 
         return plans
             .OrderBy(plan => plan.Type, StringComparer.OrdinalIgnoreCase)
