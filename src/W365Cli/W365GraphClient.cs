@@ -359,52 +359,59 @@ internal sealed class W365GraphClient
     /// a policy that reserved 1 unit but only provisioned 1 Cloud PC still has 2 unused slots that
     /// frontLineServicePlans' own totalCount/usedCount numbers don't show at all (those only track
     /// whole reserved units, never how fully each one is actually used).
+    ///
+    /// Deliberately re-fetches each candidate policy's assignments via the dedicated
+    /// .../provisioningPolicies/{id}/assignments navigation endpoint rather than trusting the
+    /// $expand=assignments already present on the plain policy list -- undocumented beta-only
+    /// fields like servicePlanId/allotmentLicensesCount on the assignment target have been
+    /// observed to not survive collection-level $expand serialization, only showing up reliably
+    /// via the assign POST itself and this per-item navigation endpoint.
     /// </summary>
     public async Task<int> GetUnusedDedicatedSlotsForServicePlanAsync(string servicePlanId)
     {
         var policies = await GetProvisioningPoliciesAsync();
-        var dedicatedPolicyIds = new List<(string PolicyId, int ReservedUnits)>();
+        var dedicatedPolicyCandidates = policies
+            .Where(policy => string.Equals(policy.ProvisioningType, "sharedByUser", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
 
-        foreach (var policy in policies)
-        {
-            if (!string.Equals(policy.ProvisioningType, "sharedByUser", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (!policy.Raw.TryGetProperty("assignments", out var assignments) || assignments.ValueKind != JsonValueKind.Array)
-            {
-                continue;
-            }
-
-            foreach (var assignment in assignments.EnumerateArray())
-            {
-                if (!assignment.TryGetProperty("target", out var target))
-                {
-                    continue;
-                }
-
-                var targetServicePlanId = GetString(target, "servicePlanId");
-                if (!string.Equals(targetServicePlanId, servicePlanId, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                dedicatedPolicyIds.Add((policy.Id, GetInt(target, "allotmentLicensesCount") ?? 0));
-            }
-        }
-
-        if (dedicatedPolicyIds.Count == 0)
+        if (dedicatedPolicyCandidates.Length == 0)
         {
             return 0;
         }
 
-        var actualCounts = await ConcurrencyHelper.MapWithConcurrencyAsync(dedicatedPolicyIds, maxConcurrency: 5, async entry =>
+        var perPolicyUnused = await ConcurrencyHelper.MapWithConcurrencyAsync(dedicatedPolicyCandidates, maxConcurrency: 5, async policy =>
         {
             try
             {
-                var cloudPcs = await GetCloudPcsByProvisioningPolicyAsync(entry.PolicyId);
-                return Math.Max(0, entry.ReservedUnits * 3 - cloudPcs.Count);
+                var assignmentsPage = await GetAsync<GraphPage<JsonElement>>(
+                    $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policy.Id)}/assignments");
+
+                var reservedUnits = 0;
+                var matched = false;
+                foreach (var assignment in assignmentsPage?.Value ?? [])
+                {
+                    if (!assignment.TryGetProperty("target", out var target))
+                    {
+                        continue;
+                    }
+
+                    var targetServicePlanId = GetString(target, "servicePlanId");
+                    if (!string.Equals(targetServicePlanId, servicePlanId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    matched = true;
+                    reservedUnits += GetInt(target, "allotmentLicensesCount") ?? 0;
+                }
+
+                if (!matched)
+                {
+                    return 0;
+                }
+
+                var cloudPcs = await GetCloudPcsByProvisioningPolicyAsync(policy.Id);
+                return Math.Max(0, reservedUnits * 3 - cloudPcs.Count);
             }
             catch
             {
@@ -414,7 +421,7 @@ internal sealed class W365GraphClient
             }
         });
 
-        return actualCounts.Sum();
+        return perPolicyUnused.Sum();
     }
 
     public async Task<IReadOnlyList<GraphTableRow>> GetServicePlanRowsAsync()
