@@ -911,17 +911,63 @@ internal sealed partial class W365CliApp
             frontLineServicePlanId = selectedPlan.Id;
             allotmentDisplayName = AnsiConsole.Ask<string>("Assignment name [[shown to end users in the Windows app]]:");
 
+            // Dedicated (sharedByUser) licenses cover up to 3 Cloud PCs per reserved unit, but a
+            // policy that only ended up provisioning 1 Cloud PC from a unit still has that unit's
+            // other 2 slots sitting unused -- capacity frontLineServicePlans' own totalCount/
+            // usedCount numbers never surface, since those only track whole reserved units. Check
+            // for that leftover capacity across every existing policy already drawing from this
+            // same license, so a brand-new policy doesn't undercount how many dedicated Cloud PCs
+            // can actually still be created against it.
+            var unusedDedicatedSlots = 0;
+            if (!isSharedByEntraGroup)
+            {
+                try
+                {
+                    unusedDedicatedSlots = await AnsiConsole.Status()
+                        .Spinner(Spinner.Known.Dots)
+                        .StartAsync("Checking for unused capacity on existing dedicated policies...",
+                            async _ => await _session.Graph.GetUnusedDedicatedSlotsForServicePlanAsync(selectedPlan.Id));
+                }
+                catch
+                {
+                    // Best-effort only — proceed without this info rather than blocking the wizard.
+                }
+
+                if (unusedDedicatedSlots > 0)
+                {
+                    AnsiConsole.MarkupLine($"[green]Existing dedicated policies on this license already have {unusedDedicatedSlots} unused Cloud PC slot(s) paid for (reserved units that provisioned fewer than 3 Cloud PCs each).[/]");
+                    AnsiConsole.MarkupLine("[grey]You may not need to reserve any new license units below to cover this new policy.[/]");
+                }
+            }
+
             var maxAvailableUnits = selectedPlan.AvailableCount;
+            var maxDedicatedFromExistingUnits = unusedDedicatedSlots;
             var unitCountPrompt = new TextPrompt<int>(
                 isSharedByEntraGroup
                     ? "Number of license units to reserve for this group (1 unit = 1 shared Cloud PC):"
-                    : "Number of license units to reserve for this group (1 unit = up to 3 dedicated Cloud PCs):")
+                    : $"Number of Cloud PCs to provision for this group (up to {unusedDedicatedSlots} may already be covered by existing unused capacity; beyond that, each additional group of up to 3 needs 1 new license unit):")
                 .DefaultValue(1);
-            allotmentLicensesCount = AnsiConsole.Prompt(unitCountPrompt);
+            var cloudPcOrUnitCount = AnsiConsole.Prompt(unitCountPrompt);
+
+            if (isSharedByEntraGroup)
+            {
+                allotmentLicensesCount = cloudPcOrUnitCount;
+            }
+            else
+            {
+                // For Dedicated, the user enters how many Cloud PCs they actually want -- convert
+                // to reserved license units, crediting already-unused capacity from existing
+                // policies first before reserving any brand-new units. allotmentLicensesCount is
+                // still what Graph's assign call expects, so the requested Cloud PC count is
+                // translated back into units here.
+                var cloudPcsNeedingNewUnits = Math.Max(0, cloudPcOrUnitCount - maxDedicatedFromExistingUnits);
+                allotmentLicensesCount = (int)Math.Ceiling(cloudPcsNeedingNewUnits / 3.0);
+            }
+
             if (maxAvailableUnits.HasValue && allotmentLicensesCount > maxAvailableUnits.Value)
             {
                 var proceedAnyway = AskYesNo(
-                    $"Only {maxAvailableUnits.Value} license unit(s) are available in this plan, but you entered {allotmentLicensesCount}. Continue anyway?",
+                    $"Only {maxAvailableUnits.Value} license unit(s) are available in this plan, but this needs {allotmentLicensesCount}. Continue anyway?",
                     defaultToYes: false);
                 if (!proceedAnyway)
                 {

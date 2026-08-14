@@ -351,6 +351,72 @@ internal sealed class W365GraphClient
         return await GetPagedAsync<FrontLineServicePlan>("deviceManagement/virtualEndpoint/frontLineServicePlans");
     }
 
+    /// <summary>
+    /// For a specific Frontline license pool, finds every EXISTING Windows 365 Flex Dedicated
+    /// (sharedByUser) policy assignment that already draws from it, and how many actual Cloud PCs
+    /// each one has provisioned so far — so the create-policy wizard can surface "paid for but
+    /// unused" dedicated capacity. Each reserved license unit covers up to 3 dedicated Cloud PCs;
+    /// a policy that reserved 1 unit but only provisioned 1 Cloud PC still has 2 unused slots that
+    /// frontLineServicePlans' own totalCount/usedCount numbers don't show at all (those only track
+    /// whole reserved units, never how fully each one is actually used).
+    /// </summary>
+    public async Task<int> GetUnusedDedicatedSlotsForServicePlanAsync(string servicePlanId)
+    {
+        var policies = await GetProvisioningPoliciesAsync();
+        var dedicatedPolicyIds = new List<(string PolicyId, int ReservedUnits)>();
+
+        foreach (var policy in policies)
+        {
+            if (!string.Equals(policy.ProvisioningType, "sharedByUser", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!policy.Raw.TryGetProperty("assignments", out var assignments) || assignments.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var assignment in assignments.EnumerateArray())
+            {
+                if (!assignment.TryGetProperty("target", out var target))
+                {
+                    continue;
+                }
+
+                var targetServicePlanId = GetString(target, "servicePlanId");
+                if (!string.Equals(targetServicePlanId, servicePlanId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                dedicatedPolicyIds.Add((policy.Id, GetInt(target, "allotmentLicensesCount") ?? 0));
+            }
+        }
+
+        if (dedicatedPolicyIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var actualCounts = await ConcurrencyHelper.MapWithConcurrencyAsync(dedicatedPolicyIds, maxConcurrency: 5, async entry =>
+        {
+            try
+            {
+                var cloudPcs = await GetCloudPcsByProvisioningPolicyAsync(entry.PolicyId);
+                return Math.Max(0, entry.ReservedUnits * 3 - cloudPcs.Count);
+            }
+            catch
+            {
+                // Best-effort only — if we can't verify a policy's actual Cloud PC count, don't
+                // let one failure block showing capacity info for the rest.
+                return 0;
+            }
+        });
+
+        return actualCounts.Sum();
+    }
+
     public async Task<IReadOnlyList<GraphTableRow>> GetServicePlanRowsAsync()
     {
         var plans = await GetCloudPcServicePlansAsync();
