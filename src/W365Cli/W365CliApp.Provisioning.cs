@@ -491,8 +491,18 @@ internal sealed partial class W365CliApp
                 return;
             }
 
-            AnsiConsole.Write(new Panel(new Markup(
-                    $"[green]Succeeded: {summary.Succeeded}[/]  [red]Failed: {summary.Failed}[/]  [#d29922]Review required: {summary.ReviewRequired}[/]  [#58a6ff]In progress: {summary.InProgress}[/]  [grey]Scheduled: {summary.Scheduled}[/]"))
+            var rows2 = new List<Spectre.Console.Rendering.IRenderable>
+            {
+                new Markup($"[green]Succeeded: {summary.Succeeded}[/]  [red]Failed: {summary.Failed}[/]  [#d29922]Review required: {summary.ReviewRequired}[/]  [#58a6ff]In progress: {summary.InProgress}[/]  [grey]Scheduled: {summary.Scheduled}[/]")
+            };
+
+            var bar = BuildActionStatusBar(summary, Math.Max(20, Math.Min(80, Console.WindowWidth - 8)));
+            if (!string.IsNullOrEmpty(bar))
+            {
+                rows2.Add(new Markup(bar));
+            }
+
+            AnsiConsole.Write(new Panel(new Rows(rows2))
                 .Header("Action status")
                 .Border(BoxBorder.Rounded));
         }
@@ -505,6 +515,54 @@ internal sealed partial class W365CliApp
             summaryRenderer: RenderSummary,
             loadMoreAsync: async (skip, top) => await _session.Graph.GetProvisioningPolicyActionReportRowsAsync(policy.Id, top, skip),
             pageBatchSize: pageSize);
+    }
+
+    /// <summary>
+    /// Renders a proportional horizontal bar (colored block segments) for the 5 action-status
+    /// buckets, matching the color coding used in the text summary above it — a quick visual read
+    /// of the overall health of a policy's actions at a glance, alongside the exact counts.
+    /// </summary>
+    private static string BuildActionStatusBar(ProvisioningPolicyActionStatusSummary summary, int width)
+    {
+        if (summary.Total == 0)
+        {
+            return string.Empty;
+        }
+
+        var segments = new (int Count, string Color)[]
+        {
+            (summary.Succeeded, "green"),
+            (summary.Failed, "red"),
+            (summary.ReviewRequired, "#d29922"),
+            (summary.InProgress, "#58a6ff"),
+            (summary.Scheduled, "grey")
+        };
+
+        // Largest-remainder rounding: give every non-zero bucket at least 1 character of the bar
+        // (so small-but-nonzero counts like a single Failed action are still visible) while still
+        // summing to exactly `width` characters total, rather than letting naive rounding either
+        // overshoot the bar length or make a real nonzero bucket disappear entirely at low widths.
+        var rawWidths = segments.Select(s => s.Count > 0 ? Math.Max(1, s.Count * width / summary.Total) : 0).ToArray();
+        var totalAssigned = rawWidths.Sum();
+        var diff = width - totalAssigned;
+        var largestIndex = Array.IndexOf(rawWidths, rawWidths.Max());
+        if (largestIndex >= 0)
+        {
+            rawWidths[largestIndex] = Math.Max(0, rawWidths[largestIndex] + diff);
+        }
+
+        var builder = new System.Text.StringBuilder();
+        for (var i = 0; i < segments.Length; i++)
+        {
+            if (rawWidths[i] <= 0)
+            {
+                continue;
+            }
+
+            builder.Append($"[{segments[i].Color}]{new string('█', rawWidths[i])}[/]");
+        }
+
+        return builder.ToString();
     }
 
     private static string GetProvisioningPolicyActionReportHeader()
@@ -1585,6 +1643,7 @@ internal sealed partial class W365CliApp
         {
             List<GroupMemberSummary> members;
             HashSet<string> assignedUserIds = [];
+            string? hasCloudPcDiagnostic = null;
             try
             {
                 members = (await AnsiConsole.Status()
@@ -1595,25 +1654,40 @@ internal sealed partial class W365CliApp
 
                 // Windows 365 Flex Dedicated (sharedByUser) group sizes can exceed licensed
                 // capacity, so knowing WHICH members actually have a Cloud PC (vs. which are still
-                // waiting) is the whole point of this view for that provisioning type. Best-effort:
-                // if this lookup fails, the member list still renders without the extra column
-                // rather than blocking the whole screen.
+                // waiting) is the whole point of this view for that provisioning type. Diagnostic
+                // detail is deliberately surfaced (not silently swallowed) here: this whole lookup
+                // chain (resolve assignment IDs for the group -> fetch assignedUsers per ID) relies
+                // on undocumented Graph shapes reverse-engineered from captured browser traffic, so
+                // if it ever returns nothing, the user needs to see WHERE it failed to diagnose it,
+                // rather than getting a silently-wrong "No" for every member.
                 if (showHasCloudPc)
                 {
                     try
                     {
                         var assignmentIds = await _session.Graph.GetAssignmentIdsForGroupAsync(policy.Id, groupId);
-                        var assignedUsersPerAssignment = await ConcurrencyHelper.MapWithConcurrencyAsync(assignmentIds, maxConcurrency: 5,
-                            async assignmentId => await _session.Graph.GetAssignmentAssignedUsersAsync(policy.Id, assignmentId));
-                        assignedUserIds = assignedUsersPerAssignment
-                            .SelectMany(list => list)
-                            .Select(user => user.Id)
-                            .Where(id => !string.IsNullOrWhiteSpace(id))
-                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        if (assignmentIds.Count == 0)
+                        {
+                            hasCloudPcDiagnostic = "[yellow]No policy assignment was found matching this group — \"Has Cloud PC\" can't be determined.[/]";
+                        }
+                        else
+                        {
+                            var assignedUsersPerAssignment = await ConcurrencyHelper.MapWithConcurrencyAsync(assignmentIds, maxConcurrency: 5,
+                                async assignmentId => await _session.Graph.GetAssignmentAssignedUsersAsync(policy.Id, assignmentId));
+                            assignedUserIds = assignedUsersPerAssignment
+                                .SelectMany(list => list)
+                                .Select(user => user.Id)
+                                .Where(id => !string.IsNullOrWhiteSpace(id))
+                                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                            if (assignedUserIds.Count == 0)
+                            {
+                                hasCloudPcDiagnostic = $"[yellow]Found {assignmentIds.Count} assignment(s) for this group, but no assigned users were returned.[/]";
+                            }
+                        }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Best-effort only.
+                        hasCloudPcDiagnostic = $"[red]Failed to check Cloud PC assignment: {Markup.Escape(Fit(ex.Message, Math.Max(40, Console.WindowWidth - 4)))}[/]";
                     }
                 }
             }
@@ -1639,8 +1713,15 @@ internal sealed partial class W365CliApp
             AnsiConsole.MarkupLine($"[#58a6ff]Group members[/] [grey]{Markup.Escape(groupName)}[/]  [grey]({members.Count})[/]");
             if (showHasCloudPc)
             {
-                var withCloudPc = members.Count(member => assignedUserIds.Contains(member.Id));
-                AnsiConsole.MarkupLine($"[grey]Has Cloud PC:[/] [green]{withCloudPc}[/]  [grey]Waiting:[/] [yellow]{members.Count - withCloudPc}[/]");
+                if (hasCloudPcDiagnostic is not null)
+                {
+                    AnsiConsole.MarkupLine(hasCloudPcDiagnostic);
+                }
+                else
+                {
+                    var withCloudPc = members.Count(member => assignedUserIds.Contains(member.Id));
+                    AnsiConsole.MarkupLine($"[grey]Has Cloud PC:[/] [green]{withCloudPc}[/]  [grey]Waiting:[/] [yellow]{members.Count - withCloudPc}[/]");
+                }
             }
 
             AnsiConsole.WriteLine();
@@ -1676,9 +1757,21 @@ internal sealed partial class W365CliApp
 
                     if (showHasCloudPc)
                     {
-                        var hasCloudPc = assignedUserIds.Contains(member.Id);
-                        var cellText = hasCloudPc ? "[green]Yes[/]" : "[yellow]No[/]";
-                        cells.Add(selected ? Selected(hasCloudPc ? "Yes" : "No") : cellText);
+                        string cellRawText;
+                        string cellText;
+                        if (hasCloudPcDiagnostic is not null)
+                        {
+                            cellRawText = "?";
+                            cellText = "[grey]?[/]";
+                        }
+                        else
+                        {
+                            var hasCloudPc = assignedUserIds.Contains(member.Id);
+                            cellRawText = hasCloudPc ? "Yes" : "No";
+                            cellText = hasCloudPc ? "[green]Yes[/]" : "[yellow]No[/]";
+                        }
+
+                        cells.Add(selected ? Selected(cellRawText) : cellText);
                     }
 
                     table.AddRow(cells.ToArray());
