@@ -718,7 +718,7 @@ internal sealed partial class W365CliApp
     {
         AnsiConsole.Clear();
         RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Create copy");
-        var displayName = AnsiConsole.Ask<string>("New policy display name:");
+        var displayName = AnsiConsole.Prompt(new TextPrompt<string>("New policy display name [[Enter blank to cancel]]:").AllowEmpty());
         if (string.IsNullOrWhiteSpace(displayName))
         {
             TimedMessage("[yellow]Create copy cancelled. Display name is required.[/]");
@@ -746,7 +746,7 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine("[grey]Create a new Windows 365 provisioning policy.[/]");
         AnsiConsole.WriteLine();
 
-        var displayName = AnsiConsole.Ask<string>("Policy display name:");
+        var displayName = AnsiConsole.Prompt(new TextPrompt<string>("Policy display name [[Enter blank to cancel]]:").AllowEmpty());
         if (string.IsNullOrWhiteSpace(displayName))
         {
             TimedMessage("[yellow]Create policy cancelled. Display name is required.[/]");
@@ -1063,7 +1063,12 @@ internal sealed partial class W365CliApp
             }
 
             frontLineServicePlanId = selectedPlan.Id;
-            allotmentDisplayName = AnsiConsole.Ask<string>("Assignment name [[shown to end users in the Windows app]]:");
+            allotmentDisplayName = AnsiConsole.Prompt(new TextPrompt<string>("Assignment name [[shown to end users in the Windows app; Enter blank to cancel]]:").AllowEmpty());
+            if (string.IsNullOrWhiteSpace(allotmentDisplayName))
+            {
+                TimedMessage("[yellow]Create policy cancelled. Assignment name is required.[/]");
+                return;
+            }
 
             // Matches the Windows 365 admin portal's own Flex assignment step, which shows the
             // target group's member count right alongside the Cloud PC/session count input as
@@ -1901,7 +1906,7 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine($"[#58a6ff]Add member[/] [grey]{Markup.Escape(groupName)}[/]");
         AnsiConsole.WriteLine();
 
-        var query = AnsiConsole.Ask<string>("Search by name, UPN, or email:");
+        var query = AnsiConsole.Prompt(new TextPrompt<string>("Search by name, UPN, or email [[Enter blank to cancel]]:").AllowEmpty());
         if (string.IsNullOrWhiteSpace(query))
         {
             return;

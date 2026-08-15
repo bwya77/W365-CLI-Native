@@ -1409,7 +1409,7 @@ internal sealed partial class W365CliApp
     private static string PromptFilter()
     {
         AnsiConsole.WriteLine();
-        return AnsiConsole.Ask<string>("Filter:");
+        return AnsiConsole.Prompt(new TextPrompt<string>("Filter [[Enter blank to clear]]:").AllowEmpty());
     }
 
     private static string StatusMarkup(string? status, int width = 24)
