@@ -1091,55 +1091,6 @@ internal sealed class W365GraphClient
         return ParseReportRows(document.RootElement, "CloudPcDeviceDisplayName", "Action", "ActionState", "LastUpdatedDateTime");
     }
 
-    /// <summary>
-    /// Which Entra IDs of a target group actually have a Cloud PC provisioned under a specific
-    /// provisioning policy assignment -- confirmed via captured browser network traffic from the
-    /// Windows 365 admin portal's "see who has a Cloud PC" view. Most meaningful for Flex Dedicated
-    /// (sharedByUser) policies, where group size can exceed available licensed capacity, so not
-    /// every member necessarily gets a Cloud PC.
-    /// </summary>
-    public async Task<IReadOnlyList<GroupMemberSummary>> GetAssignmentAssignedUsersAsync(string policyId, string assignmentId)
-    {
-        var select = Uri.EscapeDataString("id,displayName,userPrincipalName");
-        return await GetPagedAsync<GroupMemberSummary>(
-            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}/assignments/{Uri.EscapeDataString(assignmentId)}/assignedUsers?$select={select}");
-    }
-
-    /// <summary>
-    /// Real assignment IDs (as Graph generated them, not the "{policyId}_{groupId}" composite this
-    /// app sometimes constructs client-side for a fresh dedicated create) for every assignment on a
-    /// provisioning policy that targets a specific group -- needed to call assignedUsers, which is
-    /// keyed by the server-assigned assignment ID.
-    /// </summary>
-    public async Task<IReadOnlyList<string>> GetAssignmentIdsForGroupAsync(string policyId, string groupId)
-    {
-        var assignmentsPage = await GetAsync<GraphPage<JsonElement>>(
-            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}/assignments");
-
-        var ids = new List<string>();
-        foreach (var assignment in assignmentsPage?.Value ?? [])
-        {
-            if (!assignment.TryGetProperty("target", out var target))
-            {
-                continue;
-            }
-
-            var targetGroupId = GetString(target, "groupId");
-            if (!string.Equals(targetGroupId, groupId, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var assignmentId = GetString(assignment, "id");
-            if (!string.IsNullOrWhiteSpace(assignmentId))
-            {
-                ids.Add(assignmentId);
-            }
-        }
-
-        return ids;
-    }
-
     public async Task<IReadOnlyList<GraphTableRow>> GetLaunchDetailRowsAsync()
     {
         var cloudPcs = await GetCloudPcsAsync();

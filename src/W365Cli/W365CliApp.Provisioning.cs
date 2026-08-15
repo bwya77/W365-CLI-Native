@@ -1642,7 +1642,7 @@ internal sealed partial class W365CliApp
         while (true)
         {
             List<GroupMemberSummary> members;
-            HashSet<string> assignedUserIds = [];
+            HashSet<string> assignedUserPrincipalNames = [];
             string? hasCloudPcDiagnostic = null;
             try
             {
@@ -1654,35 +1654,25 @@ internal sealed partial class W365CliApp
 
                 // Windows 365 Flex Dedicated (sharedByUser) group sizes can exceed licensed
                 // capacity, so knowing WHICH members actually have a Cloud PC (vs. which are still
-                // waiting) is the whole point of this view for that provisioning type. Diagnostic
-                // detail is deliberately surfaced (not silently swallowed) here: this whole lookup
-                // chain (resolve assignment IDs for the group -> fetch assignedUsers per ID) relies
-                // on undocumented Graph shapes reverse-engineered from captured browser traffic, so
-                // if it ever returns nothing, the user needs to see WHERE it failed to diagnose it,
-                // rather than getting a silently-wrong "No" for every member.
+                // waiting) is the whole point of this view for that provisioning type. Originally
+                // tried the provisioningPolicy assignment's assignedUsers relationship, but that
+                // undocumented endpoint 404s in practice -- cross-referencing against the policy's
+                // own Cloud PC list (by UPN) is simpler and uses an endpoint already proven
+                // reliable elsewhere in this app (the same data "View Cloud PCs" already shows).
                 if (showHasCloudPc)
                 {
                     try
                     {
-                        var assignmentIds = await _session.Graph.GetAssignmentIdsForGroupAsync(policy.Id, groupId);
-                        if (assignmentIds.Count == 0)
-                        {
-                            hasCloudPcDiagnostic = "[yellow]No policy assignment was found matching this group — \"Has Cloud PC\" can't be determined.[/]";
-                        }
-                        else
-                        {
-                            var assignedUsersPerAssignment = await ConcurrencyHelper.MapWithConcurrencyAsync(assignmentIds, maxConcurrency: 5,
-                                async assignmentId => await _session.Graph.GetAssignmentAssignedUsersAsync(policy.Id, assignmentId));
-                            assignedUserIds = assignedUsersPerAssignment
-                                .SelectMany(list => list)
-                                .Select(user => user.Id)
-                                .Where(id => !string.IsNullOrWhiteSpace(id))
-                                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        var cloudPcs = await _session.Graph.GetCloudPcsByProvisioningPolicyAsync(policy.Id);
+                        assignedUserPrincipalNames = cloudPcs
+                            .Select(cloudPc => cloudPc.EffectiveUserPrincipalName)
+                            .Where(upn => !string.IsNullOrWhiteSpace(upn))
+                            .Select(upn => upn!)
+                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-                            if (assignedUserIds.Count == 0)
-                            {
-                                hasCloudPcDiagnostic = $"[yellow]Found {assignmentIds.Count} assignment(s) for this group, but no assigned users were returned.[/]";
-                            }
+                        if (assignedUserPrincipalNames.Count == 0)
+                        {
+                            hasCloudPcDiagnostic = "[yellow]This policy has no Cloud PCs yet — \"Has Cloud PC\" can't be determined.[/]";
                         }
                     }
                     catch (Exception ex)
@@ -1719,7 +1709,7 @@ internal sealed partial class W365CliApp
                 }
                 else
                 {
-                    var withCloudPc = members.Count(member => assignedUserIds.Contains(member.Id));
+                    var withCloudPc = members.Count(member => !string.IsNullOrWhiteSpace(member.UserPrincipalName) && assignedUserPrincipalNames.Contains(member.UserPrincipalName));
                     AnsiConsole.MarkupLine($"[grey]Has Cloud PC:[/] [green]{withCloudPc}[/]  [grey]Waiting:[/] [yellow]{members.Count - withCloudPc}[/]");
                 }
             }
@@ -1766,7 +1756,7 @@ internal sealed partial class W365CliApp
                         }
                         else
                         {
-                            var hasCloudPc = assignedUserIds.Contains(member.Id);
+                            var hasCloudPc = !string.IsNullOrWhiteSpace(member.UserPrincipalName) && assignedUserPrincipalNames.Contains(member.UserPrincipalName);
                             cellRawText = hasCloudPc ? "Yes" : "No";
                             cellText = hasCloudPc ? "[green]Yes[/]" : "[yellow]No[/]";
                         }
