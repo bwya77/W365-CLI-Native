@@ -233,6 +233,20 @@ internal sealed record ProvisioningPolicySummary
     public JsonElement Raw { get; init; }
 }
 
+/// <summary>
+/// Counts of a provisioning policy's Cloud PC actions by state, matching the colored status bar
+/// shown above a policy's action report in the Windows 365 admin portal.
+/// </summary>
+internal sealed record ProvisioningPolicyActionStatusSummary(
+    int Succeeded,
+    int Failed,
+    int ReviewRequired,
+    int InProgress,
+    int Scheduled)
+{
+    public int Total => Succeeded + Failed + ReviewRequired + InProgress + Scheduled;
+}
+
 internal sealed record CloudAppSummary
 {
     [JsonPropertyName("id")]

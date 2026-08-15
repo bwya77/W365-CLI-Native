@@ -276,7 +276,7 @@ internal sealed partial class W365CliApp
 
     private static string[] GetProvisioningPolicyActions(ProvisioningPolicySummary policy)
     {
-        var actions = new List<string> { "View Cloud PCs", "Export", "Create copy", "Reprovision policy Cloud PCs" };
+        var actions = new List<string> { "View Cloud PCs", "Action report", "Export", "Create copy", "Reprovision policy Cloud PCs" };
 
         if (IsSharedProvisioningPolicy(policy))
         {
@@ -313,6 +313,18 @@ internal sealed partial class W365CliApp
     private static bool IsSharedByEntraGroupPolicy(ProvisioningPolicySummary policy)
     {
         return string.Equals(policy.ProvisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Windows 365 Flex Dedicated policies (sharedByUser) can have more group members than
+    /// available licensed dedicated Cloud PC capacity — unlike plain Enterprise "dedicated", where
+    /// every assigned member is expected to get one. Distinguishing this matters for "Manage group
+    /// members": only sharedByUser policies need the extra "Has Cloud PC" column showing which
+    /// members actually got provisioned vs. which are still waiting on capacity.
+    /// </summary>
+    private static bool IsSharedByUserPolicy(ProvisioningPolicySummary policy)
+    {
+        return string.Equals(policy.ProvisioningType, "sharedByUser", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void RenderProvisioningPolicyDetailLayout(ProvisioningPolicySummary policy, IReadOnlyList<string> actions, int selectedActionIndex)
@@ -364,6 +376,9 @@ internal sealed partial class W365CliApp
         {
             case "View Cloud PCs":
                 await ShowCloudPcsForProvisioningPolicyAsync(policy);
+                break;
+            case "Action report":
+                await ShowProvisioningPolicyActionReportAsync(policy);
                 break;
             case "Export":
                 await ExportProvisioningPolicyAsync(policy);
@@ -439,6 +454,83 @@ internal sealed partial class W365CliApp
         }
 
         await ConfirmAndRunAsync("Delete", policy.DisplayName, async () => await _session.Graph.DeleteProvisioningPolicyAsync(policy.Id), "Policy", policy.DisplayName);
+    }
+
+    /// <summary>
+    /// Colored action-status bar (Succeeded/Failed/Review required/In progress/Scheduled) plus a
+    /// scrollable action list beneath it -- mirrors the Windows 365 admin portal's own provisioning
+    /// policy action report. The summary counts and detail rows both come from the same
+    /// undocumented reports/getActionStatusReports endpoint, confirmed via captured browser
+    /// network traffic.
+    /// </summary>
+    private async Task ShowProvisioningPolicyActionReportAsync(ProvisioningPolicySummary policy)
+    {
+        const int pageSize = 100;
+
+        // Fetched once up front rather than inside the summaryRenderer callback: ShowGraphRowsAsync
+        // invokes that callback on every redraw (i.e. every keypress while browsing the list), so a
+        // network call there would silently re-fetch the summary on every single navigation
+        // keystroke instead of once per screen visit.
+        ProvisioningPolicyActionStatusSummary? summary = null;
+        try
+        {
+            summary = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Loading action status summary...", async _ => await _session.Graph.GetProvisioningPolicyActionStatusSummaryAsync(policy.Id));
+        }
+        catch
+        {
+            // Best-effort only — the detail rows below still convey the same information if the
+            // summary counts fail to load for some reason.
+        }
+
+        void RenderSummary(IReadOnlyList<GraphTableRow> rows)
+        {
+            if (summary is null)
+            {
+                return;
+            }
+
+            AnsiConsole.Write(new Panel(new Markup(
+                    $"[green]Succeeded: {summary.Succeeded}[/]  [red]Failed: {summary.Failed}[/]  [#d29922]Review required: {summary.ReviewRequired}[/]  [#58a6ff]In progress: {summary.InProgress}[/]  [grey]Scheduled: {summary.Scheduled}[/]"))
+                .Header("Action status")
+                .Border(BoxBorder.Rounded));
+        }
+
+        await ShowGraphRowsAsync(
+            $"action report for {policy.DisplayName}",
+            async () => await _session.Graph.GetProvisioningPolicyActionReportRowsAsync(policy.Id, pageSize, 0),
+            GetProvisioningPolicyActionReportHeader,
+            FormatProvisioningPolicyActionReportRow,
+            summaryRenderer: RenderSummary,
+            loadMoreAsync: async (skip, top) => await _session.Graph.GetProvisioningPolicyActionReportRowsAsync(policy.Id, top, skip),
+            pageBatchSize: pageSize);
+    }
+
+    private static string GetProvisioningPolicyActionReportHeader()
+    {
+        var widths = GetProvisioningPolicyActionReportWidths();
+        return Row("Cloud PC", widths.CloudPc, "Action", widths.Action, "State", widths.State, "Last updated", widths.LastUpdated);
+    }
+
+    private static string FormatProvisioningPolicyActionReportRow(GraphTableRow row)
+    {
+        var widths = GetProvisioningPolicyActionReportWidths();
+        return Row(
+            GetField(row, "CloudPcDeviceDisplayName"), widths.CloudPc,
+            GetField(row, "Action"), widths.Action,
+            GetField(row, "ActionState"), widths.State,
+            GetField(row, "LastUpdatedDateTime"), widths.LastUpdated);
+    }
+
+    private static (int CloudPc, int Action, int State, int LastUpdated) GetProvisioningPolicyActionReportWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int cloudPc = 24;
+        const int action = 20;
+        const int state = 16;
+        var lastUpdated = Math.Max(16, available - cloudPc - action - state - 6);
+        return (cloudPc, action, state, lastUpdated);
     }
 
     private async Task ShowCloudPcsForProvisioningPolicyAsync(ProvisioningPolicySummary policy)
@@ -1487,10 +1579,12 @@ internal sealed partial class W365CliApp
         }
 
         var selectedIndex = 0;
+        var showHasCloudPc = IsSharedByUserPolicy(policy);
 
         while (true)
         {
             List<GroupMemberSummary> members;
+            HashSet<string> assignedUserIds = [];
             try
             {
                 members = (await AnsiConsole.Status()
@@ -1498,6 +1592,30 @@ internal sealed partial class W365CliApp
                     .StartAsync($"Loading members of {groupName}...", async _ => await _session.Graph.GetGroupMembersAsync(groupId)))
                     .OrderBy(member => member.Name, StringComparer.OrdinalIgnoreCase)
                     .ToList();
+
+                // Windows 365 Flex Dedicated (sharedByUser) group sizes can exceed licensed
+                // capacity, so knowing WHICH members actually have a Cloud PC (vs. which are still
+                // waiting) is the whole point of this view for that provisioning type. Best-effort:
+                // if this lookup fails, the member list still renders without the extra column
+                // rather than blocking the whole screen.
+                if (showHasCloudPc)
+                {
+                    try
+                    {
+                        var assignmentIds = await _session.Graph.GetAssignmentIdsForGroupAsync(policy.Id, groupId);
+                        var assignedUsersPerAssignment = await ConcurrencyHelper.MapWithConcurrencyAsync(assignmentIds, maxConcurrency: 5,
+                            async assignmentId => await _session.Graph.GetAssignmentAssignedUsersAsync(policy.Id, assignmentId));
+                        assignedUserIds = assignedUsersPerAssignment
+                            .SelectMany(list => list)
+                            .Select(user => user.Id)
+                            .Where(id => !string.IsNullOrWhiteSpace(id))
+                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    }
+                    catch
+                    {
+                        // Best-effort only.
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1519,12 +1637,29 @@ internal sealed partial class W365CliApp
             AnsiConsole.Clear();
             RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Manage group members");
             AnsiConsole.MarkupLine($"[#58a6ff]Group members[/] [grey]{Markup.Escape(groupName)}[/]  [grey]({members.Count})[/]");
+            if (showHasCloudPc)
+            {
+                var withCloudPc = members.Count(member => assignedUserIds.Contains(member.Id));
+                AnsiConsole.MarkupLine($"[grey]Has Cloud PC:[/] [green]{withCloudPc}[/]  [grey]Waiting:[/] [yellow]{members.Count - withCloudPc}[/]");
+            }
+
             AnsiConsole.WriteLine();
 
             var table = new Table().Border(TableBorder.Rounded).AddColumn(" ").AddColumn("Name").AddColumn("UPN");
+            if (showHasCloudPc)
+            {
+                table.AddColumn("Has Cloud PC");
+            }
+
             if (members.Count == 0)
             {
-                table.AddRow(" ", "[grey]No members found.[/]", "-");
+                var emptyCells = new List<string> { " ", "[grey]No members found.[/]", "-" };
+                if (showHasCloudPc)
+                {
+                    emptyCells.Add("-");
+                }
+
+                table.AddRow(emptyCells.ToArray());
             }
             else
             {
@@ -1532,10 +1667,21 @@ internal sealed partial class W365CliApp
                 {
                     var member = members[index];
                     var selected = index == selectedIndex;
-                    table.AddRow(
+                    var cells = new List<string>
+                    {
                         selected ? "[black on #58a6ff]>[/]" : " ",
                         selected ? Selected(Markup.Escape(member.DisplayName ?? "-")) : Markup.Escape(member.DisplayName ?? "-"),
-                        selected ? Selected(Markup.Escape(member.UserPrincipalName ?? "-")) : Markup.Escape(member.UserPrincipalName ?? "-"));
+                        selected ? Selected(Markup.Escape(member.UserPrincipalName ?? "-")) : Markup.Escape(member.UserPrincipalName ?? "-")
+                    };
+
+                    if (showHasCloudPc)
+                    {
+                        var hasCloudPc = assignedUserIds.Contains(member.Id);
+                        var cellText = hasCloudPc ? "[green]Yes[/]" : "[yellow]No[/]";
+                        cells.Add(selected ? Selected(hasCloudPc ? "Yes" : "No") : cellText);
+                    }
+
+                    table.AddRow(cells.ToArray());
                 }
             }
 

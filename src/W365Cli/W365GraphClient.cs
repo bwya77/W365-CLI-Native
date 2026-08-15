@@ -1030,6 +1030,116 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    /// <summary>
+    /// Counts of a provisioning policy's Cloud PC actions grouped by state -- the same five
+    /// buckets the Windows 365 admin portal shows as a colored status bar on a policy's action
+    /// report. Endpoint confirmed via captured browser network traffic; not (yet) in the official
+    /// Graph API reference. "In progress" combines Pending and Active per the same capture.
+    /// </summary>
+    public async Task<ProvisioningPolicyActionStatusSummary> GetProvisioningPolicyActionStatusSummaryAsync(string policyId)
+    {
+        var escapedPolicyId = policyId.Replace("'", "''", StringComparison.Ordinal);
+
+        async Task<int> CountAsync(string stateFilter)
+        {
+            var body = new Dictionary<string, object>
+            {
+                ["filter"] = $"({stateFilter}) and (PolicyId eq '{escapedPolicyId}')",
+                ["search"] = string.Empty
+            };
+
+            var json = await PostJsonForStringAsync("deviceManagement/virtualEndpoint/reports/getActionStatusReports", body);
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("TotalRowCount", out var totalRowCount) && totalRowCount.ValueKind == JsonValueKind.Number
+                ? totalRowCount.GetInt32()
+                : 0;
+        }
+
+        var succeeded = await CountAsync("ActionState eq 'Done'");
+        var failed = await CountAsync("ActionState eq 'Failed'");
+        var reviewRequired = await CountAsync("ActionState eq 'ReviewRequired'");
+        var inProgress = await CountAsync("ActionState eq 'Pending' or ActionState eq 'Active'");
+        var scheduled = await CountAsync("ActionState eq 'Scheduled'");
+
+        return new ProvisioningPolicyActionStatusSummary(succeeded, failed, reviewRequired, inProgress, scheduled);
+    }
+
+    /// <summary>
+    /// The detailed action list backing a provisioning policy's action report (the table beneath
+    /// the colored status bar) -- same reports endpoint and columnar Schema/Values shape as
+    /// retrieveCloudPcTroubleshootReports, confirmed via captured browser network traffic.
+    /// </summary>
+    public async Task<IReadOnlyList<GraphTableRow>> GetProvisioningPolicyActionReportRowsAsync(string policyId, int top = 100, int skip = 0)
+    {
+        var escapedPolicyId = policyId.Replace("'", "''", StringComparison.Ordinal);
+        var body = new Dictionary<string, object>
+        {
+            ["top"] = top,
+            ["skip"] = skip,
+            ["search"] = string.Empty,
+            ["filter"] = $"(PolicyId eq '{escapedPolicyId}')",
+            ["select"] = new[]
+            {
+                "Id", "CloudPcId", "CloudPcDeviceDisplayName", "Action", "ActionState", "ActionErrorDetail",
+                "BulkActionId", "BulkActionDisplayName", "RequestDateTime", "LastUpdatedDateTime"
+            },
+            ["orderBy"] = new[] { "LastUpdatedDateTime desc" }
+        };
+
+        var json = await PostJsonForStringAsync("deviceManagement/virtualEndpoint/reports/getActionStatusReports", body);
+        using var document = JsonDocument.Parse(json);
+        return ParseReportRows(document.RootElement, "CloudPcDeviceDisplayName", "Action", "ActionState", "LastUpdatedDateTime");
+    }
+
+    /// <summary>
+    /// Which Entra IDs of a target group actually have a Cloud PC provisioned under a specific
+    /// provisioning policy assignment -- confirmed via captured browser network traffic from the
+    /// Windows 365 admin portal's "see who has a Cloud PC" view. Most meaningful for Flex Dedicated
+    /// (sharedByUser) policies, where group size can exceed available licensed capacity, so not
+    /// every member necessarily gets a Cloud PC.
+    /// </summary>
+    public async Task<IReadOnlyList<GroupMemberSummary>> GetAssignmentAssignedUsersAsync(string policyId, string assignmentId)
+    {
+        var select = Uri.EscapeDataString("id,displayName,userPrincipalName");
+        return await GetPagedAsync<GroupMemberSummary>(
+            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}/assignments/{Uri.EscapeDataString(assignmentId)}/assignedUsers?$select={select}");
+    }
+
+    /// <summary>
+    /// Real assignment IDs (as Graph generated them, not the "{policyId}_{groupId}" composite this
+    /// app sometimes constructs client-side for a fresh dedicated create) for every assignment on a
+    /// provisioning policy that targets a specific group -- needed to call assignedUsers, which is
+    /// keyed by the server-assigned assignment ID.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetAssignmentIdsForGroupAsync(string policyId, string groupId)
+    {
+        var assignmentsPage = await GetAsync<GraphPage<JsonElement>>(
+            $"deviceManagement/virtualEndpoint/provisioningPolicies/{Uri.EscapeDataString(policyId)}/assignments");
+
+        var ids = new List<string>();
+        foreach (var assignment in assignmentsPage?.Value ?? [])
+        {
+            if (!assignment.TryGetProperty("target", out var target))
+            {
+                continue;
+            }
+
+            var targetGroupId = GetString(target, "groupId");
+            if (!string.Equals(targetGroupId, groupId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var assignmentId = GetString(assignment, "id");
+            if (!string.IsNullOrWhiteSpace(assignmentId))
+            {
+                ids.Add(assignmentId);
+            }
+        }
+
+        return ids;
+    }
+
     public async Task<IReadOnlyList<GraphTableRow>> GetLaunchDetailRowsAsync()
     {
         var cloudPcs = await GetCloudPcsAsync();
