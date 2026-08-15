@@ -164,23 +164,32 @@ internal sealed partial class W365CliApp
     private static Table CreateCloudAppTable(IReadOnlyList<CloudAppSummary> allApps, IReadOnlyList<CloudAppSummary> visibleApps, int selectedIndex, string filter)
     {
         var widths = GetCloudAppWidths();
+
+        // NoWrap on every sized column is essential here: Spectre's default column overflow mode
+        // wraps text that doesn't fit the column Spectre itself decides to render (which can be
+        // narrower than the exact width we PadRight() our cell text to in Fit()). Because Fit()'s
+        // padding is nearly all trailing spaces, a wrapped cell's second line is effectively blank
+        // -- exactly the empty-looking rows seen when this table's widths were made to scale with
+        // a very wide terminal without NoWrap. Setting Width+NoWrap explicitly makes each column's
+        // render width match Fit()'s truncation point exactly, so overflow is cropped with "..."
+        // (already handled by Fit()) instead of wrapping onto a blank continuation line.
         var table = new Table()
             .Title("Cloud Apps")
             .Border(TableBorder.Rounded)
-            .AddColumn(" ")
-            .AddColumn("Status")
-            .AddColumn("Name");
+            .AddColumn(new TableColumn(" ") { Width = 1, NoWrap = true })
+            .AddColumn(new TableColumn("Status") { Width = widths.Status, NoWrap = true })
+            .AddColumn(new TableColumn("Name") { Width = widths.Name, NoWrap = true });
 
         var showPublisher = Console.WindowWidth >= 100;
         var showDates = Console.WindowWidth >= 150;
         if (showPublisher)
         {
-            table.AddColumn("Publisher");
+            table.AddColumn(new TableColumn("Publisher") { Width = widths.Publisher, NoWrap = true });
         }
         if (showDates)
         {
-            table.AddColumn("Published");
-            table.AddColumn("Added");
+            table.AddColumn(new TableColumn("Published") { Width = widths.Published, NoWrap = true });
+            table.AddColumn(new TableColumn("Added") { Width = widths.Added, NoWrap = true });
         }
 
         if (visibleApps.Count == 0)
@@ -256,17 +265,32 @@ internal sealed partial class W365CliApp
             .ToArray();
     }
 
+    /// <summary>
+    /// Computes exact column widths so the rendered table (borders + padding included) fits
+    /// within Console.WindowWidth -- previously this budgeted only a flat "-4"/"-2" fudge factor
+    /// (copied loosely from GetCloudPcWidths' simpler 3-column split), which under-accounted for
+    /// a Rounded-border table's real overhead (n+1 border chars + 2 padding chars per column) once
+    /// the fixed 104/132 cap was removed. That under-accounting let Name/Publisher grow wider than
+    /// what Spectre could actually render, and since Spectre wraps overflow by default (and Fit()
+    /// pads with trailing spaces), the wrapped continuation showed up as blank-looking rows. Now
+    /// paired with explicit Width+NoWrap on each column in CreateCloudAppTable as a second layer
+    /// of protection against any residual rounding.
+    /// </summary>
     private static (int Status, int Name, int Publisher, int Published, int Added) GetCloudAppWidths()
     {
         const int status = 12;
         const int published = 18;
         const int added = 18;
+        var showPublisher = Console.WindowWidth >= 100;
         var showDates = Console.WindowWidth >= 150;
-        var reserved = status + (showDates ? published + added : 0);
-        var available = Math.Min(Math.Max(72, Console.WindowWidth - 4), showDates ? 132 : 104);
-        var remaining = Math.Max(40, available - reserved - (showDates ? 4 : 2));
-        var name = Math.Clamp((int)(remaining * 0.58), 30, 48);
-        var publisher = Math.Clamp(remaining - name, 18, 34);
+
+        var columnCount = 3 + (showPublisher ? 1 : 0) + (showDates ? 2 : 0); // selector, status, name [+ publisher] [+ published, added]
+        var overhead = (3 * columnCount) + 1; // Rounded border: (n+1) border chars + 2 padding chars per column
+        var reserved = 1 /* selector */ + status + (showDates ? published + added : 0);
+        var available = Math.Max(48, Console.WindowWidth - overhead - reserved);
+
+        var name = showPublisher ? Math.Max(24, (int)(available * 0.58)) : Math.Max(24, available);
+        var publisher = showPublisher ? Math.Max(18, available - name) : 18;
         return (status, name, publisher, published, added);
     }
 

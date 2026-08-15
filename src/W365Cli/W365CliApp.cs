@@ -185,6 +185,12 @@ internal sealed partial class W365CliApp
                             expandedIndex = -1;
                             selectedChildIndex = -1;
                         }
+                        else if (key.Key == ConsoleKey.Escape && AskYesNo("Exit W365 CLI?", defaultToYes: false))
+                        {
+                            AnsiConsole.Clear();
+                            Console.CursorVisible = true;
+                            return 0;
+                        }
                         break;
                     case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
                         await ShowCommandPaletteAsync();
