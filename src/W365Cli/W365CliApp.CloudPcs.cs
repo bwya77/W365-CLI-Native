@@ -180,7 +180,7 @@ internal sealed partial class W365CliApp
                     }
                     else if (key.KeyChar is '/' or 'f' or 'F')
                     {
-                        filter = PromptFilter();
+                        filter = PromptFilter(filter);
                         selectedIndex = 0;
                     }
                     else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
@@ -391,7 +391,7 @@ internal sealed partial class W365CliApp
                     }
                     else if (key.KeyChar is '/' or 'f' or 'F')
                     {
-                        filter = PromptFilter();
+                        filter = PromptFilter(filter);
                         selectedIndex = 0;
                     }
                     else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
@@ -662,7 +662,7 @@ internal sealed partial class W365CliApp
                     }
                     else if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
                     {
-                        filter = PromptFilter();
+                        filter = PromptFilter(filter);
                         selectedIndex = 0;
                     }
                     else if (key.KeyChar == 'q' || key.KeyChar == 'Q' || key.KeyChar == 'b' || key.KeyChar == 'B')
@@ -1915,10 +1915,10 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine($"[#58a6ff]Rename[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
 
-        var newDisplayName = AnsiConsole.Prompt(new TextPrompt<string>("New Cloud PC display name [[Enter blank to cancel]]:").AllowEmpty());
+        var newDisplayName = PromptTextCancelable("New Cloud PC display name [[Esc cancel]]:");
         if (string.IsNullOrWhiteSpace(newDisplayName))
         {
-            TimedMessage("[yellow]Rename cancelled. Display name is required.[/]");
+            TimedMessage("[yellow]Rename cancelled.[/]");
             return;
         }
 

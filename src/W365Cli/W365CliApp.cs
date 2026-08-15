@@ -2,6 +2,7 @@ using Spectre.Console;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 
 namespace W365Cli;
@@ -1095,7 +1096,7 @@ internal sealed partial class W365CliApp
                     }
                     else if (key.KeyChar is '/' or 'f' or 'F')
                     {
-                        filter = PromptFilter();
+                        filter = PromptFilter(filter);
                         selectedIndex = 0;
                     }
                     else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
@@ -1406,10 +1407,13 @@ internal sealed partial class W365CliApp
         return terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string PromptFilter()
+    /// <summary>
+    /// Esc cancels and keeps the current filter; Enter with nothing typed clears it.
+    /// </summary>
+    private static string PromptFilter(string currentFilter)
     {
         AnsiConsole.WriteLine();
-        return AnsiConsole.Prompt(new TextPrompt<string>("Filter [[Enter blank to clear]]:").AllowEmpty());
+        return PromptTextCancelable("Filter [[Esc cancel]]:", allowEmpty: true) ?? currentFilter;
     }
 
     private static string StatusMarkup(string? status, int width = 24)
@@ -2066,6 +2070,65 @@ internal sealed partial class W365CliApp
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine(message);
         ReadNavigationKey(intercept: true);
+    }
+
+    /// <summary>
+    /// Free-text input that supports Esc to back out immediately, matching the Esc/B/Q-back
+    /// convention used by every list/menu screen in the app. Spectre's TextPrompt has no cancel
+    /// key at all -- Escape is just another character to it -- so this reads keys directly
+    /// instead. Typed characters are echoed with plain Console.Write (not AnsiConsole.Markup),
+    /// which also avoids feeding raw user input through the markup parser (the root cause of an
+    /// earlier "Unbalanced markup stack" crash when a user's input happened to contain a
+    /// bracket).
+    ///
+    /// Returns null if the user pressed Escape (treat as cancel). If allowEmpty is false and the
+    /// user presses Enter with nothing typed, the field is required, so it reprompts instead of
+    /// returning/cancelling -- Escape is always still available to actually back out.
+    /// </summary>
+    private static string? PromptTextCancelable(string label, bool allowEmpty = false)
+    {
+        while (true)
+        {
+            AnsiConsole.Markup(label + " ");
+            var buffer = new StringBuilder();
+            while (true)
+            {
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Escape)
+                {
+                    Console.WriteLine();
+                    return null;
+                }
+
+                if (key.Key == ConsoleKey.Enter)
+                {
+                    Console.WriteLine();
+                    if (buffer.Length == 0 && !allowEmpty)
+                    {
+                        break; // Required field left blank -- reprompt; Esc is still available.
+                    }
+
+                    return buffer.ToString();
+                }
+
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (buffer.Length > 0)
+                    {
+                        buffer.Length--;
+                        Console.Write("\b \b");
+                    }
+
+                    continue;
+                }
+
+                if (!char.IsControl(key.KeyChar))
+                {
+                    buffer.Append(key.KeyChar);
+                    Console.Write(key.KeyChar);
+                }
+            }
+        }
     }
 
     private static ConsoleKeyInfo ReadNavigationKey(bool intercept, bool handleTopNavTab = true)

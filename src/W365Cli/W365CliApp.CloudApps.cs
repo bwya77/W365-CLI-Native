@@ -96,7 +96,7 @@ internal sealed partial class W365CliApp
                 default:
                     if (key.KeyChar == '/' || key.KeyChar == 'f' || key.KeyChar == 'F')
                     {
-                        filter = PromptFilter();
+                        filter = PromptFilter(filter);
                         selectedIndex = 0;
                     }
                     else if (key.KeyChar == 'q' || key.KeyChar == 'Q' || key.KeyChar == 'b' || key.KeyChar == 'B')

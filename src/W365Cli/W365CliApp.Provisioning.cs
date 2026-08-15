@@ -94,7 +94,7 @@ internal sealed partial class W365CliApp
                     }
                     else if (key.KeyChar is '/' or 'f' or 'F')
                     {
-                        filter = PromptFilter();
+                        filter = PromptFilter(filter);
                         selectedIndex = 0;
                     }
                     else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
@@ -668,7 +668,7 @@ internal sealed partial class W365CliApp
                 default:
                     if (key.KeyChar is '/' or 'f' or 'F')
                     {
-                        filter = PromptFilter();
+                        filter = PromptFilter(filter);
                         selectedIndex = 0;
                     }
                     else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
@@ -718,10 +718,10 @@ internal sealed partial class W365CliApp
     {
         AnsiConsole.Clear();
         RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Create copy");
-        var displayName = AnsiConsole.Prompt(new TextPrompt<string>("New policy display name [[Enter blank to cancel]]:").AllowEmpty());
+        var displayName = PromptTextCancelable("New policy display name [[Esc cancel]]:");
         if (string.IsNullOrWhiteSpace(displayName))
         {
-            TimedMessage("[yellow]Create copy cancelled. Display name is required.[/]");
+            TimedMessage("[yellow]Create copy cancelled.[/]");
             return;
         }
 
@@ -746,10 +746,10 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine("[grey]Create a new Windows 365 provisioning policy.[/]");
         AnsiConsole.WriteLine();
 
-        var displayName = AnsiConsole.Prompt(new TextPrompt<string>("Policy display name [[Enter blank to cancel]]:").AllowEmpty());
+        var displayName = PromptTextCancelable("Policy display name [[Esc cancel]]:");
         if (string.IsNullOrWhiteSpace(displayName))
         {
-            TimedMessage("[yellow]Create policy cancelled. Display name is required.[/]");
+            TimedMessage("[yellow]Create policy cancelled.[/]");
             return;
         }
 
@@ -1063,10 +1063,10 @@ internal sealed partial class W365CliApp
             }
 
             frontLineServicePlanId = selectedPlan.Id;
-            allotmentDisplayName = AnsiConsole.Prompt(new TextPrompt<string>("Assignment name [[shown to end users in the Windows app; Enter blank to cancel]]:").AllowEmpty());
+            allotmentDisplayName = PromptTextCancelable("Assignment name [[shown to end users in the Windows app; Esc cancel]]:");
             if (string.IsNullOrWhiteSpace(allotmentDisplayName))
             {
-                TimedMessage("[yellow]Create policy cancelled. Assignment name is required.[/]");
+                TimedMessage("[yellow]Create policy cancelled.[/]");
                 return;
             }
 
@@ -1906,7 +1906,7 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine($"[#58a6ff]Add member[/] [grey]{Markup.Escape(groupName)}[/]");
         AnsiConsole.WriteLine();
 
-        var query = AnsiConsole.Prompt(new TextPrompt<string>("Search by name, UPN, or email [[Enter blank to cancel]]:").AllowEmpty());
+        var query = PromptTextCancelable("Search by name, UPN, or email [[Esc cancel]]:", allowEmpty: true);
         if (string.IsNullOrWhiteSpace(query))
         {
             return;
