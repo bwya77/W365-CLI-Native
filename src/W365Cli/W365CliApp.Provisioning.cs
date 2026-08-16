@@ -658,7 +658,7 @@ internal sealed partial class W365CliApp
             AnsiConsole.Clear();
             RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Cloud PCs");
             AnsiConsole.Write(CreateCloudPcSummaryPanel(cloudPcs, visibleCloudPcs, filter, poolMemberCount));
-            AnsiConsole.Write(CreateCloudPcTable(cloudPcs, visibleCloudPcs, selectedIndex, filter));
+            AnsiConsole.Write(CreateCloudPcTable(cloudPcs, visibleCloudPcs, selectedIndex, filter, sideBySide: false));
             var membersHint = policy.AssignedGroupIds.Count > 0 ? " | M members" : string.Empty;
             AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Enter actions | D disk | N snapshots | Z resize | Y sync{membersHint} | / filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
             var key = ReadNavigationKey(intercept: true);

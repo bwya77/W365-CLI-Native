@@ -847,21 +847,50 @@ internal sealed partial class W365CliApp
         var grid = new Grid();
         grid.AddColumn();
         grid.AddColumn();
-        grid.AddRow(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter), CreateCloudPcSidePanel(selectedCloudPc));
+        grid.AddRow(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter, sideBySide: true), CreateCloudPcSidePanel(selectedCloudPc));
 
         RenderBreadcrumb("Cloud PCs", "Browse");
         AnsiConsole.Write(CreateCloudPcSummaryPanel(allCloudPcs, visibleCloudPcs, filter));
-        if (Console.WindowWidth >= 125)
+
+        var showInUse = allCloudPcs.Any(pc => GetNormalizedInUseStatus(pc) is not null);
+        var showUser = Console.WindowWidth >= 105;
+        var showServicePlan = Console.WindowWidth >= 135;
+        if (Console.WindowWidth >= GetMinimumSideBySideCloudPcTableWidth(showInUse, showUser, showServicePlan))
         {
             AnsiConsole.Write(grid);
         }
         else
         {
-            AnsiConsole.Write(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter));
+            AnsiConsole.Write(CreateCloudPcTable(allCloudPcs, visibleCloudPcs, selectedIndex, filter, sideBySide: false));
             AnsiConsole.Write(CreateCloudPcSidePanel(selectedCloudPc));
         }
         AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Up/Down move | PgUp/PgDn page | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc/B/Q back | P or Ctrl+K command palette[/]");
         RenderStatusBar();
+    }
+
+    /// <summary>
+    /// The narrowest terminal width the side-by-side "table + Selected Cloud PC panel" grid layout
+    /// can render into without the table needing more width than every column's documented minimum
+    /// (see <see cref="GetCloudPcWidths(bool,bool,bool,bool,int)"/>) adds up to -- i.e. the point
+    /// below which switching to the stacked (table, then panel, full width) layout instead is the
+    /// only way to avoid Spectre silently shrinking a column below what it can cleanly truncate.
+    /// </summary>
+    internal static int GetMinimumSideBySideCloudPcTableWidth(bool showInUse, bool showUser, bool showServicePlan)
+    {
+        const int statusMin = 12;
+        const int typeMin = 9;
+        const int inUseMin = 14;
+        const int nameMin = 16;
+        const int userMin = 16;
+        const int servicePlanMin = 16;
+        const int sidePanelReserve = 40;
+
+        var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0);
+        var overhead = (3 * columnCount) + 1;
+
+        return overhead + sidePanelReserve + 1 /* selector */
+            + statusMin + typeMin + (showInUse ? inUseMin : 0)
+            + nameMin + (showUser ? userMin : 0) + (showServicePlan ? servicePlanMin : 0);
     }
 
     private static Panel CreateCloudPcSummaryPanel(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, string filter, int? poolMemberCount = null)
@@ -902,12 +931,12 @@ internal sealed partial class W365CliApp
         return new Panel(new Rows(rows)).Border(BoxBorder.Rounded).Header("Cloud PC fleet");
     }
 
-    private static Table CreateCloudPcTable(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, int selectedIndex, string filter)
+    private static Table CreateCloudPcTable(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, int selectedIndex, string filter, bool sideBySide = true)
     {
         var showInUse = allCloudPcs.Any(pc => GetNormalizedInUseStatus(pc) is not null);
         var showUser = Console.WindowWidth >= 105;
         var showServicePlan = Console.WindowWidth >= 135;
-        var widths = GetCloudPcWidths(showInUse, showUser, showServicePlan);
+        var widths = GetCloudPcWidths(showInUse, showUser, showServicePlan, sideBySide);
 
         // NoWrap on every sized column keeps Spectre's render width matched exactly to what Fit()
         // already truncated/padded cell text to -- without it, any residual mismatch between our
@@ -1246,21 +1275,61 @@ internal sealed partial class W365CliApp
     /// Width+NoWrap on every column so any residual mismatch truncates with "..." (already handled
     /// by Fit()) instead of wrapping.
     /// </summary>
-    internal static (int Name, int Status, int Type, int User, int ServicePlan, int InUse) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan)
+    internal static (int Name, int Status, int Type, int User, int ServicePlan, int InUse) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan, bool sideBySide = true) =>
+        GetCloudPcWidths(showInUse, showUser, showServicePlan, sideBySide, Console.WindowWidth);
+
+    internal static (int Name, int Status, int Type, int User, int ServicePlan, int InUse) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan, bool sideBySide, int windowWidth)
     {
-        const int status = 24; // Fits the longest real cloudPcStatus value ("provisionedWithWarnings").
-        const int type = 10;
-        const int inUse = 26;
-        const int sidePanelReserve = 40; // "Selected Cloud PC" panel width + Grid column gap
+        const int statusMax = 24; // Fits the longest real cloudPcStatus value ("provisionedWithWarnings").
+        const int statusMin = 12;
+        const int typeMax = 18; // Fits the longest real provisioningType value ("sharedByEntraGroup").
+        const int typeMin = 9; // Fits "dedicated"/"reserve" in full; only "sharedBy*" truncates below this.
+        const int inUseMax = 26;
+        const int inUseMin = 14;
+        const int nameMin = 16;
+        const int userMin = 16;
+        const int servicePlanMin = 16;
+        const int sidePanelReserve = 40; // "Selected Cloud PC" panel width + Grid column gap -- only spent when rendered side-by-side with it.
 
         var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0); // selector, status, type, name [+ in use] [+ user] [+ service plan]
         var overhead = (3 * columnCount) + 1; // Rounded border: (n+1) border chars + 2 padding chars per column
-        var reserved = 1 /* selector */ + status + type + (showInUse ? inUse : 0) + sidePanelReserve;
-        var available = Math.Max(60, Console.WindowWidth - overhead - reserved);
+        var sidePanelCost = sideBySide ? sidePanelReserve : 0;
 
-        var name = !showUser && !showServicePlan ? Math.Max(28, available) : Math.Max(24, (int)(available * 0.32));
-        var user = showUser ? Math.Max(24, (int)(available * 0.34)) : 0;
-        var servicePlan = showServicePlan ? Math.Max(24, available - name - user) : 0;
+        // Start every sized column at its preferred (max) width, then shrink Type, In use, and
+        // Status -- in that priority order -- before ever shrinking Name/User/Service plan below
+        // their minimums. Without this, a narrow terminal (or the side panel eating width) left
+        // Status/Type fixed at their preferred size while Name/User were floored at a minimum that
+        // still didn't fit -- Spectre then silently rendered every column narrower than requested
+        // to make the table fit the real terminal width, which broke NoWrap's truncate-with-"..."
+        // behavior and wrapped cell text character-by-character instead (e.g. "sharedByUser"
+        // rendering as "sh/ar/ed/B.." down a squashed Type column).
+        var status = statusMax;
+        var type = typeMax;
+        var inUse = showInUse ? inUseMax : 0;
+        var minNameBudget = nameMin + (showUser ? userMin : 0) + (showServicePlan ? servicePlanMin : 0);
+
+        int RemainingBudget() => windowWidth - overhead - sidePanelCost - 1 /* selector */ - status - type - inUse;
+
+        while (RemainingBudget() < minNameBudget && (type > typeMin || (showInUse && inUse > inUseMin) || status > statusMin))
+        {
+            if (type > typeMin)
+            {
+                type--;
+            }
+            else if (showInUse && inUse > inUseMin)
+            {
+                inUse--;
+            }
+            else if (status > statusMin)
+            {
+                status--;
+            }
+        }
+
+        var available = Math.Max(minNameBudget, RemainingBudget());
+        var name = !showUser && !showServicePlan ? available : Math.Max(nameMin, (int)(available * 0.32));
+        var user = showUser ? Math.Max(userMin, (int)(available * 0.34)) : 0;
+        var servicePlan = showServicePlan ? Math.Max(servicePlanMin, available - name - user) : 0;
         return (name, status, type, user, servicePlan, inUse);
     }
 
