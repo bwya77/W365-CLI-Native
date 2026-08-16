@@ -59,6 +59,8 @@ It is separate from the PowerShell-based `W365CLI` module and does not require t
   license usage (hourly, daily, and real-time) - each rendered with report-specific columns.
 - Export a Markdown snapshot of your Cloud PC inventory, provisioning policies, and licensing for
   sharing or archiving.
+- Sign into multiple tenants and switch between them instantly, no re-authenticating - add,
+  remove, and manage every cached connection from one screen.
 - Browse Cloud Apps and publish or unpublish them.
 - Browse service plans, gallery images, custom images, and supported regions.
 - View tenant settings, setting profiles, and user settings.
