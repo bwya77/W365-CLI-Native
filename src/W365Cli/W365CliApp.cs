@@ -290,8 +290,35 @@ internal sealed partial class W365CliApp
                     GetLaunchDetailsHeader,
                     FormatLaunchDetailsRow);
                 return false;
-            case "Cloud PC reports":
-                await ShowCloudPcReportsAsync();
+            case "Flex License Hourly Usage Report":
+                await ShowFlexLicenseHourlyUsageReportAsync();
+                return false;
+            case "Flex License Daily Usage Report":
+                await ShowFlexLicenseDailyUsageReportAsync();
+                return false;
+            case "Sign-In Activity Summary Report":
+                await ShowSignInActivitySummaryReportAsync();
+                return false;
+            case "Daily Connection Quality Report":
+                await ShowDailyConnectionQualityReportAsync();
+                return false;
+            case "Flex License Real-Time Usage Report":
+                await ShowFlexLicenseRealTimeUsageReportAsync();
+                return false;
+            case "Flex User Connections Report":
+                await ShowFlexUserConnectionsReportAsync();
+                return false;
+            case "Regional Connection Quality Report":
+                await ShowRegionalConnectionQualityReportAsync();
+                return false;
+            case "Cloud PC Usage Category Report":
+                await ShowCloudPcUsageCategoryReportAsync();
+                return false;
+            case "Inaccessible Cloud PC Report":
+                await ShowInaccessibleCloudPcReportAsync();
+                return false;
+            case "Performance Trend Report":
+                await ShowPerformanceTrendReportAsync();
                 return false;
             case "Organization settings":
                 await ShowGraphRowsAsync(
@@ -394,10 +421,19 @@ internal sealed partial class W365CliApp
             ]),
             new("Reports", "Reports", "Usage, connectivity, launch details, report streams",
             [
-                new("Reports", "Sign-in status", "Open current Cloud PC sign-in status"),
+                new("Reports", "Cloud PC Usage Category Report", "Cloud PCs grouped by user and service plan"),
                 new("Reports", "Connectivity history", "Select a Cloud PC and inspect connection events"),
+                new("Reports", "Daily Connection Quality Report", "Daily usage hours and round-trip time per Cloud PC"),
+                new("Reports", "Flex License Daily Usage Report", "Daily Windows 365 Flex license usage and claims"),
+                new("Reports", "Flex License Hourly Usage Report", "View Windows 365 Flex license usage by hour"),
+                new("Reports", "Flex License Real-Time Usage Report", "Real-time Flex license claims by allotment"),
+                new("Reports", "Flex User Connections Report", "Real-time Flex user connection state and license usage"),
+                new("Reports", "Inaccessible Cloud PC Report", "Cloud PCs that are currently unreachable"),
                 new("Reports", "Launch details", "Open Cloud PC launch details"),
-                new("Reports", "Cloud PC reports", "Browse Graph report streams")
+                new("Reports", "Performance Trend Report", "Slow round-trip time and low UDP connection trends"),
+                new("Reports", "Regional Connection Quality Report", "Weekly Cloud PC counts by gateway region"),
+                new("Reports", "Sign-In Activity Summary Report", "Aggregated sign-in activity and days since last sign-in"),
+                new("Reports", "Sign-in status", "Open current Cloud PC sign-in status")
             ]),
             new("Licensing", "Licensing", "Capacity, availability, Flex, and Reserve utilization"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
@@ -618,13 +654,17 @@ internal sealed partial class W365CliApp
 
     private static string FormatMainMenuChoice(MenuChoice choice, bool selected = false, bool disabled = false)
     {
+        // 22 was too narrow once "Flex License Hourly Usage Report" (33 chars) was added as a
+        // menu entry -- it got truncated to "Flex License Hourly..." even though there was plenty
+        // of terminal width to spare. Widened to fit the longest title currently in use.
+        const int titleWidth = 34;
         if (disabled)
         {
-            return $"[{MutedColor}]{Markup.Escape(Fit(choice.Title, 22))}[/] [{MutedColor}]{Markup.Escape(choice.Description)}[/]";
+            return $"[{MutedColor}]{Markup.Escape(Fit(choice.Title, titleWidth))}[/] [{MutedColor}]{Markup.Escape(choice.Description)}[/]";
         }
 
         var descriptionColor = selected ? TextColor : MutedColor;
-        return $"[{TextColor}]{Markup.Escape(Fit(choice.Title, 22))}[/] [{descriptionColor}]{Markup.Escape(choice.Description)}[/]";
+        return $"[{TextColor}]{Markup.Escape(Fit(choice.Title, titleWidth))}[/] [{descriptionColor}]{Markup.Escape(choice.Description)}[/]";
     }
 
     private static void RenderBreadcrumb(params string[] parts)
@@ -651,6 +691,16 @@ internal sealed partial class W365CliApp
             new("Reports", "Usage report", "Open Cloud PC usage"),
             new("Licensing", "Licensing", "Open licensing capacity view"),
             new("Reports", "Launch details", "Open Cloud PC launch details"),
+            new("Reports", "Flex License Hourly Usage Report", "View Windows 365 Flex license usage by hour"),
+            new("Reports", "Sign-In Activity Summary Report", "Aggregated sign-in activity and days since last sign-in"),
+            new("Reports", "Daily Connection Quality Report", "Daily usage hours and round-trip time per Cloud PC"),
+            new("Reports", "Flex License Real-Time Usage Report", "Real-time Flex license claims by allotment"),
+            new("Reports", "Flex User Connections Report", "Real-time Flex user connection state and license usage"),
+            new("Reports", "Regional Connection Quality Report", "Weekly Cloud PC counts by gateway region"),
+            new("Reports", "Cloud PC Usage Category Report", "Cloud PCs grouped by user and service plan"),
+            new("Reports", "Flex License Daily Usage Report", "Daily Windows 365 Flex license usage and claims"),
+            new("Reports", "Inaccessible Cloud PC Report", "Cloud PCs that are currently unreachable"),
+            new("Reports", "Performance Trend Report", "Slow round-trip time and low UDP connection trends"),
             new("Catalog", "Service plans", "Open service plan catalog"),
             new("Catalog", "Gallery images", "Open gallery images"),
             new("Catalog", "Supported regions", "Open supported regions")

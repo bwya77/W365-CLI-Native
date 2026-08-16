@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace W365Cli;
 
@@ -155,7 +156,22 @@ internal sealed partial class W365CliApp
             var choice = PromptChoice(
                 () => { },
                 "[#58a6ff]Reports[/]",
-                ["Sign-in status", "Connectivity history", "Launch details", "Cloud PC reports", "Back"],
+                [
+                    "Cloud PC Usage Category Report",
+                    "Connectivity history",
+                    "Daily Connection Quality Report",
+                    "Flex License Daily Usage Report",
+                    "Flex License Hourly Usage Report",
+                    "Flex License Real-Time Usage Report",
+                    "Flex User Connections Report",
+                    "Inaccessible Cloud PC Report",
+                    "Launch details",
+                    "Performance Trend Report",
+                    "Regional Connection Quality Report",
+                    "Sign-In Activity Summary Report",
+                    "Sign-in status",
+                    "Back"
+                ],
                 "Back");
 
             switch (choice)
@@ -178,8 +194,35 @@ internal sealed partial class W365CliApp
                         GetLaunchDetailsHeader,
                         FormatLaunchDetailsRow);
                     break;
-                case "Cloud PC reports":
-                    await ShowCloudPcReportsAsync();
+                case "Flex License Hourly Usage Report":
+                    await ShowFlexLicenseHourlyUsageReportAsync();
+                    break;
+                case "Flex License Daily Usage Report":
+                    await ShowFlexLicenseDailyUsageReportAsync();
+                    break;
+                case "Sign-In Activity Summary Report":
+                    await ShowSignInActivitySummaryReportAsync();
+                    break;
+                case "Daily Connection Quality Report":
+                    await ShowDailyConnectionQualityReportAsync();
+                    break;
+                case "Flex License Real-Time Usage Report":
+                    await ShowFlexLicenseRealTimeUsageReportAsync();
+                    break;
+                case "Flex User Connections Report":
+                    await ShowFlexUserConnectionsReportAsync();
+                    break;
+                case "Regional Connection Quality Report":
+                    await ShowRegionalConnectionQualityReportAsync();
+                    break;
+                case "Cloud PC Usage Category Report":
+                    await ShowCloudPcUsageCategoryReportAsync();
+                    break;
+                case "Inaccessible Cloud PC Report":
+                    await ShowInaccessibleCloudPcReportAsync();
+                    break;
+                case "Performance Trend Report":
+                    await ShowPerformanceTrendReportAsync();
                     break;
                 case "Back":
                     return;
@@ -215,104 +258,218 @@ internal sealed partial class W365CliApp
         }
     }
 
-    private async Task ShowCloudPcReportsAsync()
+    private async Task ShowPerformanceTrendReportAsync()
     {
-        var reportNames = new[]
+        var top = PromptTopRows();
+        if (top is null)
         {
-            "dailyAggregatedRemoteConnectionReports",
-            "totalAggregatedRemoteConnectionReports",
-            "frontlineLicenseUsageReport",
-            "frontlineLicenseUsageRealTimeReport",
-            "frontlineLicenseHourlyUsageReport",
-            "frontlineRealtimeUserConnectionsReport",
-            "inaccessibleCloudPcReports",
-            "actionStatusReport",
-            "performanceTrendReport",
-            "regionalConnectionQualityTrendReport",
-            "cloudPcUsageCategoryReport"
-        };
-
-        while (true)
-        {
-            var reportName = SelectCloudPcReportName(reportNames);
-            if (reportName is null)
-            {
-                return;
-            }
-
-            var top = PromptTopRows();
-            if (top is null)
-            {
-                continue;
-            }
-
-            await ShowGraphRowsAsync(
-                $"Report: {reportName}",
-                async () => await _session.Graph.GetCloudPcReportRowsAsync(reportName, top.Value),
-                enterAction: OpenCloudPcFromReportRowAsync);
+            return;
         }
+
+        await ShowAdaptiveCloudPcReportAsync("Performance Trend Report", "performanceTrendReport", top.Value);
     }
 
-    private static string? SelectCloudPcReportName(IReadOnlyList<string> reportNames)
+    private async Task ShowFlexLicenseDailyUsageReportAsync()
     {
-        var selectedIndex = 0;
-        while (true)
+        var top = PromptTopRows();
+        if (top is null)
         {
-            AnsiConsole.Clear();
-            RenderBreadcrumb("Reports", "Cloud PC reports");
-            AnsiConsole.MarkupLine("[#58a6ff]Cloud PC report[/]");
-            AnsiConsole.WriteLine();
-
-            var pageSize = Math.Max(8, Math.Min(20, Console.WindowHeight - 14));
-            var start = Math.Clamp(selectedIndex - pageSize / 2, 0, Math.Max(0, reportNames.Count - pageSize));
-            var visible = reportNames.Skip(start).Take(pageSize).ToArray();
-            for (var index = 0; index < visible.Length; index++)
-            {
-                var absoluteIndex = start + index;
-                var escaped = Markup.Escape(visible[index]);
-                AnsiConsole.MarkupLine(absoluteIndex == selectedIndex
-                    ? $"[black on #58a6ff]> {escaped}[/]"
-                    : $"  {escaped}");
-            }
-
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter select | Esc/B/Q back[/]");
-            var key = ReadNavigationKey(intercept: true);
-            switch (key.Key)
-            {
-                case ConsoleKey.UpArrow:
-                    selectedIndex = Math.Max(0, selectedIndex - 1);
-                    break;
-                case ConsoleKey.DownArrow:
-                    selectedIndex = Math.Min(reportNames.Count - 1, selectedIndex + 1);
-                    break;
-                case ConsoleKey.PageUp:
-                    selectedIndex = Math.Max(0, selectedIndex - 10);
-                    break;
-                case ConsoleKey.PageDown:
-                    selectedIndex = Math.Min(reportNames.Count - 1, selectedIndex + 10);
-                    break;
-                case ConsoleKey.Home:
-                    selectedIndex = 0;
-                    break;
-                case ConsoleKey.End:
-                    selectedIndex = reportNames.Count - 1;
-                    break;
-                case ConsoleKey.Enter:
-                    return reportNames[selectedIndex];
-                case ConsoleKey.Escape:
-                case ConsoleKey.LeftArrow:
-                    return null;
-                case ConsoleKey.K when key.Modifiers.HasFlag(ConsoleModifiers.Control):
-                    return null;
-                default:
-                    if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
-                    {
-                        return null;
-                    }
-                    break;
-            }
+            return;
         }
+
+        await ShowAdaptiveCloudPcReportAsync("Flex License Daily Usage Report", "frontlineLicenseUsageReport", top.Value);
+    }
+
+    private async Task ShowInaccessibleCloudPcReportAsync()
+    {
+        var top = PromptTopRows();
+        if (top is null)
+        {
+            return;
+        }
+
+        await ShowAdaptiveCloudPcReportAsync("Inaccessible Cloud PC Report", "inaccessibleCloudPcReports", top.Value);
+    }
+
+    private async Task ShowFlexLicenseHourlyUsageReportAsync()
+    {
+        var top = PromptTopRows();
+        if (top is null)
+        {
+            return;
+        }
+
+        await ShowAdaptiveCloudPcReportAsync("Flex License Hourly Usage Report", "frontlineLicenseHourlyUsageReport", top.Value);
+    }
+
+    private async Task ShowSignInActivitySummaryReportAsync()
+    {
+        var top = PromptTopRows();
+        if (top is null)
+        {
+            return;
+        }
+
+        await ShowAdaptiveCloudPcReportAsync("Sign-In Activity Summary Report", "totalAggregatedRemoteConnectionReports", top.Value);
+    }
+
+    private async Task ShowDailyConnectionQualityReportAsync()
+    {
+        var top = PromptTopRows();
+        if (top is null)
+        {
+            return;
+        }
+
+        await ShowAdaptiveCloudPcReportAsync("Daily Connection Quality Report", "dailyAggregatedRemoteConnectionReports", top.Value);
+    }
+
+    private async Task ShowFlexLicenseRealTimeUsageReportAsync()
+    {
+        var top = PromptTopRows();
+        if (top is null)
+        {
+            return;
+        }
+
+        await ShowAdaptiveCloudPcReportAsync("Flex License Real-Time Usage Report", "frontlineLicenseUsageRealTimeReport", top.Value);
+    }
+
+    private async Task ShowFlexUserConnectionsReportAsync()
+    {
+        var top = PromptTopRows();
+        if (top is null)
+        {
+            return;
+        }
+
+        await ShowAdaptiveCloudPcReportAsync("Flex User Connections Report", "frontlineRealtimeUserConnectionsReport", top.Value);
+    }
+
+    private async Task ShowRegionalConnectionQualityReportAsync()
+    {
+        var top = PromptTopRows();
+        if (top is null)
+        {
+            return;
+        }
+
+        await ShowAdaptiveCloudPcReportAsync("Regional Connection Quality Report", "regionalConnectionQualityTrendReport", top.Value);
+    }
+
+    private async Task ShowCloudPcUsageCategoryReportAsync()
+    {
+        var top = PromptTopRows();
+        if (top is null)
+        {
+            return;
+        }
+
+        await ShowAdaptiveCloudPcReportAsync("Cloud PC Usage Category Report", "cloudPcUsageCategoryReport", top.Value);
+    }
+
+    /// <summary>
+    /// These undocumented Cloud PC reports each have a completely different schema, so a fixed
+    /// Name+Summary layout either repeats one field twice or truncates off the one column (often a
+    /// Timestamp) that actually distinguishes one row from the next -- exactly what happened with
+    /// frontlineLicenseHourlyUsageReport before this existed. Instead, build real per-field columns
+    /// for whichever report was requested: BuildAdaptiveReportColumns runs once the rows are loaded
+    /// (columns/widths are captured by the closures below and read during rendering).
+    /// </summary>
+    private async Task ShowAdaptiveCloudPcReportAsync(string title, string reportName, int top)
+    {
+        IReadOnlyList<string> columns = [];
+        IReadOnlyList<int> widths = [];
+
+        await ShowGraphRowsAsync(
+            title,
+            async () =>
+            {
+                var rows = await _session.Graph.GetCloudPcReportRowsAsync(reportName, top);
+                (columns, widths) = BuildAdaptiveReportColumns(rows);
+                return rows;
+            },
+            headerFactory: () => columns.Count == 0
+                ? GetDefaultGraphRowsHeader()
+                : Row(InterleaveValuesAndWidths(columns, widths)),
+            rowFactory: row => columns.Count == 0
+                ? FormatDefaultGraphRow(row)
+                : Row(InterleaveValuesAndWidths(
+                    columns.Select(column => row.Fields.TryGetValue(column, out var value) && !string.IsNullOrWhiteSpace(value) ? value : "-"),
+                    widths)),
+            enterAction: OpenCloudPcFromReportRowAsync);
+    }
+
+    private static readonly Regex ReportGuidLikeValue = new(
+        @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Picks which fields to show as real columns for whichever Cloud PC report was just loaded,
+    /// and how wide each column should be. Drops the synthetic "UniqueId" composite key, internal
+    /// ingestion-pipeline metadata columns, and any column whose values are consistently bare GUIDs
+    /// (never useful to read, whatever the column happens to be called for a given schema). Any
+    /// time/date-like column is moved right after the first column so it's the last thing dropped
+    /// if the terminal is too narrow to fit every column -- it's usually the one field that
+    /// actually distinguishes one row from the next in a periodic/hourly report.
+    /// </summary>
+    private static (IReadOnlyList<string> Columns, IReadOnlyList<int> Widths) BuildAdaptiveReportColumns(IReadOnlyList<GraphTableRow> rows)
+    {
+        if (rows.Count == 0)
+        {
+            return (Array.Empty<string>(), Array.Empty<int>());
+        }
+
+        var candidateColumns = rows[0].Fields.Keys
+            .Where(key => !string.Equals(key, "UniqueId", StringComparison.OrdinalIgnoreCase))
+            .Where(key => !key.Contains("IngestedTimestamp", StringComparison.OrdinalIgnoreCase))
+            .Where(key =>
+            {
+                var nonEmptyValues = rows
+                    .Select(row => row.Fields.TryGetValue(key, out var value) ? value : null)
+                    .Where(value => !string.IsNullOrWhiteSpace(value) && value != "-")
+                    .ToArray();
+                return nonEmptyValues.Length == 0 || !nonEmptyValues.All(value => ReportGuidLikeValue.IsMatch(value!));
+            })
+            .ToList();
+
+        var timeColumnIndex = candidateColumns.FindIndex(column => column.Contains("time", StringComparison.OrdinalIgnoreCase));
+        if (timeColumnIndex > 1)
+        {
+            var timeColumn = candidateColumns[timeColumnIndex];
+            candidateColumns.RemoveAt(timeColumnIndex);
+            candidateColumns.Insert(1, timeColumn);
+        }
+
+        var entries = candidateColumns.Select(column =>
+        {
+            var maxLen = rows
+                .Select(row => row.Fields.TryGetValue(column, out var value) ? value.Length : 0)
+                .DefaultIfEmpty(0)
+                .Max();
+            return (Name: column, Width: Math.Clamp(Math.Max(maxLen, column.Length), 8, 32));
+        }).ToList();
+
+        var available = Math.Max(60, Console.WindowWidth - 4);
+        while (entries.Count > 1 && entries.Sum(entry => entry.Width) + (entries.Count - 1) * 3 > available)
+        {
+            entries.RemoveAt(entries.Count - 1);
+        }
+
+        return (entries.Select(entry => entry.Name).ToArray(), entries.Select(entry => entry.Width).ToArray());
+    }
+
+    private static object[] InterleaveValuesAndWidths(IEnumerable<string> values, IReadOnlyList<int> widths)
+    {
+        var valuesArray = values.ToArray();
+        var cells = new object[valuesArray.Length * 2];
+        for (var index = 0; index < valuesArray.Length; index++)
+        {
+            cells[index * 2] = valuesArray[index];
+            cells[index * 2 + 1] = widths[index];
+        }
+
+        return cells;
     }
 
     private async Task OpenCloudPcFromReportRowAsync(GraphTableRow row)

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace W365Cli;
 
@@ -1185,7 +1186,75 @@ internal sealed class W365GraphClient
             return [];
         }
 
-        return ParseReportRows(document.RootElement, "CloudPcName", "ManagedDeviceName", "DisplayName", "SignInStatus", "Status", "Timestamp", "LastActiveTime");
+        return ParseReportRowsAdaptive(document.RootElement);
+    }
+
+    // Matches a bare GUID string (e.g. "dd3801e2-4aa1-4b16-a44b-243e55497584"), used to strip
+    // opaque identifier columns out of the adaptive summary below.
+    private static readonly Regex GuidLikeValue = new(
+        @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// The 11 "Cloud PC reports" menu entries hit 11 completely different, undocumented report
+    /// schemas (per-Cloud-PC, per-license-pool, per-hour-bucket, etc.) -- there's no single fixed
+    /// set of summary field names (like ParseReportRows uses for the reports we've actually
+    /// captured/verified) that fits all of them. A real capture of frontlineLicenseHourlyUsageReport
+    /// showed exactly this problem: its useful columns (LicenseCount, ClaimedLicenseCount,
+    /// SkuLicenseCount) aren't in the connection-history-shaped summary field list, so every row
+    /// looked like a near-duplicate wall of the same DisplayName/Timestamp with no visible license
+    /// numbers at all. Instead of guessing per-report field names for the 10 reports without a
+    /// capture, this builds the summary from whatever fields Graph actually returned, dropping only
+    /// clearly-noisy ones: the synthetic "UniqueId" composite key, internal ingestion-pipeline
+    /// metadata columns, and any column whose value is a bare GUID (a raw id is never useful to read
+    /// in a summary line, whatever the column happens to be called for a given report).
+    /// </summary>
+    private static IReadOnlyList<GraphTableRow> ParseReportRowsAdaptive(JsonElement report)
+    {
+        if (!report.TryGetProperty("Schema", out var schema) ||
+            !report.TryGetProperty("Values", out var values) ||
+            schema.ValueKind != JsonValueKind.Array ||
+            values.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var columns = schema.EnumerateArray().Select(GetReportColumnName).ToArray();
+        var rows = new List<GraphTableRow>();
+        foreach (var valueRow in values.EnumerateArray())
+        {
+            if (valueRow.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var valuesArray = valueRow.EnumerateArray().ToArray();
+            for (var index = 0; index < Math.Min(columns.Length, valuesArray.Length); index++)
+            {
+                fields[columns[index]] = JsonToString(valuesArray[index]);
+            }
+
+            rows.Add(ToAdaptiveReportTableRow(fields));
+        }
+
+        return rows;
+    }
+
+    private static GraphTableRow ToAdaptiveReportTableRow(IReadOnlyDictionary<string, string> fields)
+    {
+        var title = GetFirst(fields, "DisplayName", "CloudPcName", "ManagedDeviceName", "UPN", "Name", "id") ?? "-";
+
+        var summaryParts = fields
+            .Where(kv => !string.Equals(kv.Key, "UniqueId", StringComparison.OrdinalIgnoreCase))
+            .Where(kv => !kv.Key.Contains("IngestedTimestamp", StringComparison.OrdinalIgnoreCase))
+            .Where(kv => !string.IsNullOrWhiteSpace(kv.Value) && kv.Value != "-")
+            .Where(kv => !GuidLikeValue.IsMatch(kv.Value))
+            .Select(kv => $"{kv.Key}: {kv.Value}")
+            .ToArray();
+
+        var summary = summaryParts.Length == 0 ? "-" : string.Join(" | ", summaryParts);
+        return new GraphTableRow(title, summary, fields);
     }
 
     private static IReadOnlyList<GraphTableRow> ParseReportRows(JsonElement report, params string[] summaryFields)

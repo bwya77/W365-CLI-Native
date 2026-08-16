@@ -275,22 +275,30 @@ internal sealed partial class W365CliApp
     /// pads with trailing spaces), the wrapped continuation showed up as blank-looking rows. Now
     /// paired with explicit Width+NoWrap on each column in CreateCloudAppTable as a second layer
     /// of protection against any residual rounding.
+    ///
+    /// Also reserves a fixed budget for the "Selected Cloud App" side panel that sits next to this
+    /// table in a two-column Grid (RenderCloudAppBrowser) once the terminal is >=125 wide -- without
+    /// this, a maximized/very wide terminal let Name/Publisher consume almost the entire window,
+    /// leaving the side panel column no room and breaking the whole layout. Name/Publisher are also
+    /// capped at a sane maximum so ultra-wide terminals don't just turn into huge padded gaps
+    /// (the original "spacing" complaint this table was fixed for).
     /// </summary>
     private static (int Status, int Name, int Publisher, int Published, int Added) GetCloudAppWidths()
     {
         const int status = 12;
         const int published = 18;
         const int added = 18;
+        const int sidePanelReserve = 40; // "Selected Cloud App" panel width + Grid column gap
         var showPublisher = Console.WindowWidth >= 100;
         var showDates = Console.WindowWidth >= 150;
 
         var columnCount = 3 + (showPublisher ? 1 : 0) + (showDates ? 2 : 0); // selector, status, name [+ publisher] [+ published, added]
         var overhead = (3 * columnCount) + 1; // Rounded border: (n+1) border chars + 2 padding chars per column
-        var reserved = 1 /* selector */ + status + (showDates ? published + added : 0);
+        var reserved = 1 /* selector */ + status + (showDates ? published + added : 0) + sidePanelReserve;
         var available = Math.Max(48, Console.WindowWidth - overhead - reserved);
 
-        var name = showPublisher ? Math.Max(24, (int)(available * 0.58)) : Math.Max(24, available);
-        var publisher = showPublisher ? Math.Max(18, available - name) : 18;
+        var name = showPublisher ? Math.Clamp((int)(available * 0.58), 24, 60) : Math.Clamp(available, 24, 90);
+        var publisher = showPublisher ? Math.Clamp(available - name, 18, 40) : 18;
         return (status, name, publisher, published, added);
     }
 
