@@ -385,6 +385,9 @@ internal sealed partial class W365CliApp
             case "Licensing":
                 await ShowLicensingAsync();
                 break;
+            case "Export":
+                await ExportMarkdownSnapshotAsync();
+                break;
             case "Catalog":
                 await ShowCatalogAsync();
                 break;
@@ -444,6 +447,7 @@ internal sealed partial class W365CliApp
             ]),
             new("Licensing", "Licensing", "Capacity, availability, Flex, and Reserve utilization"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
+            new("Export", "Export", "Export Cloud PCs, policies, and licensing to a Markdown file"),
             new("Catalog", "Catalog", "Service plans, images, regions",
             [
                 new("Catalog", "Service plans", "Open service plan catalog"),

@@ -161,6 +161,7 @@ internal sealed partial class W365CliApp
                     "Connectivity history",
                     "Daily Connection Quality Report",
                     "Disk space",
+                    "Export Markdown Snapshot",
                     "Flex License Daily Usage Report",
                     "Flex License Hourly Usage Report",
                     "Flex License Real-Time Usage Report",
@@ -191,6 +192,9 @@ internal sealed partial class W365CliApp
                     break;
                 case "Disk space":
                     await ShowDiskSpaceAsync();
+                    break;
+                case "Export Markdown Snapshot":
+                    await ExportMarkdownSnapshotAsync();
                     break;
                 case "User Experience Sync Report":
                     await ShowUserExperienceSyncOverviewAsync();
