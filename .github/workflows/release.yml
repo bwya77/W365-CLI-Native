@@ -129,7 +129,7 @@ jobs:
             Set-Content .\artifacts\release\SHA256SUMS-windows.txt
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/release/w365-win-x64.zip
@@ -277,7 +277,7 @@ jobs:
         run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/release/w365-osx-x64.zip
@@ -341,7 +341,7 @@ jobs:
             sed 's#./artifacts/release/##' > ./artifacts/release/SHA256SUMS-linux.txt
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/release/w365-linux-x64.tar.gz
