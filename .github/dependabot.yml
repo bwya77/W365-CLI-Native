@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # .NET/NuGet dependencies (Microsoft.Identity.Client, Spectre.Console, System.Text.Json, etc.)
+  - package-ecosystem: "nuget"
+    directory: "/src/W365Cli"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+
+  # GitHub Actions workflow dependencies (actions/checkout, actions/setup-dotnet, etc.)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "github-actions"

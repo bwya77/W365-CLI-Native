@@ -1,8 +1,10 @@
 # W365 CLI
 
 [![CI](https://github.com/bwya77/W365-CLI-Native/actions/workflows/ci.yml/badge.svg)](https://github.com/bwya77/W365-CLI-Native/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/bwya77/W365-CLI-Native/actions/workflows/codeql.yml/badge.svg)](https://github.com/bwya77/W365-CLI-Native/actions/workflows/codeql.yml)
 [![Release](https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml/badge.svg)](https://github.com/bwya77/W365-CLI-Native/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/bwya77/W365-CLI-Native?label=release)](https://github.com/bwya77/W365-CLI-Native/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4091f2)](https://github.com/bwya77/W365-CLI-Native/releases)
 
@@ -206,6 +208,16 @@ $env:W365CLI_TENANT_ID = '<tenant-id>'
 ```
 
 Your app registration needs the same public client configuration and permissions listed above.
+
+## Security & trust
+
+W365 CLI only ever acts with the permissions of the signed-in user (delegated Graph access) — it
+has no standing access to your tenant of its own, and nothing in the binary is secret. Release
+builds are produced entirely by this repository's own GitHub Actions workflows (nothing is
+built or uploaded by hand), are checked for vulnerabilities on every push via CodeQL, and are
+signed (Windows: Azure Trusted Signing; macOS: Apple Developer ID + notarization) with published
+`SHA256SUMS-*.txt` checksums for every platform. See [SECURITY.md](SECURITY.md) for the full
+security policy, exactly what the CLI can access, and how to report a vulnerability.
 
 ## Navigation
 
