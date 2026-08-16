@@ -192,6 +192,19 @@ internal sealed partial class W365CliApp
     private static Table CreateCloudAppTable(IReadOnlyList<CloudAppSummary> allApps, IReadOnlyList<CloudAppSummary> visibleApps, int selectedIndex, string filter, bool sideBySide = true)
     {
         var widths = GetCloudAppWidths(Console.WindowWidth >= 100, Console.WindowWidth >= 150, sideBySide);
+        var showPublisher = Console.WindowWidth >= 100;
+        var showDates = Console.WindowWidth >= 150;
+
+        // Shrink Name/Publisher down to what the actually-visible rows need (bounded by their
+        // documented min and the budget GetCloudAppWidths already allocated) instead of always
+        // rendering at that full allocated width. Without this, Publisher in particular -- often
+        // "-" for every row, since many built-in Windows/Microsoft apps have no publisher set --
+        // stretched out to its full ~40-character allocation as a big, mostly-empty column, making
+        // the table look lopsided even though nothing was actually being truncated or wrapped.
+        // Any width freed up this way is simply not used (the table renders narrower), which reads
+        // as a tidy box rather than the wasted whitespace this replaces.
+        var nameWidth = GetContentAwareColumnWidth(visibleApps.Select(app => app.DisplayName), 16, widths.Name);
+        var publisherWidth = showPublisher ? GetContentAwareColumnWidth(visibleApps.Select(app => app.Publisher), 14, widths.Publisher) : widths.Publisher;
 
         // NoWrap on every sized column is essential here: Spectre's default column overflow mode
         // wraps text that doesn't fit the column Spectre itself decides to render (which can be
@@ -206,13 +219,11 @@ internal sealed partial class W365CliApp
             .Border(TableBorder.Rounded)
             .AddColumn(new TableColumn(" ") { Width = 1, NoWrap = true })
             .AddColumn(new TableColumn("Status") { Width = widths.Status, NoWrap = true })
-            .AddColumn(new TableColumn("Name") { Width = widths.Name, NoWrap = true });
+            .AddColumn(new TableColumn("Name") { Width = nameWidth, NoWrap = true });
 
-        var showPublisher = Console.WindowWidth >= 100;
-        var showDates = Console.WindowWidth >= 150;
         if (showPublisher)
         {
-            table.AddColumn(new TableColumn("Publisher") { Width = widths.Publisher, NoWrap = true });
+            table.AddColumn(new TableColumn("Publisher") { Width = publisherWidth, NoWrap = true });
         }
         if (showDates)
         {
@@ -241,11 +252,11 @@ internal sealed partial class W365CliApp
             {
                 selected ? "[black on #58a6ff]>[/]" : " ",
                 selected ? Selected(Markup.Escape(Fit(app.AppStatus ?? "unknown", widths.Status))) : AppStatusMarkup(app.AppStatus, widths.Status),
-                selected ? Selected(Markup.Escape(Fit(app.DisplayName, widths.Name))) : Markup.Escape(Fit(app.DisplayName, widths.Name))
+                selected ? Selected(Markup.Escape(Fit(app.DisplayName, nameWidth))) : Markup.Escape(Fit(app.DisplayName, nameWidth))
             };
             if (showPublisher)
             {
-                row.Add(selected ? Selected(Markup.Escape(Fit(app.Publisher ?? "-", widths.Publisher))) : Markup.Escape(Fit(app.Publisher ?? "-", widths.Publisher)));
+                row.Add(selected ? Selected(Markup.Escape(Fit(app.Publisher ?? "-", publisherWidth))) : Markup.Escape(Fit(app.Publisher ?? "-", publisherWidth)));
             }
             if (showDates)
             {
@@ -256,6 +267,28 @@ internal sealed partial class W365CliApp
         }
 
         return table;
+    }
+
+    /// <summary>
+    /// The width a column needs to show its longest actually-present value in full, clamped to
+    /// [<paramref name="minWidth"/>, <paramref name="maxWidth"/>]. Null/blank values count as "-"
+    /// (what they render as), so an all-blank column (e.g. Publisher for built-in Microsoft apps
+    /// that Graph reports with no publisher) shrinks down to its minimum instead of sitting at
+    /// whatever wider budget the layout pass allocated for it.
+    /// </summary>
+    internal static int GetContentAwareColumnWidth(IEnumerable<string?> values, int minWidth, int maxWidth)
+    {
+        var longest = 0;
+        foreach (var value in values)
+        {
+            var length = string.IsNullOrWhiteSpace(value) ? 1 : value.Length; // "-" placeholder length
+            if (length > longest)
+            {
+                longest = length;
+            }
+        }
+
+        return Math.Clamp(longest, minWidth, maxWidth);
     }
 
     private static Panel CreateCloudAppSidePanel(CloudAppSummary? app)

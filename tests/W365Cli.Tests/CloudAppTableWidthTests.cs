@@ -108,4 +108,45 @@ public class CloudAppTableWidthTests
 
         Assert.True(standalone.Name >= sideBySide.Name);
     }
+
+    // Regression coverage for a real reported visual issue: Publisher is "-" (unset) for most
+    // built-in Microsoft/Windows apps, but the column always rendered at its full allocated width
+    // (up to 40 chars) regardless -- a big, mostly-empty column that made the table look lopsided
+    // even though nothing was being truncated. GetContentAwareColumnWidth lets the caller shrink a
+    // column down to what the actually-visible values need instead of always using the full budget.
+
+    [Fact]
+    public void GetContentAwareColumnWidth_AllBlankValues_ShrinksToMinimum()
+    {
+        var width = W365CliApp.GetContentAwareColumnWidth(new string?[] { null, "", "   " }, minWidth: 14, maxWidth: 40);
+        Assert.Equal(14, width);
+    }
+
+    [Fact]
+    public void GetContentAwareColumnWidth_UsesLongestActualValue()
+    {
+        var width = W365CliApp.GetContentAwareColumnWidth(new string?[] { "Microsoft", null, "Contoso Ltd" }, minWidth: 14, maxWidth: 40);
+        Assert.Equal(14, width); // "Contoso Ltd" (11 chars) and "Microsoft" (9 chars) both fall below the minimum
+    }
+
+    [Fact]
+    public void GetContentAwareColumnWidth_LongestValueBetweenMinAndMax_UsesExactLength()
+    {
+        var width = W365CliApp.GetContentAwareColumnWidth(new string?[] { "A Reasonably Long Publisher Name" }, minWidth: 14, maxWidth: 40);
+        Assert.Equal(32, width);
+    }
+
+    [Fact]
+    public void GetContentAwareColumnWidth_LongestValueExceedsMax_ClampsToMax()
+    {
+        var width = W365CliApp.GetContentAwareColumnWidth(new string?[] { new string('X', 100) }, minWidth: 14, maxWidth: 40);
+        Assert.Equal(40, width);
+    }
+
+    [Fact]
+    public void GetContentAwareColumnWidth_EmptyCollection_ReturnsMinimum()
+    {
+        var width = W365CliApp.GetContentAwareColumnWidth(Array.Empty<string?>(), minWidth: 14, maxWidth: 40);
+        Assert.Equal(14, width);
+    }
 }
