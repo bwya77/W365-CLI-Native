@@ -409,7 +409,7 @@ internal sealed partial class W365CliApp
     private IReadOnlyList<MenuChoice> GetMainMenuChoices()
     {
         var connectionDescription = _session.IsConnected
-            ? "Disconnect Microsoft Graph session"
+            ? "Switch tenants, add, or remove connections"
             : "Connect to Microsoft Graph";
 
         return
@@ -461,7 +461,7 @@ internal sealed partial class W365CliApp
                 new("Tenant", "Setting profiles", "View Windows 365 setting profiles"),
                 new("Tenant", "User settings", "View user settings policies")
             ]),
-            new("Connection", "Connection", connectionDescription),
+            new("Connection", "Connections", connectionDescription),
             new("About", "About", "Version and project information"),
             new("Exit", "Exit", "Close W365 CLI")
         ];
@@ -820,7 +820,13 @@ internal sealed partial class W365CliApp
         if (connected)
         {
             var identity = _session.SignedInUserUpn ?? _session.TenantName ?? "signed-in account";
-            AnsiConsole.MarkupLine($"[{GreenColor}]●[/] Signed in as: [{TextColor}]{Markup.Escape(identity)}[/]");
+            var identityLine = $"[{GreenColor}]●[/] Signed in as: [{TextColor}]{Markup.Escape(identity)}[/]";
+            if (!string.IsNullOrWhiteSpace(_session.TenantName))
+            {
+                identityLine += $" [grey]({Markup.Escape(_session.TenantName)})[/]";
+            }
+
+            AnsiConsole.MarkupLine(identityLine);
         }
         else
         {
@@ -830,28 +836,196 @@ internal sealed partial class W365CliApp
         AnsiConsole.WriteLine();
     }
 
+    /// <summary>
+    /// "Manage connections" -- lists every cached tenant/account connection (MSAL's persisted
+    /// token cache can hold more than one at once), lets the user switch between them instantly
+    /// (no re-auth needed, since MSAL silently refreshes from the cached token), sign into an
+    /// additional tenant without disturbing existing ones, or remove a single connection. Falls
+    /// back to a bare "Connect" prompt when nothing is cached yet.
+    /// </summary>
     private async Task ShowConnectionAsync()
     {
-        var choices = _session.IsConnected
-            ? new[] { "Disconnect", "Back" }
-            : new[] { "Connect", "Back" };
+        var selectedIndex = 0;
 
-        var choice = PromptChoice(() => RenderHeader(activeNav: null), "[#58a6ff]Connection[/]", choices, "Back");
-
-        switch (choice)
+        while (true)
         {
-            case "Connect":
+            var connections = await _session.GetConnectionsAsync();
+
+            if (connections.Count == 0)
+            {
+                var choice = PromptChoice(() => RenderHeader(activeNav: null), "[#58a6ff]Connections[/]", ["Connect", "Back"], "Back");
+                if (choice != "Connect")
+                {
+                    return;
+                }
+
                 await _session.ConnectAsync();
                 UpdateStatusBarSnapshot();
                 await ShowMissingPermissionPromptIfNeededAsync();
                 TimedMessage("[grey]Returning...[/]");
-                break;
-            case "Disconnect":
-                await _session.DisconnectAsync();
-                UpdateStatusBarSnapshot();
-                TimedMessage("[green]Disconnected.[/]");
-                break;
+                continue;
+            }
+
+            if (selectedIndex >= connections.Count)
+            {
+                selectedIndex = Math.Max(0, connections.Count - 1);
+            }
+
+            AnsiConsole.Clear();
+            RenderHeader(activeNav: null);
+            AnsiConsole.MarkupLine("[#58a6ff]Manage connections[/]");
+            AnsiConsole.MarkupLine("[grey]Every tenant you've signed into is kept cached so you can switch instantly.[/]");
+            AnsiConsole.WriteLine();
+
+            var table = NoWrapColumns(new Table()
+                .Border(TableBorder.Rounded)
+                .AddColumn(" ")
+                .AddColumn("Account")
+                .AddColumn("Tenant")
+                .AddColumn("Status"));
+
+            for (var index = 0; index < connections.Count; index++)
+            {
+                var connection = connections[index];
+                var selected = index == selectedIndex;
+                var tenantLabel = FormatConnectionTenantLabel(connection);
+                var statusLabel = FormatConnectionStatusMarkup(connection);
+
+                table.AddRow(
+                    selected ? "[black on #58a6ff]>[/]" : " ",
+                    selected ? Selected(Markup.Escape(connection.Username)) : Markup.Escape(connection.Username),
+                    selected ? Selected(Markup.Escape(tenantLabel)) : Markup.Escape(tenantLabel),
+                    selected ? Selected(connection.IsActive ? "Active" : "Cached") : statusLabel);
+            }
+
+            AnsiConsole.Write(table);
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Up/Down select | Enter switch | A add tenant | X remove | D sign out of all | R refresh | Esc/B/Q back[/]");
+
+            var key = ReadNavigationKey(intercept: true);
+            switch (key.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    selectedIndex = Math.Max(0, selectedIndex - 1);
+                    break;
+                case ConsoleKey.DownArrow:
+                    selectedIndex = Math.Min(connections.Count - 1, selectedIndex + 1);
+                    break;
+                case ConsoleKey.Home:
+                    selectedIndex = 0;
+                    break;
+                case ConsoleKey.End:
+                    selectedIndex = connections.Count - 1;
+                    break;
+                case ConsoleKey.Enter:
+                    await SwitchConnectionAsync(connections[selectedIndex]);
+                    break;
+                case ConsoleKey.Escape:
+                case ConsoleKey.LeftArrow:
+                    return;
+                default:
+                    if (key.KeyChar is 'a' or 'A')
+                    {
+                        await _session.AddConnectionAsync();
+                        UpdateStatusBarSnapshot();
+                        await ShowMissingPermissionPromptIfNeededAsync();
+                        selectedIndex = 0;
+                    }
+                    else if (key.KeyChar is 'x' or 'X')
+                    {
+                        await RemoveConnectionAsync(connections[selectedIndex]);
+                    }
+                    else if (key.KeyChar is 'd' or 'D')
+                    {
+                        var confirmAll = PromptChoice(
+                            () => AnsiConsole.MarkupLine("[yellow]This signs out of every cached tenant/account connection.[/]"),
+                            "Sign out of all connections now?",
+                            ["Confirm", "Cancel"],
+                            "Cancel");
+
+                        if (confirmAll == "Confirm")
+                        {
+                            await _session.DisconnectAsync();
+                            UpdateStatusBarSnapshot();
+                            TimedMessage("[green]Signed out of all connections.[/]");
+                            selectedIndex = 0;
+                        }
+                    }
+                    else if (key.KeyChar is 'r' or 'R')
+                    {
+                        // Loop reloads connections at the top — nothing else to do here.
+                    }
+                    else if (key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                    {
+                        return;
+                    }
+
+                    break;
+            }
         }
+    }
+
+    internal static string FormatConnectionTenantLabel(CachedConnection connection) =>
+        connection.TenantName ?? connection.TenantId ?? "-";
+
+    internal static string FormatConnectionStatusMarkup(CachedConnection connection) =>
+        connection.IsActive ? "[green]Active[/]" : "[grey]Cached[/]";
+
+    private async Task SwitchConnectionAsync(CachedConnection connection)
+    {
+        if (connection.IsActive)
+        {
+            return;
+        }
+
+        var switched = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync($"Switching to {connection.Username}...", async _ => await _session.SwitchConnectionAsync(connection.HomeAccountId));
+
+        UpdateStatusBarSnapshot();
+        if (switched)
+        {
+            await ShowMissingPermissionPromptIfNeededAsync();
+            TimedMessage($"[green]Switched to {Markup.Escape(connection.Username)}.[/]");
+        }
+        else
+        {
+            var reconnect = AskYesNo($"Couldn't silently switch to {connection.Username} — its sign-in may have expired. Sign in again now?");
+            if (reconnect)
+            {
+                await _session.AddConnectionAsync();
+                UpdateStatusBarSnapshot();
+                await ShowMissingPermissionPromptIfNeededAsync();
+            }
+        }
+    }
+
+    private async Task RemoveConnectionAsync(CachedConnection connection)
+    {
+        var confirm = PromptChoice(
+            () =>
+            {
+                AnsiConsole.MarkupLine("[#58a6ff]Remove connection[/]");
+                AnsiConsole.MarkupLine($"Target: [grey]{Markup.Escape(connection.Username)}[/]");
+                if (connection.IsActive)
+                {
+                    AnsiConsole.MarkupLine("[yellow]This is your active connection — removing it will sign you out.[/]");
+                }
+
+                AnsiConsole.WriteLine();
+            },
+            "Remove this connection now?",
+            ["Confirm", "Cancel"],
+            "Cancel");
+
+        if (confirm != "Confirm")
+        {
+            return;
+        }
+
+        await _session.RemoveConnectionAsync(connection.HomeAccountId);
+        UpdateStatusBarSnapshot();
+        TimedMessage($"[green]Removed {Markup.Escape(connection.Username)}.[/]");
     }
 
     /// <summary>

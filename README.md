@@ -153,12 +153,13 @@ extracted folder to your PATH manually if you want to launch the CLI from any te
 
 The CLI uses Microsoft Graph delegated permissions and an interactive browser sign-in. After the
 first successful sign-in, MSAL keeps a persistent token cache so you usually do not need to sign in
-every run.
+every run. You can also sign into more than one tenant/account and switch between them without
+re-authenticating - see [Connections](#connections).
 
 On startup, the CLI tries to silently restore the cached Microsoft Graph session. If no cached session exists, open:
 
 ```text
-Connection > Connect
+Connections > Connect
 ```
 
 ## Permissions
@@ -327,6 +328,23 @@ Cloud Apps includes browse, publish, and unpublish workflows.
 Export generates a single Markdown snapshot of your tenant - Cloud PC inventory (with status/type
 breakdowns), provisioning policies, and Windows 365 licensing - for sharing or archiving outside
 the CLI. It's read-only and makes no changes to your tenant.
+
+### Connections
+
+The Connections area manages every tenant/account you've signed into - MSAL's local token cache
+can hold more than one at a time, so you can work across multiple tenants without signing out and
+back in each time. From this screen you can:
+
+- **Switch** to any cached connection instantly (`Enter`) - no re-authentication needed.
+- **Add** another tenant or account (`A`) - signs in with the Microsoft account picker without
+  disturbing any existing cached connections.
+- **Remove** a single connection (`X`) - signs out of just that tenant/account, leaving the others
+  intact.
+- **Sign out of everything** (`D`) - the original one-tenant "Disconnect" behavior, for a full
+  clean slate.
+
+The CLI remembers which connection you were last using and restores it automatically the next
+time you launch.
 
 ## Updates
 
