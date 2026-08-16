@@ -268,6 +268,7 @@ internal sealed partial class W365CliApp
                 await CreateProvisioningPolicyWizardAsync();
                 return false;
             case "User experience sync overview":
+            case "User Experience Sync Report":
                 await ShowUserExperienceSyncOverviewAsync();
                 return false;
             case "Usage report":
@@ -424,6 +425,7 @@ internal sealed partial class W365CliApp
                 new("Reports", "Cloud PC Usage Category Report", "Cloud PCs grouped by user and service plan"),
                 new("Reports", "Connectivity history", "Select a Cloud PC and inspect connection events"),
                 new("Reports", "Daily Connection Quality Report", "Daily usage hours and round-trip time per Cloud PC"),
+                new("Reports", "Disk space", "All Cloud PC disk space usage"),
                 new("Reports", "Flex License Daily Usage Report", "Daily Windows 365 Flex license usage and claims"),
                 new("Reports", "Flex License Hourly Usage Report", "View Windows 365 Flex license usage by hour"),
                 new("Reports", "Flex License Real-Time Usage Report", "Real-time Flex license claims by allotment"),
@@ -433,7 +435,8 @@ internal sealed partial class W365CliApp
                 new("Reports", "Performance Trend Report", "Slow round-trip time and low UDP connection trends"),
                 new("Reports", "Regional Connection Quality Report", "Weekly Cloud PC counts by gateway region"),
                 new("Reports", "Sign-In Activity Summary Report", "Aggregated sign-in activity and days since last sign-in"),
-                new("Reports", "Sign-in status", "Open current Cloud PC sign-in status")
+                new("Reports", "Sign-in status", "Open current Cloud PC sign-in status"),
+                new("Reports", "User Experience Sync Report", "Storage usage across all shared policies with user experience sync")
             ]),
             new("Licensing", "Licensing", "Capacity, availability, Flex, and Reserve utilization"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
@@ -701,6 +704,7 @@ internal sealed partial class W365CliApp
             new("Reports", "Flex License Daily Usage Report", "Daily Windows 365 Flex license usage and claims"),
             new("Reports", "Inaccessible Cloud PC Report", "Cloud PCs that are currently unreachable"),
             new("Reports", "Performance Trend Report", "Slow round-trip time and low UDP connection trends"),
+            new("Reports", "User Experience Sync Report", "Storage usage across all shared policies with user experience sync"),
             new("Catalog", "Service plans", "Open service plan catalog"),
             new("Catalog", "Gallery images", "Open gallery images"),
             new("Catalog", "Supported regions", "Open supported regions")

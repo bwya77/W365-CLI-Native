@@ -160,6 +160,7 @@ internal sealed partial class W365CliApp
                     "Cloud PC Usage Category Report",
                     "Connectivity history",
                     "Daily Connection Quality Report",
+                    "Disk space",
                     "Flex License Daily Usage Report",
                     "Flex License Hourly Usage Report",
                     "Flex License Real-Time Usage Report",
@@ -170,6 +171,7 @@ internal sealed partial class W365CliApp
                     "Regional Connection Quality Report",
                     "Sign-In Activity Summary Report",
                     "Sign-in status",
+                    "User Experience Sync Report",
                     "Back"
                 ],
                 "Back");
@@ -186,6 +188,12 @@ internal sealed partial class W365CliApp
                     break;
                 case "Connectivity history":
                     await ShowConnectivityHistoryAsync();
+                    break;
+                case "Disk space":
+                    await ShowDiskSpaceAsync();
+                    break;
+                case "User Experience Sync Report":
+                    await ShowUserExperienceSyncOverviewAsync();
                     break;
                 case "Launch details":
                     await ShowGraphRowsAsync(

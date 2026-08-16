@@ -550,6 +550,7 @@ internal sealed partial class W365CliApp
     private static void ShowDiskSpaceDetails(CloudPcDiskSpace disk)
     {
         AnsiConsole.Clear();
+        var bar = BuildDiskUsageBar(disk.UsedStorageGb, disk.TotalStorageGb, 30);
         var panel = new Panel(
             new Rows(
                 new Markup($"[bold]Cloud PC:[/] {Markup.Escape(disk.CloudPcName)}"),
@@ -558,6 +559,7 @@ internal sealed partial class W365CliApp
                 new Markup($"[bold]Free:[/] {Markup.Escape(FormatGb(disk.FreeStorageGb))}"),
                 new Markup($"[bold]Used:[/] {Markup.Escape(FormatGb(disk.UsedStorageGb))}"),
                 new Markup($"[bold]Total:[/] {Markup.Escape(FormatGb(disk.TotalStorageGb))}"),
+                new Markup(bar),
                 new Markup($"[bold]Percent free:[/] {Markup.Escape(disk.PercentFree is null ? "-" : $"{disk.PercentFree}%")}"),
                 new Markup($"[bold]Last sync:[/] {Markup.Escape(disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
                 new Markup($"[bold]Status:[/] {Markup.Escape(disk.Error ?? "Disk data available")}"),
@@ -572,6 +574,26 @@ internal sealed partial class W365CliApp
     private static string FormatGb(double? value)
     {
         return value is null ? "-" : $"{value:0.##} GB";
+    }
+
+    /// <summary>
+    /// Same green/yellow/red-at-90%/75% threshold styling as the Provisioning "User experience
+    /// sync" storage bar, reused here so disk space usage reads the same way everywhere it's shown.
+    /// Returns unescaped Spectre markup -- callers using the plain Row()+Markup.Escape() list style
+    /// must append this AFTER escaping the rest of the row, never pass it through Escape() itself.
+    /// </summary>
+    private static string BuildDiskUsageBar(double? usedGb, double? totalGb, int width)
+    {
+        if (totalGb is not > 0 || usedGb is null)
+        {
+            return $"[grey]{new string('░', width)}[/]";
+        }
+
+        var ratio = Math.Clamp(usedGb.Value / totalGb.Value, 0, 1);
+        var usedSegments = (int)Math.Round(width * ratio);
+        var freeSegments = Math.Max(0, width - usedSegments);
+        var barColor = ratio >= 0.9 ? "red" : ratio >= 0.75 ? "yellow" : "green";
+        return $"[{barColor}]{new string('█', usedSegments)}[/][grey]{new string('░', freeSegments)}[/]";
     }
 
     private async Task ShowCloudPcsAsync()
@@ -1335,10 +1357,12 @@ internal sealed partial class W365CliApp
                 .Border(BoxBorder.Rounded);
         }
 
+        var bar = BuildDiskUsageBar(disk.UsedStorageGb, disk.TotalStorageGb, 24);
         var rows = new Rows(
             new Markup($"[bold]Free[/] {Markup.Escape(FormatGb(disk.FreeStorageGb))}"),
             new Markup($"[bold]Used[/] {Markup.Escape(FormatGb(disk.UsedStorageGb))}"),
             new Markup($"[bold]Total[/] {Markup.Escape(FormatGb(disk.TotalStorageGb))}"),
+            new Markup(bar),
             new Markup($"[bold]Percent free[/] {Markup.Escape(disk.PercentFree is null ? "-" : $"{disk.PercentFree}%")}"),
             new Markup($"[bold]Last sync[/] {Markup.Escape(disk.LastSyncDateTime?.ToLocalTime().ToString("g") ?? "-")}"),
             new Markup($"[bold]Status[/]\n{Markup.Escape(disk.Error ?? "Disk data available")}"),
