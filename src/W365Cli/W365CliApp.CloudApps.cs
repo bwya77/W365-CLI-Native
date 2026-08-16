@@ -130,21 +130,49 @@ internal sealed partial class W365CliApp
         var grid = new Grid();
         grid.AddColumn();
         grid.AddColumn();
-        grid.AddRow(CreateCloudAppTable(allApps, visibleApps, selectedIndex, filter), CreateCloudAppSidePanel(selectedApp));
+        grid.AddRow(CreateCloudAppTable(allApps, visibleApps, selectedIndex, filter, sideBySide: true), CreateCloudAppSidePanel(selectedApp));
 
         RenderBreadcrumb("Cloud Apps", "Browse");
         AnsiConsole.Write(CreateCloudAppSummaryPanel(allApps, visibleApps, filter));
-        if (Console.WindowWidth >= 125)
+
+        var showPublisher = Console.WindowWidth >= 100;
+        var showDates = Console.WindowWidth >= 150;
+        if (Console.WindowWidth >= GetMinimumSideBySideCloudAppTableWidth(showPublisher, showDates))
         {
             AnsiConsole.Write(grid);
         }
         else
         {
-            AnsiConsole.Write(CreateCloudAppTable(allApps, visibleApps, selectedIndex, filter));
+            AnsiConsole.Write(CreateCloudAppTable(allApps, visibleApps, selectedIndex, filter, sideBySide: false));
             AnsiConsole.Write(CreateCloudAppSidePanel(selectedApp));
         }
         AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter details | A actions | / filter | C clear | R refresh | Esc/B/Q back | P or Ctrl+K command palette[/]");
         RenderStatusBar();
+    }
+
+    /// <summary>
+    /// The narrowest terminal width the side-by-side "table + Selected Cloud App panel" grid
+    /// layout can render into without the table needing more width than every column's documented
+    /// minimum (see <see cref="GetCloudAppWidths(bool,bool,bool,int)"/>) adds up to -- mirrors
+    /// <see cref="GetMinimumSideBySideCloudPcTableWidth"/> for the same reason: below this width,
+    /// switching to the stacked (table, then panel, full width) layout instead is the only way to
+    /// avoid Spectre silently shrinking a column below what it can cleanly truncate.
+    /// </summary>
+    internal static int GetMinimumSideBySideCloudAppTableWidth(bool showPublisher, bool showDates)
+    {
+        const int statusMin = 10;
+        const int nameMin = 16;
+        const int publisherMin = 14;
+        const int dateMin = 12;
+        const int sidePanelReserve = 40;
+
+        var columnCount = 3 + (showPublisher ? 1 : 0) + (showDates ? 2 : 0);
+        var overhead = (3 * columnCount) + 1;
+
+        return overhead + sidePanelReserve + 1 /* selector */
+            + statusMin + nameMin
+            + (showPublisher ? publisherMin : 0)
+            + (showDates ? dateMin * 2 : 0);
     }
 
     private static Panel CreateCloudAppSummaryPanel(IReadOnlyList<CloudAppSummary> allApps, IReadOnlyList<CloudAppSummary> visibleApps, string filter)
@@ -161,9 +189,9 @@ internal sealed partial class W365CliApp
         return new Panel(content).Border(BoxBorder.Rounded).Header("Cloud Apps");
     }
 
-    private static Table CreateCloudAppTable(IReadOnlyList<CloudAppSummary> allApps, IReadOnlyList<CloudAppSummary> visibleApps, int selectedIndex, string filter)
+    private static Table CreateCloudAppTable(IReadOnlyList<CloudAppSummary> allApps, IReadOnlyList<CloudAppSummary> visibleApps, int selectedIndex, string filter, bool sideBySide = true)
     {
-        var widths = GetCloudAppWidths();
+        var widths = GetCloudAppWidths(Console.WindowWidth >= 100, Console.WindowWidth >= 150, sideBySide);
 
         // NoWrap on every sized column is essential here: Spectre's default column overflow mode
         // wraps text that doesn't fit the column Spectre itself decides to render (which can be
@@ -267,38 +295,83 @@ internal sealed partial class W365CliApp
 
     /// <summary>
     /// Computes exact column widths so the rendered table (borders + padding included) fits
-    /// within Console.WindowWidth -- previously this budgeted only a flat "-4"/"-2" fudge factor
-    /// (copied loosely from GetCloudPcWidths' simpler 3-column split), which under-accounted for
-    /// a Rounded-border table's real overhead (n+1 border chars + 2 padding chars per column) once
-    /// the fixed 104/132 cap was removed. That under-accounting let Name/Publisher grow wider than
-    /// what Spectre could actually render, and since Spectre wraps overflow by default (and Fit()
-    /// pads with trailing spaces), the wrapped continuation showed up as blank-looking rows. Now
-    /// paired with explicit Width+NoWrap on each column in CreateCloudAppTable as a second layer
-    /// of protection against any residual rounding.
+    /// within the given window width -- previously this budgeted only a flat "-4"/"-2" fudge
+    /// factor (copied loosely from GetCloudPcWidths' simpler 3-column split), which under-
+    /// accounted for a Rounded-border table's real overhead (n+1 border chars + 2 padding chars
+    /// per column) once the fixed 104/132 cap was removed. That under-accounting let Name/Publisher
+    /// grow wider than what Spectre could actually render, and since Spectre wraps overflow by
+    /// default (and Fit() pads with trailing spaces), the wrapped continuation showed up as
+    /// blank-looking rows. Now paired with explicit Width+NoWrap on each column in
+    /// CreateCloudAppTable as a second layer of protection against any residual rounding.
     ///
-    /// Also reserves a fixed budget for the "Selected Cloud App" side panel that sits next to this
-    /// table in a two-column Grid (RenderCloudAppBrowser) once the terminal is >=125 wide -- without
-    /// this, a maximized/very wide terminal let Name/Publisher consume almost the entire window,
-    /// leaving the side panel column no room and breaking the whole layout. Name/Publisher are also
-    /// capped at a sane maximum so ultra-wide terminals don't just turn into huge padded gaps
-    /// (the original "spacing" complaint this table was fixed for).
+    /// Status/Published/Added are shrunk (in that priority order) toward their minimums before
+    /// Name/Publisher ever go below theirs, and the whole computed total is kept within
+    /// <paramref name="windowWidth"/> -- otherwise, in a side-by-side layout with dates shown
+    /// (Console.WindowWidth around 150, right where "show dates" turns on), the same
+    /// character-by-character column-squishing bug fixed for the Cloud PCs table could occur here
+    /// too, since the previous flat "Math.Max(48, ...)" floor could push the computed total past
+    /// the real terminal width once the side panel and every optional column were all showing at
+    /// once. <paramref name="sideBySide"/> should be false when the table is rendered full-width
+    /// with no adjacent side panel (e.g. a narrow terminal, or a caller with no panel at all), so
+    /// it doesn't reserve space for a panel that isn't actually there.
     /// </summary>
-    private static (int Status, int Name, int Publisher, int Published, int Added) GetCloudAppWidths()
+    internal static (int Status, int Name, int Publisher, int Published, int Added) GetCloudAppWidths(bool showPublisher, bool showDates, bool sideBySide = true) =>
+        GetCloudAppWidths(showPublisher, showDates, sideBySide, Console.WindowWidth);
+
+    internal static (int Status, int Name, int Publisher, int Published, int Added) GetCloudAppWidths(bool showPublisher, bool showDates, bool sideBySide, int windowWidth)
     {
-        const int status = 12;
-        const int published = 18;
-        const int added = 18;
-        const int sidePanelReserve = 40; // "Selected Cloud App" panel width + Grid column gap
-        var showPublisher = Console.WindowWidth >= 100;
-        var showDates = Console.WindowWidth >= 150;
+        const int statusMax = 12;
+        const int statusMin = 10;
+        const int dateMax = 18;
+        const int dateMin = 12;
+        const int nameMin = 16;
+        const int nameMax = 60;
+        const int publisherMin = 14;
+        const int publisherMax = 40;
+        const int sidePanelReserve = 40; // "Selected Cloud App" panel width + Grid column gap -- only spent when rendered side-by-side with it.
 
         var columnCount = 3 + (showPublisher ? 1 : 0) + (showDates ? 2 : 0); // selector, status, name [+ publisher] [+ published, added]
         var overhead = (3 * columnCount) + 1; // Rounded border: (n+1) border chars + 2 padding chars per column
-        var reserved = 1 /* selector */ + status + (showDates ? published + added : 0) + sidePanelReserve;
-        var available = Math.Max(48, Console.WindowWidth - overhead - reserved);
+        var sidePanelCost = sideBySide ? sidePanelReserve : 0;
 
-        var name = showPublisher ? Math.Clamp((int)(available * 0.58), 24, 60) : Math.Clamp(available, 24, 90);
-        var publisher = showPublisher ? Math.Clamp(available - name, 18, 40) : 18;
+        var status = statusMax;
+        var published = showDates ? dateMax : 0;
+        var added = showDates ? dateMax : 0;
+        var minNameBudget = nameMin + (showPublisher ? publisherMin : 0);
+
+        int RemainingBudget() => windowWidth - overhead - sidePanelCost - 1 /* selector */ - status - published - added;
+
+        // Shrink Published/Added first (a truncated date is still readable with "..."), then
+        // Status, before ever touching Name/Publisher's minimums.
+        while (RemainingBudget() < minNameBudget && (
+            (showDates && published > dateMin) || (showDates && added > dateMin) || status > statusMin))
+        {
+            if (showDates && published > dateMin)
+            {
+                published--;
+            }
+            else if (showDates && added > dateMin)
+            {
+                added--;
+            }
+            else if (status > statusMin)
+            {
+                status--;
+            }
+        }
+
+        var available = Math.Max(minNameBudget, RemainingBudget());
+
+        // Split by allocating each column's minimum first, then handing out any slack beyond that
+        // proportionally (58/42) and capping at each column's maximum -- capping only ever removes
+        // width, so name + publisher can never exceed `available` here, unlike clamping each one
+        // independently with Math.Max(...min...), which could round both up past their minimum at
+        // once and silently push the total over budget right at the narrowest supported width.
+        var slack = Math.Max(0, available - minNameBudget);
+        var name = showPublisher
+            ? Math.Min(nameMax, nameMin + (int)(slack * 0.58))
+            : Math.Clamp(available, nameMin, nameMax + publisherMax);
+        var publisher = showPublisher ? Math.Min(publisherMax, publisherMin + (slack - (int)(slack * 0.58))) : 0;
         return (status, name, publisher, published, added);
     }
 
