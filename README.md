@@ -34,20 +34,29 @@ It is separate from the PowerShell-based `W365CLI` module and does not require t
 ## What it does
 
 - Browse, filter, sort, and inspect Cloud PCs.
+- Browse Cloud PCs scoped to a Flex shared-pool provisioning policy, including how many users
+  share access to each pool.
 - Run Cloud PC actions such as sync, restart, resize, rename, reprovision, power on,
   reset local admin password, and end grace period.
-- View disk space, snapshots, and remote action history.
+- View disk space (with a color-coded usage bar), snapshots, and remote action history.
 - Create, restore, and delete snapshots.
-- View detailed status information (including provisioning warnings/errors) for a Cloud PC.
+- View detailed status information (including provisioning warnings/errors, real-time sign-in
+  status, and "in use" state) for a Cloud PC.
 - Browse provisioning policies and view the Cloud PCs assigned to a policy.
-- Create a new provisioning policy from scratch.
+- Create a new provisioning policy from scratch, including Windows 365 Flex Dedicated and Flex
+  Shared with real-time license capacity validation.
 - Export, copy, reprovision, and delete provisioning policies.
 - Reprovision a shared policy's Cloud PCs while keeping a reserve percentage available.
 - View and manage user experience sync (user settings persistence) storage and profiles for
   shared provisioning policies, including a tenant-wide overview across all policies.
-- View and manage the members of a provisioning policy's assigned Entra group.
+- View and manage the members of a provisioning policy's assigned Entra group, including which
+  members currently have a Cloud PC provisioned.
 - Understand Windows 365 license capacity, availability, and Flex utilization.
-- Browse reports for usage, connectivity history, launch details, and Graph report streams.
+- Browse a full set of Cloud PC reports — sign-in status, connectivity/connection-quality
+  history, disk space, launch details, action status, performance trends, and Windows 365 Flex
+  license usage (hourly, daily, and real-time) — each rendered with report-specific columns.
+- Export a Markdown snapshot of your Cloud PC inventory, provisioning policies, and licensing for
+  sharing or archiving.
 - Browse Cloud Apps and publish or unpublish them.
 - Browse service plans, gallery images, custom images, and supported regions.
 - View tenant settings, setting profiles, and user settings.
@@ -224,6 +233,8 @@ Action submissions show a brief result screen, then return to the previous page.
 The Cloud PCs area includes:
 
 - Browse Cloud PCs
+- By shared pool — browse the Cloud PCs and member count of a specific Flex shared-pool
+  provisioning policy
 - Disk space across all Cloud PCs
 - Snapshots across all Cloud PCs
 
@@ -240,23 +251,34 @@ The Provisioning area includes a provisioning policy browser with actions to:
 - Reprovision Cloud PCs assigned to the policy
 - Reprovision a shared policy while keeping a reserve percentage available, and check status
 - View user experience sync storage usage and profiles for shared-by-Entra-group policies
-- Manage the members of a policy's assigned Entra group (view, add, remove)
+- Manage the members of a policy's assigned Entra group (view, add, remove), including which
+  members currently have a Cloud PC
 - Delete a policy
 
-It also includes a "Create policy" wizard, and a tenant-wide "User experience sync overview" that
-rolls up storage usage across every shared-by-Entra-group policy.
+It also includes a "Create policy" wizard — with Windows 365 Flex Dedicated and Flex Shared
+license capacity validated against real tenant data before you submit — and a tenant-wide "User
+experience sync overview" that rolls up storage usage across every shared-by-Entra-group policy.
 
 ### Reports
 
 Reports include:
 
 - Sign-in status
-- Usage
-- Connectivity history
+- Connectivity history (per Cloud PC)
+- Disk space
+- User experience sync
 - Launch details
-- Cloud PC report streams
+- Cloud PC Usage Category Report
+- Daily Connection Quality Report
+- Flex License Daily/Hourly/Real-Time Usage Reports
+- Flex User Connections Report
+- Inaccessible Cloud PC Report
+- Performance Trend Report
+- Regional Connection Quality Report
+- Sign-In Activity Summary Report
 
-Where possible, selecting a Cloud PC row opens that Cloud PC's detail page.
+Where possible, selecting a Cloud PC row opens that Cloud PC's detail page; report rows with data
+that only exists on the report itself open a full field-detail view instead.
 
 ### Licensing
 
@@ -287,6 +309,12 @@ Tenant settings includes:
 ### Cloud Apps
 
 Cloud Apps includes browse, publish, and unpublish workflows.
+
+### Export
+
+Export generates a single Markdown snapshot of your tenant — Cloud PC inventory (with status/type
+breakdowns), provisioning policies, and Windows 365 licensing — for sharing or archiving outside
+the CLI. It's read-only and makes no changes to your tenant.
 
 ## Updates
 
