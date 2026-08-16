@@ -17,7 +17,7 @@ jobs:
       HAS_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -147,7 +147,7 @@ jobs:
       HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -291,7 +291,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
