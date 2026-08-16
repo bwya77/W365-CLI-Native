@@ -1210,7 +1210,7 @@ internal sealed class W365GraphClient
     /// metadata columns, and any column whose value is a bare GUID (a raw id is never useful to read
     /// in a summary line, whatever the column happens to be called for a given report).
     /// </summary>
-    private static IReadOnlyList<GraphTableRow> ParseReportRowsAdaptive(JsonElement report)
+    internal static IReadOnlyList<GraphTableRow> ParseReportRowsAdaptive(JsonElement report)
     {
         if (!report.TryGetProperty("Schema", out var schema) ||
             !report.TryGetProperty("Values", out var values) ||
@@ -1242,7 +1242,7 @@ internal sealed class W365GraphClient
         return rows;
     }
 
-    private static GraphTableRow ToAdaptiveReportTableRow(IReadOnlyDictionary<string, string> fields)
+    internal static GraphTableRow ToAdaptiveReportTableRow(IReadOnlyDictionary<string, string> fields)
     {
         var title = GetFirst(fields, "DisplayName", "CloudPcName", "ManagedDeviceName", "UPN", "Name", "id") ?? "-";
 
@@ -1258,7 +1258,7 @@ internal sealed class W365GraphClient
         return new GraphTableRow(title, summary, fields);
     }
 
-    private static IReadOnlyList<GraphTableRow> ParseReportRows(JsonElement report, params string[] summaryFields)
+    internal static IReadOnlyList<GraphTableRow> ParseReportRows(JsonElement report, params string[] summaryFields)
     {
         if (!report.TryGetProperty("Schema", out var schema) ||
             !report.TryGetProperty("Values", out var values) ||
@@ -1542,12 +1542,12 @@ internal sealed class W365GraphClient
         return TimeSpan.FromMilliseconds(baseDelayMs + jitterMs);
     }
 
-    private static double? ToGb(long? bytes)
+    internal static double? ToGb(long? bytes)
     {
         return bytes is null ? null : Math.Round(bytes.Value / 1024d / 1024d / 1024d, 2);
     }
 
-    private static Dictionary<string, string> FlattenJsonObject(JsonElement item)
+    internal static Dictionary<string, string> FlattenJsonObject(JsonElement item)
     {
         var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var property in item.EnumerateObject())
@@ -1558,7 +1558,7 @@ internal sealed class W365GraphClient
         return fields;
     }
 
-    private static ProvisioningPolicySummary ToProvisioningPolicySummary(JsonElement policy, IReadOnlyDictionary<string, string> groupNames)
+    internal static ProvisioningPolicySummary ToProvisioningPolicySummary(JsonElement policy, IReadOnlyDictionary<string, string> groupNames)
     {
         var groupIds = GetAssignmentGroupIds(policy).ToArray();
         var domainJoinTypes = policy.TryGetProperty("domainJoinConfigurations", out var joins) && joins.ValueKind == JsonValueKind.Array
@@ -1586,7 +1586,7 @@ internal sealed class W365GraphClient
         };
     }
 
-    private static IEnumerable<string> GetAssignmentGroupIds(JsonElement policy)
+    internal static IEnumerable<string> GetAssignmentGroupIds(JsonElement policy)
     {
         if (!policy.TryGetProperty("assignments", out var assignments) || assignments.ValueKind != JsonValueKind.Array)
         {
@@ -1625,7 +1625,7 @@ internal sealed class W365GraphClient
         return resolved.ToDictionary(pair => pair.groupId, pair => pair.name, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static Dictionary<string, object?> BuildProvisioningPolicyCreateBody(ProvisioningPolicySummary policy, string displayName)
+    internal static Dictionary<string, object?> BuildProvisioningPolicyCreateBody(ProvisioningPolicySummary policy, string displayName)
     {
         var createKeys = new[]
         {
@@ -1677,7 +1677,7 @@ internal sealed class W365GraphClient
         return BuildProvisioningPolicyAssignments(policy, createdPolicyId, includeSourceId: false);
     }
 
-    private static IReadOnlyList<object> BuildProvisioningPolicyAssignments(ProvisioningPolicySummary policy, string? createdPolicyId, bool includeSourceId)
+    internal static IReadOnlyList<object> BuildProvisioningPolicyAssignments(ProvisioningPolicySummary policy, string? createdPolicyId, bool includeSourceId)
     {
         if (!policy.Raw.TryGetProperty("assignments", out var assignments) || assignments.ValueKind != JsonValueKind.Array)
         {
@@ -1728,7 +1728,7 @@ internal sealed class W365GraphClient
         return output;
     }
 
-    private static void AddJsonValueIfPresent(IDictionary<string, object?> target, JsonElement source, string property)
+    internal static void AddJsonValueIfPresent(IDictionary<string, object?> target, JsonElement source, string property)
     {
         if (source.TryGetProperty(property, out var value) && value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
         {
@@ -1736,7 +1736,7 @@ internal sealed class W365GraphClient
         }
     }
 
-    private static string? GetString(JsonElement item, string property)
+    internal static string? GetString(JsonElement item, string property)
     {
         if (!item.TryGetProperty(property, out var value))
         {
@@ -1753,7 +1753,7 @@ internal sealed class W365GraphClient
         };
     }
 
-    private static bool? GetBool(JsonElement item, string property)
+    internal static bool? GetBool(JsonElement item, string property)
     {
         if (!item.TryGetProperty(property, out var value))
         {
@@ -1769,7 +1769,7 @@ internal sealed class W365GraphClient
         };
     }
 
-    private static int? GetInt(JsonElement item, string property)
+    internal static int? GetInt(JsonElement item, string property)
     {
         if (!item.TryGetProperty(property, out var value))
         {
@@ -1784,14 +1784,14 @@ internal sealed class W365GraphClient
         };
     }
 
-    private static GraphTableRow ToTableRow(IReadOnlyDictionary<string, string> fields, params string[] summaryFields)
+    internal static GraphTableRow ToTableRow(IReadOnlyDictionary<string, string> fields, params string[] summaryFields)
     {
         var title = GetFirst(fields, "displayName", "DisplayName", "Cloud PC", "CloudPcName", "ManagedDeviceName", "id") ?? "-";
         var summary = JoinSummary(summaryFields.Select(field => GetFirst(fields, field)).Where(value => !string.IsNullOrWhiteSpace(value)).ToArray());
         return new GraphTableRow(title, string.IsNullOrWhiteSpace(summary) ? "-" : summary, fields);
     }
 
-    private static string? GetFirst(IReadOnlyDictionary<string, string> fields, params string[] names)
+    internal static string? GetFirst(IReadOnlyDictionary<string, string> fields, params string[] names)
     {
         foreach (var name in names)
         {
@@ -1804,7 +1804,7 @@ internal sealed class W365GraphClient
         return null;
     }
 
-    private static string JoinSummary(params string?[] values)
+    internal static string JoinSummary(params string?[] values)
     {
         var parts = values.Where(value => !string.IsNullOrWhiteSpace(value) && value != "-").ToArray();
         return parts.Length == 0 ? "-" : string.Join(" | ", parts);
@@ -1838,7 +1838,7 @@ internal sealed class W365GraphClient
         return errorBody;
     }
 
-    private static string JsonToString(JsonElement value)
+    internal static string JsonToString(JsonElement value)
     {
         return value.ValueKind switch
         {
@@ -1852,7 +1852,7 @@ internal sealed class W365GraphClient
         };
     }
 
-    private static string GetReportColumnName(JsonElement schemaItem)
+    internal static string GetReportColumnName(JsonElement schemaItem)
     {
         if (schemaItem.ValueKind == JsonValueKind.String)
         {
@@ -1877,7 +1877,7 @@ internal sealed class W365GraphClient
         return "-";
     }
 
-    private static string FormatBoolean(string? value)
+    internal static string FormatBoolean(string? value)
     {
         return value?.ToLowerInvariant() switch
         {
@@ -1888,7 +1888,7 @@ internal sealed class W365GraphClient
         };
     }
 
-    private static string FormatLaunchDetailError(HttpRequestException ex)
+    internal static string FormatLaunchDetailError(HttpRequestException ex)
     {
         var message = ex.Message;
         if (message.Contains("404", StringComparison.OrdinalIgnoreCase) ||

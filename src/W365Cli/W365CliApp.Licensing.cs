@@ -103,7 +103,7 @@ internal sealed partial class W365CliApp
                 });
         }
 
-        private static IReadOnlyList<LicenseOverviewItem> BuildLicenseOverview(
+        internal static IReadOnlyList<LicenseOverviewItem> BuildLicenseOverview(
             IReadOnlyList<SubscribedSku> skus,
             IReadOnlyList<CloudPcSummary> cloudPcs,
             IReadOnlyList<ProvisioningPolicySummary> policies)
@@ -161,7 +161,7 @@ internal sealed partial class W365CliApp
             return output;
         }
 
-        private static Windows365LicenseInfo? GetWindows365LicenseInfo(SubscribedSku sku)
+        internal static Windows365LicenseInfo? GetWindows365LicenseInfo(SubscribedSku sku)
         {
             var text = $"{sku.SkuPartNumber} {string.Join(' ', sku.ServicePlans?.Select(plan => plan.ServicePlanName) ?? [])}";
             if (!text.Contains("W365", StringComparison.OrdinalIgnoreCase) &&
@@ -199,7 +199,7 @@ internal sealed partial class W365CliApp
             return new Windows365LicenseInfo(family, planKey, $"{family} {planLabel}");
         }
 
-        private static IReadOnlyList<CloudPcSummary> GetCloudPcsForLicense(IReadOnlyList<CloudPcSummary> cloudPcs, Windows365LicenseInfo license)
+        internal static IReadOnlyList<CloudPcSummary> GetCloudPcsForLicense(IReadOnlyList<CloudPcSummary> cloudPcs, Windows365LicenseInfo license)
         {
             return cloudPcs
                 .Where(pc =>
@@ -209,7 +209,7 @@ internal sealed partial class W365CliApp
                 .ToArray();
         }
 
-        private static bool IsCloudPcInLicenseFamily(CloudPcSummary pc, string family)
+        internal static bool IsCloudPcInLicenseFamily(CloudPcSummary pc, string family)
         {
             if (family.Equals("Flex", StringComparison.OrdinalIgnoreCase))
             {
@@ -226,14 +226,14 @@ internal sealed partial class W365CliApp
             return Contains(pc.ServicePlanName, family);
         }
 
-        private static bool IsReserveText(string? value)
+        internal static bool IsReserveText(string? value)
         {
             return Contains(value, "Reserve") ||
                 Contains(value, "CPC_R_") ||
                 Contains(value, "WINDOWS_365_R_");
         }
 
-        private static string? GetPlanKey(string value)
+        internal static string? GetPlanKey(string value)
         {
             var displayMatch = System.Text.RegularExpressions.Regex.Match(
                 value,
@@ -253,25 +253,25 @@ internal sealed partial class W365CliApp
                 : null;
         }
 
-        private static string FormatPlanKey(string planKey)
+        internal static string FormatPlanKey(string planKey)
         {
             var parts = planKey.Split('/');
             return parts.Length == 3 ? $"{parts[0]}vCPU/{parts[1]}GB/{parts[2]}GB" : planKey;
         }
 
-        private static bool IsDedicatedCloudPc(CloudPcSummary cloudPc)
+        internal static bool IsDedicatedCloudPc(CloudPcSummary cloudPc)
         {
             return cloudPc.ProvisioningType?.Contains("dedicated", StringComparison.OrdinalIgnoreCase) == true ||
                 cloudPc.ProvisioningPolicyName?.Contains("dedicated", StringComparison.OrdinalIgnoreCase) == true;
         }
 
-        private static bool IsSharedCloudPc(CloudPcSummary cloudPc)
+        internal static bool IsSharedCloudPc(CloudPcSummary cloudPc)
         {
             return cloudPc.ProvisioningType?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true ||
                 cloudPc.ProvisioningPolicyName?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true;
         }
 
-        private static bool IsFlexPolicy(ProvisioningPolicySummary policy)
+        internal static bool IsFlexPolicy(ProvisioningPolicySummary policy)
         {
             return policy.ProvisioningType?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true ||
                 policy.DisplayName.Contains("Flex", StringComparison.OrdinalIgnoreCase) ||
@@ -390,12 +390,12 @@ internal sealed partial class W365CliApp
             WaitForBack();
         }
 
-        private static bool IsFlexLicense(LicenseOverviewItem item)
+        internal static bool IsFlexLicense(LicenseOverviewItem item)
         {
             return item.Family.StartsWith("Flex", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsReserveLicense(LicenseOverviewItem item)
+        internal static bool IsReserveLicense(LicenseOverviewItem item)
         {
             return item.Family.StartsWith("Reserve", StringComparison.OrdinalIgnoreCase);
         }
@@ -603,13 +603,13 @@ internal sealed partial class W365CliApp
             return table;
         }
 
-        private static string FormatCloudPcList(IEnumerable<CloudPcSummary> cloudPcs)
+        internal static string FormatCloudPcList(IEnumerable<CloudPcSummary> cloudPcs)
         {
             var names = cloudPcs.Select(pc => pc.Name).ToArray();
             return names.Length == 0 ? "-" : string.Join(", ", names);
         }
 
-        private static IReadOnlyList<FlexAccessRow> GetPolicyAccessRows(ProvisioningPolicySummary policy, IReadOnlyDictionary<string, IReadOnlyList<GroupMemberSummary>> groupMembers)
+        internal static IReadOnlyList<FlexAccessRow> GetPolicyAccessRows(ProvisioningPolicySummary policy, IReadOnlyDictionary<string, IReadOnlyList<GroupMemberSummary>> groupMembers)
         {
             var rows = new List<FlexAccessRow>();
             for (var index = 0; index < Math.Max(policy.AssignedGroupIds.Count, policy.AssignedGroupNames.Count); index++)
@@ -632,7 +632,7 @@ internal sealed partial class W365CliApp
             return rows.Count == 0 ? [new FlexAccessRow("-", "No direct users found", "-")] : rows;
         }
 
-        private static string GetFlexCloudPcMode(CloudPcSummary cloudPc)
+        internal static string GetFlexCloudPcMode(CloudPcSummary cloudPc)
         {
             if (cloudPc.ProvisioningPolicyName?.Contains("Dedicated", StringComparison.OrdinalIgnoreCase) == true)
             {
@@ -642,7 +642,7 @@ internal sealed partial class W365CliApp
             return "Shared";
         }
 
-        private static string GetDedicatedUserState(CloudPcSummary? cloudPc)
+        internal static string GetDedicatedUserState(CloudPcSummary? cloudPc)
         {
             if (cloudPc is null)
             {
@@ -656,25 +656,25 @@ internal sealed partial class W365CliApp
                     : "Has Cloud PC";
         }
 
-        private static bool IsCloudAppsPolicy(ProvisioningPolicySummary policy)
+        internal static bool IsCloudAppsPolicy(ProvisioningPolicySummary policy)
         {
             return policy.DisplayName.Contains("Cloud-Apps", StringComparison.OrdinalIgnoreCase) ||
                 policy.DisplayName.Contains("Cloud Apps", StringComparison.OrdinalIgnoreCase) ||
                 policy.DisplayName.Contains("CloudApps", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsSharedFlexPolicy(ProvisioningPolicySummary policy)
+        internal static bool IsSharedFlexPolicy(ProvisioningPolicySummary policy)
         {
             return policy.DisplayName.Contains("Shared", StringComparison.OrdinalIgnoreCase) ||
                 (policy.ProvisioningType?.Contains("shared", StringComparison.OrdinalIgnoreCase) == true && !IsDedicatedFlexPolicy(policy));
         }
 
-        private static bool IsDedicatedFlexPolicy(ProvisioningPolicySummary policy)
+        internal static bool IsDedicatedFlexPolicy(ProvisioningPolicySummary policy)
         {
             return policy.DisplayName.Contains("Dedicated", StringComparison.OrdinalIgnoreCase);
         }
 
-    private sealed record LicenseOverviewItem(
+    internal sealed record LicenseOverviewItem(
         string Family,
         string SkuPartNumbers,
         int Purchased,
@@ -692,7 +692,7 @@ internal sealed partial class W365CliApp
         IReadOnlyList<CloudPcSummary> CloudPcs,
         IReadOnlyList<ProvisioningPolicySummary> FlexPolicies);
 
-    private sealed record Windows365LicenseInfo(string Family, string PlanKey, string DisplayName);
+    internal sealed record Windows365LicenseInfo(string Family, string PlanKey, string DisplayName);
 
-    private sealed record FlexAccessRow(string GroupName, string UserName, string UserPrincipalName);
+    internal sealed record FlexAccessRow(string GroupName, string UserName, string UserPrincipalName);
 }

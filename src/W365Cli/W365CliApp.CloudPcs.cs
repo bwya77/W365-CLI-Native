@@ -300,7 +300,7 @@ internal sealed partial class W365CliApp
         RenderStatusBar();
     }
 
-    private static IReadOnlyList<CloudPcDiskSpace> FilterDiskSpaces(IReadOnlyList<CloudPcDiskSpace> items, string filter)
+    internal static IReadOnlyList<CloudPcDiskSpace> FilterDiskSpaces(IReadOnlyList<CloudPcDiskSpace> items, string filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
         {
@@ -1005,7 +1005,7 @@ internal sealed partial class W365CliApp
     /// (just not signed in right now), i.e. Available; only for notProvisioned Cloud PCs (no VM
     /// exists at all yet) does "Unavailable" mean truly unusable.
     /// </summary>
-    private static string? GetNormalizedInUseStatus(CloudPcSummary pc)
+    internal static string? GetNormalizedInUseStatus(CloudPcSummary pc)
     {
         var signIn = pc.RealTimeSignInStatus;
         if (!string.IsNullOrWhiteSpace(signIn))
@@ -1031,7 +1031,7 @@ internal sealed partial class W365CliApp
         return pc.ConnectivityResult?.Status;
     }
 
-    private static string FormatInUsePlain(CloudPcSummary pc)
+    internal static string FormatInUsePlain(CloudPcSummary pc)
     {
         var status = GetNormalizedInUseStatus(pc);
         if (string.IsNullOrWhiteSpace(status))
@@ -1068,7 +1068,7 @@ internal sealed partial class W365CliApp
         return status;
     }
 
-    private static string FormatInUseMarkup(CloudPcSummary pc)
+    internal static string FormatInUseMarkup(CloudPcSummary pc)
     {
         var status = GetNormalizedInUseStatus(pc);
         var text = Markup.Escape(Fit(FormatInUsePlain(pc), 26));
@@ -1119,7 +1119,7 @@ internal sealed partial class W365CliApp
             .Border(BoxBorder.Rounded);
     }
 
-    private static IReadOnlyList<CloudPcSummary> FilterCloudPcs(IReadOnlyList<CloudPcSummary> cloudPcs, string filter)
+    internal static IReadOnlyList<CloudPcSummary> FilterCloudPcs(IReadOnlyList<CloudPcSummary> cloudPcs, string filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
         {
@@ -1136,7 +1136,7 @@ internal sealed partial class W365CliApp
             .ToArray();
     }
 
-    private static IReadOnlyList<CloudPcSummary> SortCloudPcs(IReadOnlyList<CloudPcSummary> cloudPcs, CloudPcSortMode sortMode)
+    internal static IReadOnlyList<CloudPcSummary> SortCloudPcs(IReadOnlyList<CloudPcSummary> cloudPcs, CloudPcSortMode sortMode)
     {
         return sortMode switch
         {
@@ -1147,7 +1147,7 @@ internal sealed partial class W365CliApp
         };
     }
 
-    private static CloudPcSortMode NextCloudPcSortMode(CloudPcSortMode sortMode)
+    internal static CloudPcSortMode NextCloudPcSortMode(CloudPcSortMode sortMode)
     {
         return sortMode switch
         {
@@ -1158,7 +1158,7 @@ internal sealed partial class W365CliApp
         };
     }
 
-    private static string FormatCloudPcSortMode(CloudPcSortMode sortMode)
+    internal static string FormatCloudPcSortMode(CloudPcSortMode sortMode)
     {
         return sortMode switch
         {
@@ -1246,7 +1246,7 @@ internal sealed partial class W365CliApp
     /// Width+NoWrap on every column so any residual mismatch truncates with "..." (already handled
     /// by Fit()) instead of wrapping.
     /// </summary>
-    private static (int Name, int Status, int Type, int User, int ServicePlan, int InUse) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan)
+    internal static (int Name, int Status, int Type, int User, int ServicePlan, int InUse) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan)
     {
         const int status = 24; // Fits the longest real cloudPcStatus value ("provisionedWithWarnings").
         const int type = 10;
@@ -2193,7 +2193,7 @@ internal sealed partial class W365CliApp
 
     private sealed record SnapshotListItem(CloudPcSummary CloudPc, CloudPcSnapshot Snapshot);
 
-    private enum CloudPcSortMode
+    internal enum CloudPcSortMode
     {
         Name,
         Status,

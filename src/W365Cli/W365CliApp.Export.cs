@@ -118,7 +118,7 @@ internal sealed partial class W365CliApp
         return sb.ToString();
     }
 
-    private static void AppendCloudPcSection(StringBuilder sb, IReadOnlyList<CloudPcSummary> cloudPcs)
+    internal static void AppendCloudPcSection(StringBuilder sb, IReadOnlyList<CloudPcSummary> cloudPcs)
     {
         sb.AppendLine("## Cloud PCs");
         sb.AppendLine();
@@ -161,7 +161,7 @@ internal sealed partial class W365CliApp
                 }));
     }
 
-    private static void AppendProvisioningPolicySection(StringBuilder sb, IReadOnlyList<ProvisioningPolicySummary> policies)
+    internal static void AppendProvisioningPolicySection(StringBuilder sb, IReadOnlyList<ProvisioningPolicySummary> policies)
     {
         sb.AppendLine("## Provisioning Policies");
         sb.AppendLine();
@@ -191,7 +191,7 @@ internal sealed partial class W365CliApp
                 }));
     }
 
-    private static void AppendLicensingSection(StringBuilder sb, IReadOnlyList<LicenseOverviewItem> licenseItems, string? licensingError)
+    internal static void AppendLicensingSection(StringBuilder sb, IReadOnlyList<LicenseOverviewItem> licenseItems, string? licensingError)
     {
         sb.AppendLine("## Licensing");
         sb.AppendLine();
@@ -229,7 +229,7 @@ internal sealed partial class W365CliApp
             }));
     }
 
-    private static string MarkdownEscape(string? value)
+    internal static string MarkdownEscape(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -239,7 +239,7 @@ internal sealed partial class W365CliApp
         return value.Replace("|", "\\|", StringComparison.Ordinal).Replace("\r", "", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal);
     }
 
-    private static void AppendMarkdownTable(StringBuilder sb, IReadOnlyList<string> headers, IEnumerable<IReadOnlyList<string>> rows)
+    internal static void AppendMarkdownTable(StringBuilder sb, IReadOnlyList<string> headers, IEnumerable<IReadOnlyList<string>> rows)
     {
         sb.AppendLine($"| {string.Join(" | ", headers)} |");
         sb.AppendLine($"| {string.Join(" | ", headers.Select(_ => "---"))} |");

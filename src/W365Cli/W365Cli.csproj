@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>W365Cli</AssemblyName>
-    <VersionPrefix>0.5.38</VersionPrefix>
+    <VersionPrefix>1.0.0</VersionPrefix>
     <Authors>Bradley Wyatt</Authors>
     <RepositoryUrl>https://github.com/bwya77/W365-CLI-Native</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -19,6 +19,13 @@
          entirely on every platform without changing any user-visible behavior. -->
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets the unit test project call internal pure-logic helpers directly (filtering, sorting,
+         license math, report parsing, formatting) without exposing any of this as a public API.
+         W365CliApp/W365GraphClient remain internal, unreachable from outside this solution. -->
+    <InternalsVisibleTo Include="W365Cli.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Identity.Client" Version="4.87.0" />

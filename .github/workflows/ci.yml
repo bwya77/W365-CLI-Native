@@ -22,3 +22,6 @@ jobs:
 
       - name: Build
         run: dotnet build --configuration Release
+
+      - name: Test
+        run: dotnet test tests/W365Cli.Tests/W365Cli.Tests.csproj --configuration Release --no-build

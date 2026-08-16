@@ -1239,7 +1239,7 @@ internal sealed partial class W365CliApp
         return Row("Name", widths.Name, "Summary", widths.Summary);
     }
 
-    private static (int Name, int Summary) GetDefaultGraphRowsWidths()
+    internal static (int Name, int Summary) GetDefaultGraphRowsWidths()
     {
         var available = Math.Max(70, Console.WindowWidth - 4);
         var name = Math.Max(28, Math.Min(42, available / 3));
@@ -1253,7 +1253,7 @@ internal sealed partial class W365CliApp
         return Row(row.Title, widths.Name, row.Summary, widths.Summary);
     }
 
-    private static IReadOnlyList<GraphTableRow> FilterGraphRows(IReadOnlyList<GraphTableRow> rows, string filter)
+    internal static IReadOnlyList<GraphTableRow> FilterGraphRows(IReadOnlyList<GraphTableRow> rows, string filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
         {
@@ -1268,7 +1268,7 @@ internal sealed partial class W365CliApp
             .ToArray();
     }
 
-    private static IReadOnlyList<GraphTableRow> SortGraphRows(IReadOnlyList<GraphTableRow> rows, GraphRowSortMode sortMode)
+    internal static IReadOnlyList<GraphTableRow> SortGraphRows(IReadOnlyList<GraphTableRow> rows, GraphRowSortMode sortMode)
     {
         return sortMode switch
         {
@@ -1280,7 +1280,7 @@ internal sealed partial class W365CliApp
         };
     }
 
-    private static GraphRowSortMode NextSortMode(GraphRowSortMode sortMode)
+    internal static GraphRowSortMode NextSortMode(GraphRowSortMode sortMode)
     {
         return sortMode switch
         {
@@ -1292,7 +1292,7 @@ internal sealed partial class W365CliApp
         };
     }
 
-    private static string FormatSortMode(GraphRowSortMode sortMode)
+    internal static string FormatSortMode(GraphRowSortMode sortMode)
     {
         return sortMode switch
         {
@@ -1485,7 +1485,7 @@ internal sealed partial class W365CliApp
         return PromptTextCancelable("Filter:", allowEmpty: true) ?? currentFilter;
     }
 
-    private static string StatusMarkup(string? status, int width = 24)
+    internal static string StatusMarkup(string? status, int width = 24)
     {
         var text = status ?? "unknown";
         var color = text.ToLowerInvariant() switch
@@ -1501,7 +1501,7 @@ internal sealed partial class W365CliApp
         return $"[{color}]{Markup.Escape(Fit(text, width))}[/]";
     }
 
-    private static string AppStatusMarkup(string? status, int width)
+    internal static string AppStatusMarkup(string? status, int width)
     {
         var text = status ?? "unknown";
         var color = text.ToLowerInvariant() switch
@@ -1697,7 +1697,7 @@ internal sealed partial class W365CliApp
         return string.Join(" ", cells);
     }
 
-    private static string Fit(string value, int width)
+    internal static string Fit(string value, int width)
     {
         if (value.Length > width)
         {
@@ -1948,7 +1948,7 @@ internal sealed partial class W365CliApp
 
     private sealed record ActionHistoryItem(string Action, string Target, string ResourceType, string? ResourceName, string Status, DateTimeOffset RequestedAt, string? Detail);
 
-    private enum GraphRowSortMode
+    internal enum GraphRowSortMode
     {
         None,
         TitleAscending,
@@ -2107,7 +2107,7 @@ internal sealed partial class W365CliApp
         return metadataIndex >= 0 ? version[..metadataIndex] : version;
     }
 
-    private static Version? ParseVersion(string value)
+    internal static Version? ParseVersion(string value)
     {
         var normalized = value.Trim().TrimStart('v', 'V');
         var metadataIndex = normalized.IndexOf('+', StringComparison.Ordinal);

@@ -395,6 +395,16 @@ osx-x64
 osx-arm64
 ```
 
+Run the unit test suite:
+
+```powershell
+dotnet test .\tests\W365Cli.Tests\W365Cli.Tests.csproj --configuration Release
+```
+
+The tests cover the app's pure logic (filtering, sorting, in-use status, license capacity math,
+Graph report parsing, and Markdown export) against real captured Graph response shapes. They run
+automatically in CI on every push and pull request.
+
 Create a release:
 
 ```powershell

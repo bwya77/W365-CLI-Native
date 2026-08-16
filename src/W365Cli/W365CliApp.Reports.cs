@@ -111,7 +111,7 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine("[grey]Up/Down move | PgUp/PgDn page | Enter remote actions for Cloud PC rows | C clear | Esc/B/Q back[/]");
     }
 
-    private static string ActionStatusCell(string status)
+    internal static string ActionStatusCell(string status)
     {
         return status.Equals("Failed", StringComparison.OrdinalIgnoreCase)
             ? $"[red]{Markup.Escape(status)}[/]"
@@ -435,7 +435,7 @@ internal sealed partial class W365CliApp
     /// if the terminal is too narrow to fit every column -- it's usually the one field that
     /// actually distinguishes one row from the next in a periodic/hourly report.
     /// </summary>
-    private static (IReadOnlyList<string> Columns, IReadOnlyList<int> Widths) BuildAdaptiveReportColumns(IReadOnlyList<GraphTableRow> rows)
+    internal static (IReadOnlyList<string> Columns, IReadOnlyList<int> Widths) BuildAdaptiveReportColumns(IReadOnlyList<GraphTableRow> rows)
     {
         if (rows.Count == 0)
         {
@@ -597,7 +597,7 @@ internal sealed partial class W365CliApp
         }
     }
 
-    private static (int Name, int Status, int User, int ServicePlan) GetConnectivityCloudPcWidths()
+    internal static (int Name, int Status, int User, int ServicePlan) GetConnectivityCloudPcWidths()
     {
         var available = Math.Max(76, Console.WindowWidth - 4);
         const int status = 12;
@@ -635,7 +635,7 @@ internal sealed partial class W365CliApp
                 GetField(row, "LastActiveTime"), widths.User);
     }
 
-    private static (int CloudPc, int Status, int Power, int User, int ServicePlan) GetUsageReportWidths()
+    internal static (int CloudPc, int Status, int Power, int User, int ServicePlan) GetUsageReportWidths()
     {
         var available = Math.Max(76, Console.WindowWidth - 4);
         const int status = 14;
@@ -713,7 +713,7 @@ internal sealed partial class W365CliApp
             .Border(BoxBorder.Rounded));
     }
 
-    private static DateTimeOffset? ParseGraphDate(string value)
+    internal static DateTimeOffset? ParseGraphDate(string value)
     {
         return DateTimeOffset.TryParse(value, out var parsed) ? parsed.ToLocalTime() : null;
     }
@@ -725,7 +725,7 @@ internal sealed partial class W365CliApp
             : $"{eventName ?? "Event"} at {eventTime.Value:g}";
     }
 
-    private static (int Time, int Type, int Event, int Result, int Message) GetConnectivityHistoryWidths()
+    internal static (int Time, int Type, int Event, int Result, int Message) GetConnectivityHistoryWidths()
     {
         var available = Math.Max(76, Console.WindowWidth - 4);
         var showEvent = available >= 112;
@@ -755,7 +755,7 @@ internal sealed partial class W365CliApp
             GetField(row, "TransportType"), widths.Transport);
     }
 
-    private static (int Begin, int End, int Upn, int ClientOs, int Transport) GetConnectionHistoryReportWidths()
+    internal static (int Begin, int End, int Upn, int ClientOs, int Transport) GetConnectionHistoryReportWidths()
     {
         var available = Math.Max(76, Console.WindowWidth - 4);
         const int begin = 20;
@@ -784,7 +784,7 @@ internal sealed partial class W365CliApp
             GetSwitchValue(row), widths.Switch);
     }
 
-    private static (int CloudPc, int User, int Status, int Switch) GetLaunchDetailsWidths()
+    internal static (int CloudPc, int User, int Status, int Switch) GetLaunchDetailsWidths()
     {
         var available = Math.Max(76, Console.WindowWidth - 4);
         const int status = 12;

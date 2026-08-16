@@ -274,7 +274,7 @@ internal sealed partial class W365CliApp
         }
     }
 
-    private static string[] GetProvisioningPolicyActions(ProvisioningPolicySummary policy)
+    internal static string[] GetProvisioningPolicyActions(ProvisioningPolicySummary policy)
     {
         var actions = new List<string> { "View Cloud PCs", "Action report", "Export", "Create copy", "Reprovision policy Cloud PCs" };
 
@@ -299,7 +299,7 @@ internal sealed partial class W365CliApp
         return actions.ToArray();
     }
 
-    private static bool IsSharedProvisioningPolicy(ProvisioningPolicySummary policy)
+    internal static bool IsSharedProvisioningPolicy(ProvisioningPolicySummary policy)
     {
         return policy.ProvisioningType is not null &&
             new[] { "shared", "sharedByUser", "sharedByEntraGroup" }.Any(value =>
@@ -310,7 +310,7 @@ internal sealed partial class W365CliApp
     /// User settings persistence ("user experience sync") is only available for shared-by-Entra-
     /// group policies — not dedicated or shared-by-user — per Microsoft's documentation.
     /// </summary>
-    private static bool IsSharedByEntraGroupPolicy(ProvisioningPolicySummary policy)
+    internal static bool IsSharedByEntraGroupPolicy(ProvisioningPolicySummary policy)
     {
         return string.Equals(policy.ProvisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
     }
@@ -352,7 +352,7 @@ internal sealed partial class W365CliApp
     /// members": only sharedByUser policies need the extra "Has Cloud PC" column showing which
     /// members actually got provisioned vs. which are still waiting on capacity.
     /// </summary>
-    private static bool IsSharedByUserPolicy(ProvisioningPolicySummary policy)
+    internal static bool IsSharedByUserPolicy(ProvisioningPolicySummary policy)
     {
         return string.Equals(policy.ProvisioningType, "sharedByUser", StringComparison.OrdinalIgnoreCase);
     }
@@ -552,7 +552,7 @@ internal sealed partial class W365CliApp
     /// buckets, matching the color coding used in the text summary above it — a quick visual read
     /// of the overall health of a policy's actions at a glance, alongside the exact counts.
     /// </summary>
-    private static string BuildActionStatusBar(ProvisioningPolicyActionStatusSummary summary, int width)
+    internal static string BuildActionStatusBar(ProvisioningPolicyActionStatusSummary summary, int width)
     {
         if (summary.Total == 0)
         {
@@ -2284,7 +2284,7 @@ internal sealed partial class W365CliApp
         return value is null ? "-" : value.Value ? "Yes" : "No";
     }
 
-    private static IReadOnlyList<ProvisioningPolicySummary> FilterProvisioningPolicies(IReadOnlyList<ProvisioningPolicySummary> policies, string filter)
+    internal static IReadOnlyList<ProvisioningPolicySummary> FilterProvisioningPolicies(IReadOnlyList<ProvisioningPolicySummary> policies, string filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
         {
@@ -2305,7 +2305,7 @@ internal sealed partial class W365CliApp
             .ToArray();
     }
 
-    private static IReadOnlyList<ProvisioningPolicySummary> SortProvisioningPolicies(IReadOnlyList<ProvisioningPolicySummary> policies, ProvisioningPolicySortMode sortMode)
+    internal static IReadOnlyList<ProvisioningPolicySummary> SortProvisioningPolicies(IReadOnlyList<ProvisioningPolicySummary> policies, ProvisioningPolicySortMode sortMode)
     {
         return sortMode switch
         {
@@ -2316,7 +2316,7 @@ internal sealed partial class W365CliApp
         };
     }
 
-    private static ProvisioningPolicySortMode NextProvisioningPolicySortMode(ProvisioningPolicySortMode sortMode)
+    internal static ProvisioningPolicySortMode NextProvisioningPolicySortMode(ProvisioningPolicySortMode sortMode)
     {
         return sortMode switch
         {
@@ -2327,7 +2327,7 @@ internal sealed partial class W365CliApp
         };
     }
 
-    private static string FormatProvisioningPolicySortMode(ProvisioningPolicySortMode sortMode)
+    internal static string FormatProvisioningPolicySortMode(ProvisioningPolicySortMode sortMode)
     {
         return sortMode switch
         {
@@ -2338,7 +2338,7 @@ internal sealed partial class W365CliApp
         };
     }
 
-    private enum ProvisioningPolicySortMode
+    internal enum ProvisioningPolicySortMode
     {
         Name,
         Type,
