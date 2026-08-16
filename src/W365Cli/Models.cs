@@ -187,6 +187,27 @@ internal sealed record CloudPcSummary
     [JsonPropertyName("connectivityResult")]
     public CloudPcConnectivityResult? ConnectivityResult { get; init; }
 
+    /// <summary>
+    /// Not part of the bulk cloudPCs list response at all -- connectivityResult (above) is
+    /// confirmed unreliable there (comes back null for every Cloud PC on a live tenant test,
+    /// regardless of $select). Populated separately, after the initial list load, via a bulk
+    /// concurrent call to the per-Cloud-PC real-time sign-in status endpoint
+    /// (getRealTimeRemoteConnectionStatus, the same one the "Sign-in status" report and Cloud PC
+    /// details screen already use and have confirmed accurate for every provisioning type --
+    /// Enterprise, Flex Dedicated, and Flex Shared alike). Raw values seen: "SignedIn",
+    /// "NotSignedIn", "Unavailable".
+    /// </summary>
+    [JsonIgnore]
+    public string? RealTimeSignInStatus { get; init; }
+
+    /// <summary>
+    /// Same real-time endpoint/fetch as RealTimeSignInStatus above -- used as the "in use since"
+    /// timestamp for Enterprise (dedicated) Cloud PCs, which have no SharedDeviceDetail (that's
+    /// Frontline/shared-only) to source a session start time from otherwise.
+    /// </summary>
+    [JsonIgnore]
+    public DateTimeOffset? RealTimeLastActiveTime { get; init; }
+
     [JsonIgnore]
     public string? EffectiveUserPrincipalName => !string.IsNullOrWhiteSpace(UserPrincipalName)
         ? UserPrincipalName

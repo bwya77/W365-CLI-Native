@@ -98,7 +98,7 @@ internal sealed partial class W365CliApp
                 Markup.Escape(item.value.Target));
         }
 
-        AnsiConsole.Write(table);
+        AnsiConsole.Write(NoWrapColumns(table));
 
         var selected = ActionHistory[Math.Min(selectedIndex, ActionHistory.Count - 1)];
         if (!string.IsNullOrWhiteSpace(selected.Detail))

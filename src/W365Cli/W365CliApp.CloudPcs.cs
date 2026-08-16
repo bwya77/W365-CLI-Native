@@ -16,7 +16,7 @@ internal sealed partial class W365CliApp
             return;
         }
 
-        var choices = new[] { "Browse Cloud PCs", "Disk space", "Snapshots", "Back" };
+        var choices = new[] { "Browse Cloud PCs", "By shared pool", "Disk space", "Snapshots", "Back" };
         var selectedIndex = 0;
         while (true)
         {
@@ -56,6 +56,9 @@ internal sealed partial class W365CliApp
                         case "Browse Cloud PCs":
                             await ShowCloudPcsAsync();
                             break;
+                        case "By shared pool":
+                            await ShowCloudPcsBySharedPoolAsync();
+                            break;
                         case "Disk space":
                             await ShowDiskSpaceAsync();
                             break;
@@ -87,6 +90,62 @@ internal sealed partial class W365CliApp
                     }
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// Reuses the same fleet view (summary panel + table + full Cloud PC actions) already used by
+    /// Provisioning > Policies > [policy] > View Cloud PCs, just reached directly from Cloud PCs
+    /// without navigating into a specific policy's action menu first. Scoped to sharedByEntraGroup
+    /// policies only -- Flex Dedicated (sharedByUser) is a 1:1 allocation (one Cloud PC per group
+    /// member), not a shared pool multiple people draw from, so it doesn't belong in a "pool" picker
+    /// even though it's technically a Flex/shared provisioning type. Plain Enterprise "dedicated"
+    /// policies aren't pools either and are already fully covered by Browse Cloud PCs.
+    /// </summary>
+    private async Task ShowCloudPcsBySharedPoolAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        var policies = await LoadProvisioningPoliciesAsync();
+        var sharedPolicies = policies
+            .Where(IsSharedByEntraGroupPolicy)
+            .OrderBy(policy => policy.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (sharedPolicies.Length == 0)
+        {
+            TimedMessage("[yellow]No Flex shared pool provisioning policies were found.[/]");
+            return;
+        }
+
+        var memberCountsByPolicyId = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading pool membership...", async _ =>
+            {
+                var pairs = await ConcurrencyHelper.MapWithConcurrencyAsync(sharedPolicies, maxConcurrency: 5, async policy => (policy.Id, Count: await GetPoolMemberCountAsync(policy)));
+                return pairs.ToDictionary(pair => pair.Id, pair => pair.Count, StringComparer.OrdinalIgnoreCase);
+            });
+
+        while (true)
+        {
+            var policy = SelectFromTable(
+                "Select a Flex shared pool",
+                Row("Pool", 44, "Type", 18, "Users sharing", 14),
+                sharedPolicies,
+                p => Row(
+                    p.DisplayName, 44,
+                    p.ProvisioningType ?? "-", 18,
+                    memberCountsByPolicyId.TryGetValue(p.Id, out var count) && count.HasValue ? count.Value.ToString() : "-", 14));
+
+            if (policy is null)
+            {
+                return;
+            }
+
+            await ShowCloudPcsForProvisioningPolicyAsync(policy);
         }
     }
 
@@ -603,7 +662,7 @@ internal sealed partial class W365CliApp
             return;
         }
 
-        var cloudPcs = await LoadCloudPcsAsync();
+        var cloudPcs = await LoadCloudPcsWithSignInStatusAsync();
 
         if (cloudPcs.Count == 0)
         {
@@ -660,7 +719,7 @@ internal sealed partial class W365CliApp
                     }
                     break;
                 case ConsoleKey.R:
-                    cloudPcs = await LoadCloudPcsAsync();
+                    cloudPcs = await LoadCloudPcsWithSignInStatusAsync();
                     selectedIndex = 0;
                     break;
                 case ConsoleKey.C:
@@ -723,6 +782,58 @@ internal sealed partial class W365CliApp
             .StartAsync("Loading Cloud PCs...", async _ => await _session.Graph.GetCloudPcsAsync());
     }
 
+    /// <summary>
+    /// Used only by the Browse Cloud PCs screen, which is the one place "In use" needs to be
+    /// accurate for every row (both the table column and the currently selected Cloud PC's side
+    /// panel) -- NOT by LoadCloudPcsAsync's other callers (Disk space, Connectivity history, etc.),
+    /// which don't show "In use" at all and shouldn't pay for the extra per-Cloud-PC network calls
+    /// this requires. connectivityResult -- the field the bulk cloudPCs list would otherwise supply
+    /// this from -- is confirmed unreliable (always null on a live tenant test regardless of
+    /// $select), so this instead bulk-fetches the same real-time sign-in status endpoint the
+    /// "Sign-in status" report and Cloud PC details screen already use successfully for every
+    /// provisioning type (Enterprise, Flex Dedicated, Flex Shared), then stamps each Cloud PC's
+    /// result onto CloudPcSummary.RealTimeSignInStatus.
+    /// </summary>
+    private async Task<IReadOnlyList<CloudPcSummary>> LoadCloudPcsWithSignInStatusAsync()
+    {
+        var cloudPcs = await LoadCloudPcsAsync();
+        if (cloudPcs.Count == 0)
+        {
+            return cloudPcs;
+        }
+
+        var signInRows = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("Loading real-time sign-in status...", async _ =>
+            {
+                try
+                {
+                    return await _session.Graph.GetSignInStatusRowsAsync(cloudPcs);
+                }
+                catch
+                {
+                    return Array.Empty<GraphTableRow>();
+                }
+            });
+
+        var statusByCloudPcId = signInRows
+            .Select(row => (
+                Id: GetOptionalField(row, "Cloud PC ID"),
+                Status: GetOptionalField(row, "SignInStatus"),
+                LastActive: GetOptionalField(row, "LastActiveTime")))
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Id))
+            .ToDictionary(
+                entry => entry.Id!,
+                entry => (entry.Status, LastActive: DateTimeOffset.TryParse(entry.LastActive, out var parsed) ? parsed : (DateTimeOffset?)null),
+                StringComparer.OrdinalIgnoreCase);
+
+        return cloudPcs
+            .Select(pc => statusByCloudPcId.TryGetValue(pc.Id, out var status)
+                ? pc with { RealTimeSignInStatus = status.Status, RealTimeLastActiveTime = status.LastActive }
+                : pc)
+            .ToArray();
+    }
+
     private void RenderCloudPcBrowser(
         IReadOnlyList<CloudPcSummary> allCloudPcs,
         IReadOnlyList<CloudPcSummary> visibleCloudPcs,
@@ -753,7 +864,7 @@ internal sealed partial class W365CliApp
         RenderStatusBar();
     }
 
-    private static Panel CreateCloudPcSummaryPanel(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, string filter)
+    private static Panel CreateCloudPcSummaryPanel(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, string filter, int? poolMemberCount = null)
     {
         var statusSummary = string.Join("  ", allCloudPcs
             .GroupBy(pc => pc.Status ?? "unknown", StringComparer.OrdinalIgnoreCase)
@@ -772,11 +883,20 @@ internal sealed partial class W365CliApp
             new Markup($"[bold]Type[/] {Markup.Escape(typeSummary)}")
         };
 
-        if (allCloudPcs.Any(pc => pc.ConnectivityResult is not null))
+        if (allCloudPcs.Any(pc => GetNormalizedInUseStatus(pc) is not null))
         {
-            var inUseCount = allCloudPcs.Count(pc => string.Equals(pc.ConnectivityResult?.Status, "inUse", StringComparison.OrdinalIgnoreCase));
-            var availableCount = allCloudPcs.Count(pc => string.Equals(pc.ConnectivityResult?.Status, "available", StringComparison.OrdinalIgnoreCase));
+            var inUseCount = allCloudPcs.Count(pc => string.Equals(GetNormalizedInUseStatus(pc), "inUse", StringComparison.OrdinalIgnoreCase));
+            var availableCount = allCloudPcs.Count(pc => string.Equals(GetNormalizedInUseStatus(pc), "available", StringComparison.OrdinalIgnoreCase));
             rows.Add(new Markup($"[bold]Shared usage[/] [yellow]In use: {inUseCount}[/]  [green]Available: {availableCount}[/]"));
+        }
+
+        // Only set when this fleet view is scoped to a single shared-pool policy (Browse Cloud PCs'
+        // call site never passes this) -- the number of people sharing access to this pool, sourced
+        // from the policy's assigned group(s), not the Cloud PC count above (a pool with 2 Cloud PCs
+        // could still be shared by many more users than that, taking turns).
+        if (poolMemberCount is not null)
+        {
+            rows.Add(new Markup($"[bold]Pool members[/] {poolMemberCount} user(s) sharing this pool"));
         }
 
         return new Panel(new Rows(rows)).Border(BoxBorder.Rounded).Header("Cloud PC fleet");
@@ -784,32 +904,36 @@ internal sealed partial class W365CliApp
 
     private static Table CreateCloudPcTable(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, int selectedIndex, string filter)
     {
-        var widths = GetCloudPcWidths();
-        var showInUse = allCloudPcs.Any(pc => pc.ConnectivityResult is not null);
+        var showInUse = allCloudPcs.Any(pc => GetNormalizedInUseStatus(pc) is not null);
+        var showUser = Console.WindowWidth >= 105;
+        var showServicePlan = Console.WindowWidth >= 135;
+        var widths = GetCloudPcWidths(showInUse, showUser, showServicePlan);
+
+        // NoWrap on every sized column keeps Spectre's render width matched exactly to what Fit()
+        // already truncated/padded cell text to -- without it, any residual mismatch between our
+        // computed widths and what Spectre decides to render wraps overflow onto a second, mostly-
+        // blank line instead of truncating with "...", which read as inconsistent gaps between rows.
         var table = new Table()
             .Title("Cloud PCs")
             .Border(TableBorder.Rounded)
-            .AddColumn(" ")
-            .AddColumn("Status")
-            .AddColumn("Type")
-            .AddColumn("Name");
-
-        var showUser = Console.WindowWidth >= 105;
-        var showServicePlan = Console.WindowWidth >= 135;
+            .AddColumn(new TableColumn(" ") { Width = 1, NoWrap = true })
+            .AddColumn(new TableColumn("Status") { Width = widths.Status, NoWrap = true })
+            .AddColumn(new TableColumn("Type") { Width = widths.Type, NoWrap = true })
+            .AddColumn(new TableColumn("Name") { Width = widths.Name, NoWrap = true });
 
         if (showInUse)
         {
-            table.AddColumn("In use");
+            table.AddColumn(new TableColumn("In use") { Width = widths.InUse, NoWrap = true });
         }
 
         if (showUser)
         {
-            table.AddColumn("User");
+            table.AddColumn(new TableColumn("User") { Width = widths.User, NoWrap = true });
         }
 
         if (showServicePlan)
         {
-            table.AddColumn("Service plan");
+            table.AddColumn(new TableColumn("Service plan") { Width = widths.ServicePlan, NoWrap = true });
         }
 
         if (visibleCloudPcs.Count == 0)
@@ -849,7 +973,7 @@ internal sealed partial class W365CliApp
 
             if (showInUse)
             {
-                row.Add(selected ? Selected(Markup.Escape(Fit(FormatInUsePlain(pc), 26))) : FormatInUseMarkup(pc));
+                row.Add(selected ? Selected(Markup.Escape(Fit(FormatInUsePlain(pc), widths.InUse))) : FormatInUseMarkup(pc));
             }
 
             if (showUser)
@@ -868,9 +992,48 @@ internal sealed partial class W365CliApp
         return table;
     }
 
+    /// <summary>
+    /// <summary>
+    /// Normalizes "in use" into "inUse"/"available"/"unavailable"/null across both data sources this
+    /// app has for it. Prefers RealTimeSignInStatus (getRealTimeRemoteConnectionStatus, bulk-fetched
+    /// once per Cloud PC when Browse Cloud PCs loads/refreshes -- confirmed accurate for Enterprise,
+    /// Flex Dedicated, and Flex Shared alike) over ConnectivityResult (the bulk cloudPCs list's own
+    /// field, confirmed unreliable/always-null on a live tenant test). "Unavailable" is Graph's own
+    /// real value here -- confirmed directly against a live tenant report dump -- but it means two
+    /// different things depending on whether the Cloud PC actually exists: for a genuinely
+    /// provisioned Cloud PC, a failed/incomplete real-time check still means it CAN be connected to
+    /// (just not signed in right now), i.e. Available; only for notProvisioned Cloud PCs (no VM
+    /// exists at all yet) does "Unavailable" mean truly unusable.
+    /// </summary>
+    private static string? GetNormalizedInUseStatus(CloudPcSummary pc)
+    {
+        var signIn = pc.RealTimeSignInStatus;
+        if (!string.IsNullOrWhiteSpace(signIn))
+        {
+            if (signIn.Contains("notsignedin", StringComparison.OrdinalIgnoreCase))
+            {
+                return "available";
+            }
+
+            if (signIn.Contains("signedin", StringComparison.OrdinalIgnoreCase))
+            {
+                return "inUse";
+            }
+
+            if (signIn.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Equals(pc.Status, "notProvisioned", StringComparison.OrdinalIgnoreCase)
+                    ? "unavailable"
+                    : "available";
+            }
+        }
+
+        return pc.ConnectivityResult?.Status;
+    }
+
     private static string FormatInUsePlain(CloudPcSummary pc)
     {
-        var status = pc.ConnectivityResult?.Status;
+        var status = GetNormalizedInUseStatus(pc);
         if (string.IsNullOrWhiteSpace(status))
         {
             return "-";
@@ -878,6 +1041,14 @@ internal sealed partial class W365CliApp
 
         if (string.Equals(status, "inUse", StringComparison.OrdinalIgnoreCase))
         {
+            // SharedDeviceDetail.SessionStartDateTime (Frontline/shared-only) is a genuine fixed
+            // session-start timestamp. RealTimeLastActiveTime was tried here as an Enterprise
+            // fallback, but confirmed wrong on a live tenant: it's a continuously-updating "last
+            // seen active" heartbeat, not a session start -- it kept advancing on every refresh
+            // (13:48 -> 14:03 -> 14:05 for the same still-signed-in session), which is the opposite
+            // of what "since" should mean. Enterprise (dedicated) Cloud PCs have no genuine
+            // session-start source available, so just show "In use" with no time for them rather
+            // than a fabricated, drifting one.
             var sessionStart = pc.SharedDeviceDetail?.SessionStartDateTime;
             return sessionStart is null
                 ? "In use"
@@ -889,12 +1060,17 @@ internal sealed partial class W365CliApp
             return "Available";
         }
 
+        if (string.Equals(status, "unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Unavailable";
+        }
+
         return status;
     }
 
     private static string FormatInUseMarkup(CloudPcSummary pc)
     {
-        var status = pc.ConnectivityResult?.Status;
+        var status = GetNormalizedInUseStatus(pc);
         var text = Markup.Escape(Fit(FormatInUsePlain(pc), 26));
 
         if (string.Equals(status, "inUse", StringComparison.OrdinalIgnoreCase))
@@ -919,13 +1095,22 @@ internal sealed partial class W365CliApp
                 .Border(BoxBorder.Rounded);
         }
 
+        // Browse Cloud PCs now bulk-fetches real-time sign-in status for every Cloud PC up front
+        // (LoadCloudPcsWithSignInStatusAsync), so this is normally populated for every row. The
+        // fallback text only shows if that bulk fetch itself failed for this specific Cloud PC
+        // (e.g. a transient per-item error) and connectivityResult (confirmed unreliable on this
+        // list endpoint) has nothing either.
+        var inUseLine = GetNormalizedInUseStatus(cloudPc) is not null
+            ? new Markup(PropertyInline("In use", FormatInUseMarkup(cloudPc), valueIsMarkup: true))
+            : new Markup(PropertyBlock("In use", "See Enter details for live status", "grey"));
+
         var content = new Rows(
             new Markup(PropertyBlock("Name", cloudPc.Name, "grey")),
             new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
             new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-", "grey")),
             new Markup(PropertyBlock("User", cloudPc.EffectiveUserPrincipalName ?? "-", "grey")),
             new Markup(PropertyBlock("Service plan", cloudPc.ServicePlanName ?? "-", "grey")),
-            new Markup(PropertyInline("In use", FormatInUseMarkup(cloudPc), valueIsMarkup: true)),
+            inUseLine,
             new Markup(PropertyBlock("Cloud PC ID", cloudPc.Id, "grey")),
             new Markup(PropertyBlock("Actions", "Enter details, A actions", "grey")));
 
@@ -1047,18 +1232,36 @@ internal sealed partial class W365CliApp
         return string.Equals(cloudPc.Status, "inGracePeriod", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static (int Name, int Status, int Type, int User, int ServicePlan) GetCloudPcWidths()
+    /// <summary>
+    /// Computes exact column widths so the rendered table (borders + padding included) fits within
+    /// Console.WindowWidth, and reserves room for the "Selected Cloud PC" side panel that sits next
+    /// to this table in a two-column Grid (RenderCloudPcBrowser) once the terminal is wide enough.
+    /// This mirrors the same fix applied to the Cloud Apps table: the previous version budgeted
+    /// widths independently of Spectre's actual per-column render overhead (n+1 border chars + 2
+    /// padding chars per column, Rounded border) and didn't reserve anything for the side panel, so
+    /// on some terminal widths a cell (most often "In use" or "Name", whichever happened to end up
+    /// wider than Spectre could actually render) would wrap onto a second line while others didn't --
+    /// exactly the "inconsistent spacing between rows" symptom, since a wrapped row's second line is
+    /// nearly all trailing padding and reads as a gap. CreateCloudPcTable also now sets explicit
+    /// Width+NoWrap on every column so any residual mismatch truncates with "..." (already handled
+    /// by Fit()) instead of wrapping.
+    /// </summary>
+    private static (int Name, int Status, int Type, int User, int ServicePlan, int InUse) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan)
     {
-        var available = Math.Max(90, Console.WindowWidth - 4);
-        // Wide enough for the longest real cloudPcStatus value ("provisionedWithWarnings" /
-        // "resizeValidationFailed" = 23 chars) so status text is never truncated.
-        const int status = 24;
+        const int status = 24; // Fits the longest real cloudPcStatus value ("provisionedWithWarnings").
         const int type = 10;
-        var remaining = Math.Max(40, available - status - type - 4);
-        var name = Console.WindowWidth < 105 ? Math.Max(28, remaining - 4) : Math.Max(24, (int)(remaining * 0.32));
-        var user = Math.Max(24, (int)(remaining * 0.34));
-        var servicePlan = Math.Max(24, remaining - name - user);
-        return (name, status, type, user, servicePlan);
+        const int inUse = 26;
+        const int sidePanelReserve = 40; // "Selected Cloud PC" panel width + Grid column gap
+
+        var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0); // selector, status, type, name [+ in use] [+ user] [+ service plan]
+        var overhead = (3 * columnCount) + 1; // Rounded border: (n+1) border chars + 2 padding chars per column
+        var reserved = 1 /* selector */ + status + type + (showInUse ? inUse : 0) + sidePanelReserve;
+        var available = Math.Max(60, Console.WindowWidth - overhead - reserved);
+
+        var name = !showUser && !showServicePlan ? Math.Max(28, available) : Math.Max(24, (int)(available * 0.32));
+        var user = showUser ? Math.Max(24, (int)(available * 0.34)) : 0;
+        var servicePlan = showServicePlan ? Math.Max(24, available - name - user) : 0;
+        return (name, status, type, user, servicePlan, inUse);
     }
 
     private async Task ShowCloudPcDetailsAsync(CloudPcSummary cloudPc, string initialSubPanel = "Actions")
@@ -1299,7 +1502,7 @@ internal sealed partial class W365CliApp
                 new Markup(PropertyInline("Name", cloudPc.Name, "grey")),
                 new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
                 new Markup(PropertyInline("Power state", cloudPc.PowerState ?? "-", "grey")),
-                new Markup(PropertyInline("In use", GetInUseStatusMarkup(latestSession), valueIsMarkup: true)),
+                new Markup(PropertyInline("In use", GetInUseStatusMarkup(latestSession, signInStatus), valueIsMarkup: true)),
                 new Markup(PropertyInline("Sign-in status", GetSignInStatusValue(signInStatus, "SignInStatus"), "grey")),
                 new Markup(PropertyInline("Last sign-in", GetSignInStatusValue(signInStatus, "LastActiveTime"), "grey")),
                 new Markup(PropertyInline("Days since sign-in", GetSignInStatusValue(signInStatus, "DaysSinceLastSignIn"), "grey")),
@@ -1373,6 +1576,13 @@ internal sealed partial class W365CliApp
             .Border(BoxBorder.Rounded);
     }
 
+    /// <summary>
+    /// Field values here are either plain text (SignInStatus, DaysSinceLastSignIn) or a UTC ISO
+    /// timestamp (LastActiveTime, shown as "Last sign-in") straight from Graph -- previously shown
+    /// as-is, unlike "In use since" elsewhere on this same screen, which already converts to local
+    /// time. Parses and localizes anything that looks like a timestamp; non-date fields simply fail
+    /// the parse and pass through unchanged.
+    /// </summary>
     private static string GetSignInStatusValue(GraphTableRow? row, string field)
     {
         if (row is null)
@@ -1380,20 +1590,49 @@ internal sealed partial class W365CliApp
             return "-";
         }
 
-        return GetOptionalField(row, field) ?? "-";
-    }
-
-    private static string GetInUseStatusMarkup(GraphTableRow? latestSession)
-    {
-        if (latestSession is null)
+        var value = GetOptionalField(row, field);
+        if (string.IsNullOrWhiteSpace(value))
         {
-            return "[grey]Unknown[/]";
+            return "-";
         }
 
-        var sessionEnd = GetField(latestSession, "SessionEndTime");
-        return sessionEnd == "-"
-            ? "[yellow]In use[/]"
-            : "[green]Available[/]";
+        return DateTimeOffset.TryParse(value, out var parsed)
+            ? parsed.ToLocalTime().ToString("g")
+            : value;
+    }
+
+    /// <summary>
+    /// "In use" is normally derived from the Connection History report, but that report is
+    /// hardcoded to a "Last 7 days" window (troubleshootConnectionConfigurationOfViewDataTableV1Report
+    /// filter) -- if the Cloud PC's last logged session started more than 7 days ago, the query
+    /// returns zero rows even if the user is actively signed in right now, which showed as a
+    /// misleading "Unknown" (confirmed directly: user was signed in per the real-time sign-in
+    /// status report at the same moment this showed Unknown). Falls back to the real-time sign-in
+    /// status (getRealTimeRemoteConnectionStatus, already loaded alongside this for the "Sign-in
+    /// status" field) when the 7-day history has nothing, since a signed-in session IS in use
+    /// regardless of when it started.
+    /// </summary>
+    private static string GetInUseStatusMarkup(GraphTableRow? latestSession, GraphTableRow? signInStatus)
+    {
+        if (latestSession is not null)
+        {
+            var sessionEnd = GetField(latestSession, "SessionEndTime");
+            return sessionEnd == "-"
+                ? "[yellow]In use[/]"
+                : "[green]Available[/]";
+        }
+
+        var signIn = signInStatus is null ? null : GetOptionalField(signInStatus, "SignInStatus");
+        if (!string.IsNullOrWhiteSpace(signIn))
+        {
+            return signIn.Contains("notsignedin", StringComparison.OrdinalIgnoreCase)
+                ? "[green]Available[/]"
+                : signIn.Contains("signedin", StringComparison.OrdinalIgnoreCase)
+                    ? "[yellow]In use[/]"
+                    : "[grey]Unknown[/]";
+        }
+
+        return "[grey]Unknown[/]";
     }
 
     private static Panel CreateSnapshotsSubPanel(IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex)
@@ -1412,12 +1651,12 @@ internal sealed partial class W365CliApp
                 .Border(BoxBorder.Rounded);
         }
 
-        var table = new Table()
+        var table = NoWrapColumns(new Table()
             .Border(TableBorder.Simple)
             .AddColumn("Status")
             .AddColumn("Type")
             .AddColumn("Created")
-            .AddColumn("Expires");
+            .AddColumn("Expires"));
 
         var visible = snapshots.Take(Math.Max(3, Console.WindowHeight - 18)).ToArray();
         for (var index = 0; index < visible.Length; index++)
@@ -1457,12 +1696,12 @@ internal sealed partial class W365CliApp
                 .Border(BoxBorder.Rounded);
         }
 
-        var table = new Table()
+        var table = NoWrapColumns(new Table()
             .Border(TableBorder.Simple)
             .AddColumn("Action")
             .AddColumn("State")
             .AddColumn("Started")
-            .AddColumn("Updated");
+            .AddColumn("Updated"));
 
         var visible = remoteActions.Take(Math.Max(3, Console.WindowHeight - 18)).ToArray();
         for (var index = 0; index < visible.Length; index++)

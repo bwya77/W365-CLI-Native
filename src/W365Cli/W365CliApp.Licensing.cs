@@ -284,7 +284,7 @@ internal sealed partial class W365CliApp
             AnsiConsole.MarkupLine("[#58a6ff]Windows 365 licensing[/]");
             AnsiConsole.MarkupLine("[grey]Capacity estimates use Microsoft Graph subscribedSkUs plus current Cloud PC inventory.[/]");
             AnsiConsole.WriteLine();
-            var table = new Table()
+            var table = NoWrapColumns(new Table()
                 .Border(TableBorder.Rounded)
                 .AddColumn(" ")
                 .AddColumn("Family")
@@ -295,7 +295,7 @@ internal sealed partial class W365CliApp
                 .AddColumn("Shared")
                 .AddColumn("Units used")
                 .AddColumn("Units left")
-                .AddColumn("Can run now");
+                .AddColumn("Can run now"));
 
             for (var index = 0; index < items.Count; index++)
             {
@@ -442,13 +442,13 @@ internal sealed partial class W365CliApp
 
         private static Table BuildLicenseCloudPcTable(LicenseOverviewItem item)
         {
-            var table = new Table()
+            var table = NoWrapColumns(new Table()
                 .Border(TableBorder.Rounded)
                 .AddColumn("Cloud PC")
                 .AddColumn("Mode")
                 .AddColumn("Assigned user")
                 .AddColumn("Service plan")
-                .AddColumn("Policy");
+                .AddColumn("Policy"));
 
             foreach (var cloudPc in item.CloudPcs.OrderBy(pc => pc.ProvisioningPolicyName).ThenBy(pc => pc.Name, StringComparer.OrdinalIgnoreCase))
             {
@@ -492,14 +492,14 @@ internal sealed partial class W365CliApp
 
         private static Table BuildCloudAppsPoolTable(LicenseOverviewItem item, IReadOnlyDictionary<string, IReadOnlyList<GroupMemberSummary>> groupMembers)
         {
-            var table = new Table()
+            var table = NoWrapColumns(new Table()
                 .Title("Cloud Apps pool")
                 .Border(TableBorder.Rounded)
                 .AddColumn("Policy")
                 .AddColumn("Group")
                 .AddColumn("Cloud PC")
                 .AddColumn("User")
-                .AddColumn("UPN");
+                .AddColumn("UPN"));
 
             var policies = item.FlexPolicies.Where(IsCloudAppsPolicy).ToArray();
             foreach (var policy in policies)
@@ -527,14 +527,14 @@ internal sealed partial class W365CliApp
 
         private static Table BuildSharedPoolTable(LicenseOverviewItem item, IReadOnlyDictionary<string, IReadOnlyList<GroupMemberSummary>> groupMembers)
         {
-            var table = new Table()
+            var table = NoWrapColumns(new Table()
                 .Title("Shared pools")
                 .Border(TableBorder.Rounded)
                 .AddColumn("Pool")
                 .AddColumn("Group")
                 .AddColumn("Cloud PCs in pool")
                 .AddColumn("User")
-                .AddColumn("UPN");
+                .AddColumn("UPN"));
 
             var policies = item.FlexPolicies.Where(policy => IsSharedFlexPolicy(policy) && !IsCloudAppsPolicy(policy) && !IsDedicatedFlexPolicy(policy)).ToArray();
             foreach (var policy in policies)
@@ -561,7 +561,7 @@ internal sealed partial class W365CliApp
 
         private static Table BuildDedicatedMachineTable(LicenseOverviewItem item, IReadOnlyDictionary<string, IReadOnlyList<GroupMemberSummary>> groupMembers)
         {
-            var table = new Table()
+            var table = NoWrapColumns(new Table()
                 .Title("Dedicated machines")
                 .Border(TableBorder.Rounded)
                 .AddColumn("User")
@@ -569,7 +569,7 @@ internal sealed partial class W365CliApp
                 .AddColumn("Cloud PC")
                 .AddColumn("Status")
                 .AddColumn("Policy")
-                .AddColumn("State");
+                .AddColumn("State"));
 
             var dedicatedPolicies = item.FlexPolicies.Where(IsDedicatedFlexPolicy).ToArray();
             foreach (var policy in dedicatedPolicies)

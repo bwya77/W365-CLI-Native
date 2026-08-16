@@ -173,7 +173,7 @@ internal sealed partial class W365CliApp
             var cells = new List<string> { "-", "[grey]No policies match the current filter.[/]", "-", "-", "-", "-" };
             if (showGroups) { cells.Add("-"); }
             table.AddRow(cells.ToArray());
-            return table;
+            return NoWrapColumns(table);
         }
 
         var pageSize = Math.Max(8, Math.Min(18, Console.WindowHeight - 16));
@@ -201,7 +201,7 @@ internal sealed partial class W365CliApp
             table.AddRow(row.ToArray());
         }
 
-        return table;
+        return NoWrapColumns(table);
     }
 
     private static (int Name, int Type, int Image, int Join, int Sso, int Groups) GetProvisioningPolicyWidths()
@@ -313,6 +313,36 @@ internal sealed partial class W365CliApp
     private static bool IsSharedByEntraGroupPolicy(ProvisioningPolicySummary policy)
     {
         return string.Equals(policy.ProvisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Sums member counts across every group assigned to a shared pool policy (usually just one).
+    /// Reuses GetGroupMemberCountAsync, the same fast $count lookup the create-policy wizard already
+    /// uses for "This group has N member(s)". If any assigned group's count can't be determined,
+    /// returns null rather than showing a misleadingly low partial sum -- a user in more than one
+    /// assigned group would also be double-counted, but that's a rare edge case for the simple
+    /// single-group-per-policy setups this is aimed at.
+    ///
+    /// No spinner here by design -- callers that need one (a single policy) wrap this themselves;
+    /// AnsiConsole.Status doesn't nest, so a caller that's already inside its own status callback
+    /// (fetching for several policies at once) must call this directly instead.
+    /// </summary>
+    private async Task<int?> GetPoolMemberCountAsync(ProvisioningPolicySummary policy)
+    {
+        if (policy.AssignedGroupIds.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var counts = await ConcurrencyHelper.MapWithConcurrencyAsync(policy.AssignedGroupIds, maxConcurrency: 5, _session.Graph.GetGroupMemberCountAsync);
+            return counts.Any(count => count is null) ? null : counts.Sum(count => count!.Value);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -602,6 +632,14 @@ internal sealed partial class W365CliApp
             return;
         }
 
+        // Only meaningful for a true shared pool (sharedByEntraGroup) -- Flex Dedicated
+        // (sharedByUser) is a 1:1 allocation per the user's own correction, so "how many users are
+        // sharing this pool" doesn't apply there, and plain Enterprise dedicated policies aren't
+        // pools at all.
+        var poolMemberCount = IsSharedByEntraGroupPolicy(policy)
+            ? await AnsiConsole.Status().Spinner(Spinner.Known.Dots).StartAsync("Loading pool membership...", async _ => await GetPoolMemberCountAsync(policy))
+            : null;
+
         var selectedIndex = 0;
         var filter = string.Empty;
         var sortMode = CloudPcSortMode.Name;
@@ -619,9 +657,10 @@ internal sealed partial class W365CliApp
 
             AnsiConsole.Clear();
             RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Cloud PCs");
-            AnsiConsole.Write(CreateCloudPcSummaryPanel(cloudPcs, visibleCloudPcs, filter));
+            AnsiConsole.Write(CreateCloudPcSummaryPanel(cloudPcs, visibleCloudPcs, filter, poolMemberCount));
             AnsiConsole.Write(CreateCloudPcTable(cloudPcs, visibleCloudPcs, selectedIndex, filter));
-            AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Enter actions | D disk | N snapshots | Z resize | Y sync | / filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
+            var membersHint = policy.AssignedGroupIds.Count > 0 ? " | M members" : string.Empty;
+            AnsiConsole.MarkupLine($"[grey]Sort: {FormatCloudPcSortMode(sortMode)} | Enter actions | D disk | N snapshots | Z resize | Y sync{membersHint} | / filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
             var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
             {
@@ -690,6 +729,10 @@ internal sealed partial class W365CliApp
                     else if (visibleCloudPcs.Count > 0 && key.KeyChar is 'y' or 'Y')
                     {
                         await InvokeCloudPcActionAsync(visibleCloudPcs[selectedIndex], "Sync");
+                    }
+                    else if (policy.AssignedGroupIds.Count > 0 && key.KeyChar is 'm' or 'M')
+                    {
+                        await ShowProvisioningPolicyGroupMembersAsync(policy);
                     }
                     break;
             }
@@ -1773,8 +1816,8 @@ internal sealed partial class W365CliApp
                 }
             }
 
-            AnsiConsole.Write(table);
-            AnsiConsole.MarkupLine("[grey]Up/Down select | Enter view/remove | A add member | R refresh | Esc/B/Q back[/]");
+            AnsiConsole.Write(NoWrapColumns(table));
+            AnsiConsole.MarkupLine("[grey]Up/Down select | Enter details | X remove | A add member | R refresh | Esc/B/Q back[/]");
 
             var key = ReadNavigationKey(intercept: true);
             switch (key.Key)
@@ -1804,6 +1847,25 @@ internal sealed partial class W365CliApp
                     if (key.KeyChar is 'a' or 'A')
                     {
                         await AddGroupMemberWizardAsync(groupId, groupName);
+                    }
+                    else if (members.Count > 0 && key.KeyChar is 'x' or 'X')
+                    {
+                        // Direct one-key removal from the list itself -- "Enter" only opened the
+                        // member detail screen, which then required arrowing down to a separate
+                        // "Remove from group" action before pressing Enter again to actually
+                        // confirm. That two-step indirection read as "I can add members but not
+                        // remove them" since nothing on the list screen itself did the removal.
+                        // ConfirmAndRunAsync (same call ShowGroupMemberDetailAsync already used)
+                        // still requires an explicit Yes/No confirmation, so this stays just as
+                        // safe against accidental removal.
+                        var member = members[selectedIndex];
+                        await ConfirmAndRunAsync(
+                            "Remove from group",
+                            $"{member.Name} from {groupName}",
+                            async () => await _session.Graph.RemoveGroupMemberAsync(groupId, member.Id),
+                            resourceType: "Group member",
+                            resourceName: member.Name,
+                            requiredPermission: "GroupMember.ReadWrite.All or Group.ReadWrite.All");
                     }
                     else if (key.KeyChar is 'r' or 'R')
                     {

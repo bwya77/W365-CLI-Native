@@ -255,6 +255,9 @@ internal sealed partial class W365CliApp
             case "Browse Cloud PCs":
                 await ShowCloudPcsAsync();
                 return false;
+            case "By shared pool":
+                await ShowCloudPcsBySharedPoolAsync();
+                return false;
             case "Disk space":
                 await ShowDiskSpaceAsync();
                 return false;
@@ -411,6 +414,7 @@ internal sealed partial class W365CliApp
             new("CloudPcs", "Cloud PCs", "Browse, inspect, filter, and act on Cloud PCs",
             [
                 new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
+                new("CloudPcs", "By shared pool", "Browse Cloud PCs scoped to a Flex shared pool policy"),
                 new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
                 new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots")
             ]),
@@ -686,6 +690,7 @@ internal sealed partial class W365CliApp
         [
             ..GetMainMenuChoices().Where(choice => choice.Key != "Exit"),
             new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
+            new("CloudPcs", "By shared pool", "Browse Cloud PCs scoped to a Flex shared pool policy"),
             new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
             new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots"),
             new("Provisioning", "Policies", "Open provisioning policy browser"),
@@ -1696,6 +1701,29 @@ internal sealed partial class W365CliApp
         }
 
         return value.PadRight(width);
+    }
+
+    /// <summary>
+    /// Applied right after a Spectre Table's columns are added, across every table in the app.
+    /// Spectre's default column behavior wraps cell content that doesn't fit its computed column
+    /// width onto a second line instead of truncating it -- for a borderless/simple-border table
+    /// with no visual separation between rows, a wrapped row's mostly-blank second line reads as an
+    /// inconsistent gap compared to rows that didn't need to wrap (this is what caused the Cloud
+    /// PCs/Cloud Apps "spacing looks inconsistent" reports). Setting NoWrap on every column makes
+    /// Spectre truncate with "..." instead whenever a column ends up too narrow for its content,
+    /// keeping row spacing uniform regardless of terminal width -- without requiring every table to
+    /// have its own manual column-width budget (some tables here do compute explicit widths via
+    /// Fit() for other reasons, like word-BREAKING cleanly at the truncation point; this is a
+    /// second, independent layer of protection against Spectre's own column-fitting decisions).
+    /// </summary>
+    private static Table NoWrapColumns(Table table)
+    {
+        foreach (var column in table.Columns)
+        {
+            column.NoWrap = true;
+        }
+
+        return table;
     }
 
     private async Task ConfirmAndRunAsync(string action, string target, Func<Task> operation, string resourceType = "Cloud PC", string? resourceName = null, string requiredPermission = "CloudPC.ReadWrite.All")

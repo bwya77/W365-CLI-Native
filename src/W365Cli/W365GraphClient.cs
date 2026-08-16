@@ -25,7 +25,8 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsAsync()
     {
         var items = await GetPagedAsync<CloudPcSummary>(
-            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,sharedDeviceDetail");
+            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,sharedDeviceDetail,connectivityResult",
+            includeUnknownEnumMembers: true);
 
         return items
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -924,9 +925,9 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
-    public async Task<IReadOnlyList<GraphTableRow>> GetSignInStatusRowsAsync()
+    public async Task<IReadOnlyList<GraphTableRow>> GetSignInStatusRowsAsync(IReadOnlyList<CloudPcSummary>? cloudPcs = null)
     {
-        var cloudPcs = await GetCloudPcsAsync();
+        cloudPcs ??= await GetCloudPcsAsync();
         var rows = await ConcurrencyHelper.MapWithConcurrencyAsync(cloudPcs, maxConcurrency: 5, GetSignInStatusRowAsync);
         return rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
     }
