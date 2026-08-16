@@ -375,6 +375,12 @@ internal sealed partial class W365CliApp
     /// frontlineLicenseHourlyUsageReport before this existed. Instead, build real per-field columns
     /// for whichever report was requested: BuildAdaptiveReportColumns runs once the rows are loaded
     /// (columns/widths are captured by the closures below and read during rendering).
+    ///
+    /// Enter always opens the full, untruncated field list for the row (ShowGraphRowDetails) rather
+    /// than jumping to the matching Cloud PC's own details screen -- these are data/analytics
+    /// reports, and several (like Cloud PC Usage Category Report) return large JSON blob fields
+    /// (DevicePerfSummary, CurrentSize, RecommendedSize) that are only visible here, not on the
+    /// Cloud PC details screen. Jumping away lost that data entirely with no way back to see it.
     /// </summary>
     private async Task ShowAdaptiveCloudPcReportAsync(string title, string reportName, int top)
     {
@@ -397,7 +403,11 @@ internal sealed partial class W365CliApp
                 : Row(InterleaveValuesAndWidths(
                     columns.Select(column => row.Fields.TryGetValue(column, out var value) && !string.IsNullOrWhiteSpace(value) ? value : "-"),
                     widths)),
-            enterAction: OpenCloudPcFromReportRowAsync);
+            enterAction: row =>
+            {
+                ShowGraphRowDetails(title, row);
+                return Task.CompletedTask;
+            });
     }
 
     private static readonly Regex ReportGuidLikeValue = new(
