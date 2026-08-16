@@ -21,11 +21,14 @@ internal sealed partial class W365CliApp
         }
 
         AnsiConsole.Clear();
-        RenderBreadcrumb("Reports", "Export Markdown Snapshot");
+        RenderBreadcrumb("Export");
         var defaultPath = Path.Combine(Environment.CurrentDirectory, $"W365-Snapshot-{DateTime.Now:yyyy-MM-dd-HHmm}.md");
-        var path = AnsiConsole.Prompt(
-            new TextPrompt<string>($"Export path [[{Markup.Escape(defaultPath)}]]:")
-                .AllowEmpty());
+        var path = PromptTextCancelable($"Export path [[{Markup.Escape(defaultPath)}]]:", allowEmpty: true);
+        if (path is null)
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(path))
         {
             path = defaultPath;

@@ -2178,7 +2178,7 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine($"[#58a6ff]Rename[/] [grey]{Markup.Escape(cloudPc.Name)}[/]");
         AnsiConsole.WriteLine();
 
-        var newDisplayName = PromptTextCancelable("New Cloud PC display name [[Esc cancel]]:");
+        var newDisplayName = PromptTextCancelable("New Cloud PC display name:");
         if (string.IsNullOrWhiteSpace(newDisplayName))
         {
             TimedMessage("[yellow]Rename cancelled.[/]");

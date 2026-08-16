@@ -1482,7 +1482,7 @@ internal sealed partial class W365CliApp
     private static string PromptFilter(string currentFilter)
     {
         AnsiConsole.WriteLine();
-        return PromptTextCancelable("Filter [[Esc cancel]]:", allowEmpty: true) ?? currentFilter;
+        return PromptTextCancelable("Filter:", allowEmpty: true) ?? currentFilter;
     }
 
     private static string StatusMarkup(string? status, int width = 24)
@@ -2186,7 +2186,11 @@ internal sealed partial class W365CliApp
             while (true)
             {
                 var key = Console.ReadKey(intercept: true);
-                if (key.Key == ConsoleKey.Escape)
+                // LeftArrow doubles as "back" everywhere else in this app (Esc/Left arrow/B/Q),
+                // but this is a real text-entry field where LeftArrow would normally mean "move
+                // cursor left" -- only treat it as cancel when the buffer is empty (nothing typed
+                // yet to navigate within), so it doesn't fight typo correction once text exists.
+                if (key.Key == ConsoleKey.Escape || (key.Key == ConsoleKey.LeftArrow && buffer.Length == 0))
                 {
                     Console.WriteLine();
                     return null;

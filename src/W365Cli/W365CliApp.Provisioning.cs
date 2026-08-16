@@ -761,7 +761,7 @@ internal sealed partial class W365CliApp
     {
         AnsiConsole.Clear();
         RenderBreadcrumb("Provisioning", "Policies", policy.DisplayName, "Create copy");
-        var displayName = PromptTextCancelable("New policy display name [[Esc cancel]]:");
+        var displayName = PromptTextCancelable("New policy display name:");
         if (string.IsNullOrWhiteSpace(displayName))
         {
             TimedMessage("[yellow]Create copy cancelled.[/]");
@@ -789,7 +789,7 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine("[grey]Create a new Windows 365 provisioning policy.[/]");
         AnsiConsole.WriteLine();
 
-        var displayName = PromptTextCancelable("Policy display name [[Esc cancel]]:");
+        var displayName = PromptTextCancelable("Policy display name:");
         if (string.IsNullOrWhiteSpace(displayName))
         {
             TimedMessage("[yellow]Create policy cancelled.[/]");
@@ -1106,7 +1106,7 @@ internal sealed partial class W365CliApp
             }
 
             frontLineServicePlanId = selectedPlan.Id;
-            allotmentDisplayName = PromptTextCancelable("Assignment name [[shown to end users in the Windows app; Esc cancel]]:");
+            allotmentDisplayName = PromptTextCancelable("Assignment name [[shown to end users in the Windows app]]:");
             if (string.IsNullOrWhiteSpace(allotmentDisplayName))
             {
                 TimedMessage("[yellow]Create policy cancelled.[/]");
@@ -1968,7 +1968,7 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine($"[#58a6ff]Add member[/] [grey]{Markup.Escape(groupName)}[/]");
         AnsiConsole.WriteLine();
 
-        var query = PromptTextCancelable("Search by name, UPN, or email [[Esc cancel]]:", allowEmpty: true);
+        var query = PromptTextCancelable("Search by name, UPN, or email:", allowEmpty: true);
         if (string.IsNullOrWhiteSpace(query))
         {
             return;
