@@ -54,9 +54,9 @@ It is separate from the PowerShell-based `W365CLI` module and does not require t
 - View and manage the members of a provisioning policy's assigned Entra group, including which
   members currently have a Cloud PC provisioned.
 - Understand Windows 365 license capacity, availability, and Flex utilization.
-- Browse a full set of Cloud PC reports — sign-in status, connectivity/connection-quality
+- Browse a full set of Cloud PC reports - sign-in status, connectivity/connection-quality
   history, disk space, launch details, action status, performance trends, and Windows 365 Flex
-  license usage (hourly, daily, and real-time) — each rendered with report-specific columns.
+  license usage (hourly, daily, and real-time) - each rendered with report-specific columns.
 - Export a Markdown snapshot of your Cloud PC inventory, provisioning policies, and licensing for
   sharing or archiving.
 - Browse Cloud Apps and publish or unpublish them.
@@ -68,7 +68,7 @@ It is separate from the PowerShell-based `W365CLI` module and does not require t
 
 ### Windows (recommended: installer)
 
-One-line install (no admin/UAC prompt — installs to `%LocalAppData%\Programs\W365CLI` and adds it
+One-line install (no admin/UAC prompt - installs to `%LocalAppData%\Programs\W365CLI` and adds it
 to your user PATH):
 
 ```powershell
@@ -77,7 +77,7 @@ irm https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.ps1 | 
 
 Open a new terminal and type `w365cli` to get started. The installer also registers a normal
 uninstaller under **Settings > Apps** (or **Control Panel > Programs and Features**), so you can
-remove it like any other application — or run:
+remove it like any other application - or run:
 
 ```powershell
 irm https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/uninstall.ps1 | iex
@@ -88,7 +88,7 @@ Alternatively, download `W365CLISetup-<version>-win-x64.exe` or `-win-arm64.exe`
 
 ### macOS (recommended: install script)
 
-One-line install (no `sudo` required — installs to `~/.local/bin/w365cli` and adds it to your
+One-line install (no `sudo` required - installs to `~/.local/bin/w365cli` and adds it to your
 PATH):
 
 ```bash
@@ -106,8 +106,8 @@ Add `--purge-path` to also remove the PATH line the installer added to your shel
 
 ### Linux (recommended: install script)
 
-Same one-line install script as macOS — it detects the OS and architecture automatically (no
-`sudo` required — installs to `~/.local/bin/w365cli` and adds it to your PATH):
+Same one-line install script as macOS - it detects the OS and architecture automatically (no
+`sudo` required - installs to `~/.local/bin/w365cli` and adds it to your PATH):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bwya77/W365-CLI-Native/main/install.sh | bash
@@ -163,7 +163,7 @@ Connection > Connect
 
 ## Permissions
 
-W365 CLI ships with a built-in, multi-tenant Entra app registration — there's nothing to set up
+W365 CLI ships with a built-in, multi-tenant Entra app registration - there's nothing to set up
 or register yourself. The first time you connect from a new tenant, if the required permissions
 haven't been consented to yet, the CLI detects that automatically and offers to open the admin
 consent page for you; a Global Admin (or Privileged Role Admin) approves it once, and you're set.
@@ -211,7 +211,7 @@ Your app registration needs the same public client configuration and permissions
 
 ## Security & trust
 
-W365 CLI only ever acts with the permissions of the signed-in user (delegated Graph access) — it
+W365 CLI only ever acts with the permissions of the signed-in user (delegated Graph access) - it
 has no standing access to your tenant of its own, and nothing in the binary is secret. Release
 builds are produced entirely by this repository's own GitHub Actions workflows (nothing is
 built or uploaded by hand), are checked for vulnerabilities on every push via CodeQL, and are
@@ -245,7 +245,7 @@ Action submissions show a brief result screen, then return to the previous page.
 The Cloud PCs area includes:
 
 - Browse Cloud PCs
-- By shared pool — browse the Cloud PCs and member count of a specific Flex shared-pool
+- By shared pool - browse the Cloud PCs and member count of a specific Flex shared-pool
   provisioning policy
 - Disk space across all Cloud PCs
 - Snapshots across all Cloud PCs
@@ -267,8 +267,8 @@ The Provisioning area includes a provisioning policy browser with actions to:
   members currently have a Cloud PC
 - Delete a policy
 
-It also includes a "Create policy" wizard — with Windows 365 Flex Dedicated and Flex Shared
-license capacity validated against real tenant data before you submit — and a tenant-wide "User
+It also includes a "Create policy" wizard - with Windows 365 Flex Dedicated and Flex Shared
+license capacity validated against real tenant data before you submit - and a tenant-wide "User
 experience sync overview" that rolls up storage usage across every shared-by-Entra-group policy.
 
 ### Reports
@@ -324,8 +324,8 @@ Cloud Apps includes browse, publish, and unpublish workflows.
 
 ### Export
 
-Export generates a single Markdown snapshot of your tenant — Cloud PC inventory (with status/type
-breakdowns), provisioning policies, and Windows 365 licensing — for sharing or archiving outside
+Export generates a single Markdown snapshot of your tenant - Cloud PC inventory (with status/type
+breakdowns), provisioning policies, and Windows 365 licensing - for sharing or archiving outside
 the CLI. It's read-only and makes no changes to your tenant.
 
 ## Updates
@@ -333,10 +333,10 @@ the CLI. It's read-only and makes no changes to your tenant.
 W365 CLI checks GitHub Releases on startup and offers to update automatically when a newer
 version is available:
 
-- **Windows** — downloads the matching installer and, if you agree, runs it silently
+- **Windows** - downloads the matching installer and, if you agree, runs it silently
   (`/VERYSILENT /NORESTART`); W365 CLI closes for a few seconds while it updates, then reopen it.
   If you'd rather update later, the installer is saved locally and you can double-click it anytime.
-- **macOS and Linux** — downloads the matching build and replaces the installed `w365cli` binary
+- **macOS and Linux** - downloads the matching build and replaces the installed `w365cli` binary
   in place (an atomic rename, safe even while it's running). The new version is used the next
   time you quit and reopen `w365cli`.
 
