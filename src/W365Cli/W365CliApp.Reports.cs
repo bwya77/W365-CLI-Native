@@ -159,6 +159,7 @@ internal sealed partial class W365CliApp
                 [
                     "Cloud PC Usage Category Report",
                     "Connectivity history",
+                    "Connection Count Trend Report",
                     "Daily Connection Quality Report",
                     "Disk space",
                     "Export Markdown Snapshot",
@@ -172,7 +173,9 @@ internal sealed partial class W365CliApp
                     "Regional Connection Quality Report",
                     "Sign-In Activity Summary Report",
                     "Sign-in status",
+                    "Session Activity Report",
                     "User Experience Sync Report",
+                    "User Troubleshoot Report",
                     "Back"
                 ],
                 "Back");
@@ -189,6 +192,9 @@ internal sealed partial class W365CliApp
                     break;
                 case "Connectivity history":
                     await ShowConnectivityHistoryAsync();
+                    break;
+                case "Connection Count Trend Report":
+                    await ShowConnectionCountTrendReportAsync();
                     break;
                 case "Disk space":
                     await ShowDiskSpaceAsync();
@@ -236,6 +242,12 @@ internal sealed partial class W365CliApp
                 case "Performance Trend Report":
                     await ShowPerformanceTrendReportAsync();
                     break;
+                case "User Troubleshoot Report":
+                    await ShowUserTroubleshootReportAsync();
+                    break;
+                case "Session Activity Report":
+                    await ShowSessionActivityReportAsync();
+                    break;
                 case "Back":
                     return;
             }
@@ -279,6 +291,508 @@ internal sealed partial class W365CliApp
         }
 
         await ShowAdaptiveCloudPcReportAsync("Performance Trend Report", "performanceTrendReport", top.Value);
+    }
+
+    /// <summary>
+    /// Mirrors the Windows 365 admin portal's "search by user" troubleshoot report: prompts for
+    /// a UPN, then lists every Cloud PC assigned to that user with sign-in state, host health,
+    /// device name, service plan, SKU, and provisioning policy -- one row per Cloud PC.
+    /// </summary>
+    private async Task ShowUserTroubleshootReportAsync()
+    {
+        while (true)
+        {
+            AnsiConsole.Clear();
+            RenderBreadcrumb("User Troubleshoot Report");
+            AnsiConsole.MarkupLine($"[{AccentColor}]User Troubleshoot Report[/]");
+            AnsiConsole.MarkupLine("[grey]Enter a user principal name (UPN) to see all of their Cloud PCs. Esc/B/Q to go back.[/]");
+            AnsiConsole.WriteLine();
+            var upn = PromptTextCancelable("UPN:");
+            if (upn is null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(upn))
+            {
+                continue;
+            }
+
+            await ShowGraphRowsAsync(
+                $"Cloud PCs for {upn}",
+                async () => await _session.Graph.GetUserTroubleshootReportAsync(upn),
+                GetUserTroubleshootReportHeader,
+                FormatUserTroubleshootReportRow,
+                OpenCloudPcFromReportRowAsync);
+        }
+    }
+
+    // Only "Last 7 days" and "Last 60 days" are confirmed working against these undocumented
+    // troubleshoot-report endpoints (captured browser traffic + user testing). "Last 90 days"
+    // returns a 400 badRequest from troubleshootConfigurationConnectionCountTrendv1Report, so the
+    // wider preset list is intentionally not offered here rather than risk the same failure
+    // silently for the session activity report too.
+    private static readonly string[] SessionActivityTimeRanges = ["Last 7 days", "Last 60 days"];
+
+    private static readonly Color[] ChartPalette =
+    [
+        Color.SkyBlue1, Color.Gold1, Color.Green, Color.Orange1,
+        Color.MediumPurple1, Color.Red, Color.Cyan1, Color.HotPink
+    ];
+
+    /// <summary>
+    /// These undocumented troubleshoot-report endpoints return a bare 400 badRequest for
+    /// unsupported parameter combinations (confirmed for TimeRange = "Last 90 days" against
+    /// troubleshootConfigurationConnectionCountTrendv1Report) instead of a descriptive error --
+    /// shows a clear "this combination isn't supported" message instead of a raw exception/stack
+    /// trace, since a 400 here means a bad request shape, not a broken report or missing data.
+    /// </summary>
+    private static bool HandleUnsupportedReportRequestError(Exception ex, string reportTitle, string timeRange)
+    {
+        var isBadRequest = ex.Message.Contains("400", StringComparison.Ordinal) ||
+            ex.Message.Contains("badRequest", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("malformed", StringComparison.OrdinalIgnoreCase);
+        if (!isBadRequest)
+        {
+            return false;
+        }
+
+        AnsiConsole.Clear();
+        RenderBreadcrumb(reportTitle);
+        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(reportTitle)} rejected this request (400 Bad Request).[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[grey]The time range \"{Markup.Escape(timeRange)}\" (or another parameter combination) isn't supported by this undocumented report endpoint -- this is a request-shape problem, not a sign of missing data or a broken report.[/]");
+        AnsiConsole.MarkupLine("[grey]Try \"Last 7 days\" or \"Last 60 days\", which are confirmed to work.[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Fit(ex.Message, Math.Max(40, Console.WindowWidth - 4)))}[/]");
+        WaitForBack();
+        return true;
+    }
+
+    /// <summary>
+    /// Mirrors the graphs on the Windows 365 admin portal's Reports blade: sessions over time,
+    /// transport mix, client OS mix, and top gateway regions, built from tenant-wide session data
+    /// (GetSessionActivityReportAsync). A static dashboard rather than a scrollable row list --
+    /// R refreshes with the same time range, Esc/B/Q backs out to the time range prompt.
+    /// </summary>
+    private async Task ShowSessionActivityReportAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        while (true)
+        {
+            var timeRange = PromptChoice(
+                () => AnsiConsole.MarkupLine("[grey]Both ranges are confirmed against captured portal traffic and real testing.[/]"),
+                "[#58a6ff]Session Activity Report -- time range[/]",
+                [.. SessionActivityTimeRanges, "Back"],
+                "Back");
+
+            if (timeRange == "Back")
+            {
+                return;
+            }
+
+            while (true)
+            {
+                (IReadOnlyList<GraphTableRow> Rows, int TotalRowCount) result;
+                try
+                {
+                    result = await AnsiConsole.Status()
+                        .Spinner(Spinner.Known.Dots)
+                        .StartAsync($"Loading session activity ({timeRange})...", async _ => await _session.Graph.GetSessionActivityReportAsync(timeRange));
+                }
+                catch (Exception ex)
+                {
+                    if (await HandlePermissionErrorAsync(ex, "Load session activity", "Session Activity Report"))
+                    {
+                        break;
+                    }
+
+                    if (HandleUnsupportedReportRequestError(ex, "Session Activity Report", timeRange))
+                    {
+                        break;
+                    }
+
+                    AnsiConsole.Clear();
+                    RenderBreadcrumb("Session Activity Report");
+                    AnsiConsole.MarkupLine("[red]Failed to load session activity.[/]");
+                    AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
+                    WaitForBack();
+                    break;
+                }
+
+                AnsiConsole.Clear();
+                RenderBreadcrumb("Session Activity Report");
+                RenderSessionActivityDashboard(timeRange, result.Rows, result.TotalRowCount);
+
+                var key = ReadNavigationKey(intercept: true);
+                if (key.Key == ConsoleKey.R)
+                {
+                    continue;
+                }
+
+                if (key.Key is ConsoleKey.Escape or ConsoleKey.LeftArrow || key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    private static void RenderSessionActivityDashboard(string timeRange, IReadOnlyList<GraphTableRow> rows, int totalRowCount)
+    {
+        AnsiConsole.MarkupLine($"[#58a6ff]Session Activity Report[/] [grey]-- {Markup.Escape(timeRange)}[/]");
+        AnsiConsole.WriteLine();
+
+        if (rows.Count == 0)
+        {
+            // Explicit so a quiet tenant/window doesn't read as a broken report -- matches the
+            // ask: make it obvious *why* there's nothing to draw, not that the graphs are broken.
+            AnsiConsole.Write(new Panel(
+                new Rows(
+                    new Markup("[yellow]No Cloud PC sessions were found for this time range.[/]"),
+                    new Markup("[grey]This means no Windows 365 sessions occurred tenant-wide in the selected window -- it is not a sign that this report or the underlying connectivity is broken.[/]"),
+                    new Markup("[grey]Try a longer time range (R to retry with a different one after going back), or confirm Cloud PCs in this tenant have been used recently.[/]")))
+                .Header("No data")
+                .Border(BoxBorder.Rounded));
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]R refresh | Esc/B/Q back[/]");
+            return;
+        }
+
+        var sessions = rows
+            .Select(row => new
+            {
+                Row = row,
+                Begin = ParseGraphDate(GetField(row, "SessionBeginTime")),
+                End = ParseGraphDate(GetField(row, "SessionEndTime")),
+                Upn = GetField(row, "UPN"),
+                Transport = GetField(row, "TransportType"),
+                ClientOs = GetField(row, "ClientOS"),
+                Region = GetOptionalField(row, "GatewayRegion", "Region") ?? "-"
+            })
+            .ToArray();
+
+        var capped = rows.Count < totalRowCount;
+        var summaryText = capped
+            ? $"Sessions analyzed: {rows.Count} of {totalRowCount} total (capped for performance) | Distinct users: {sessions.Select(s => s.Upn).Distinct(StringComparer.OrdinalIgnoreCase).Count()} | Distinct Cloud PCs: {rows.Select(r => GetField(r, "CloudPCId")).Distinct(StringComparer.OrdinalIgnoreCase).Count()}"
+            : $"Sessions analyzed: {rows.Count} | Distinct users: {sessions.Select(s => s.Upn).Distinct(StringComparer.OrdinalIgnoreCase).Count()} | Distinct Cloud PCs: {rows.Select(r => GetField(r, "CloudPCId")).Distinct(StringComparer.OrdinalIgnoreCase).Count()}";
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(summaryText)}[/]");
+        AnsiConsole.WriteLine();
+
+        RenderSessionsPerDayChart(sessions.Select(s => s.Begin).ToArray());
+        AnsiConsole.WriteLine();
+        RenderTransportMixChart(sessions.Select(s => s.Transport).ToArray());
+        AnsiConsole.WriteLine();
+        RenderClientOsMixChart(sessions.Select(s => s.ClientOs).ToArray());
+        AnsiConsole.WriteLine();
+        RenderTopCategoryChart("Top gateway regions", sessions.Select(s => s.Region).ToArray());
+        var distinctUsers = sessions.Select(s => s.Upn).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        if (distinctUsers > 1)
+        {
+            AnsiConsole.WriteLine();
+            RenderTopCategoryChart("Top users by session count", sessions.Select(s => s.Upn).ToArray());
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]R refresh | Esc/B/Q back[/]");
+    }
+
+    private static void RenderSessionsPerDayChart(IReadOnlyList<DateTimeOffset?> beginTimes)
+    {
+        var buckets = beginTimes
+            .Where(value => value is not null)
+            .GroupBy(value => value!.Value.Date)
+            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .OrderBy(item => item.Date)
+            .TakeLast(14)
+            .ToArray();
+
+        if (buckets.Length == 0)
+        {
+            AnsiConsole.MarkupLine("[grey]Sessions per day: no parseable session start times.[/]");
+            return;
+        }
+
+        var chart = new BarChart()
+            .Width(70)
+            .Label("[bold]Sessions per day (most recent 14 days with activity)[/]")
+            .CenterLabel();
+
+        foreach (var bucket in buckets)
+        {
+            chart.AddItem(bucket.Date.ToString("MM/dd"), bucket.Count, Color.SkyBlue1);
+        }
+
+        AnsiConsole.Write(chart);
+    }
+
+    private static void RenderTransportMixChart(IReadOnlyList<string> transportTypes)
+    {
+        RenderBreakdown("Transport type mix", transportTypes);
+    }
+
+    private static void RenderClientOsMixChart(IReadOnlyList<string> clientOsValues)
+    {
+        RenderBreakdown("Client OS mix", clientOsValues.Select(ShortenLabel).ToArray());
+    }
+
+    private static void RenderBreakdown(string title, IReadOnlyList<string> values)
+    {
+        var groups = values
+            .Where(value => !string.IsNullOrWhiteSpace(value) && value != "-")
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Label = group.Key, Count = group.Count() })
+            .OrderByDescending(item => item.Count)
+            .ToArray();
+
+        if (groups.Length == 0)
+        {
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(title)}: no data.[/]");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[bold]{Markup.Escape(title)}[/]");
+        var chart = new BreakdownChart().Width(70).ShowPercentage();
+        var top = groups.Take(6).ToArray();
+        var otherCount = groups.Skip(6).Sum(item => item.Count);
+        var colorIndex = 0;
+        foreach (var item in top)
+        {
+            chart.AddItem(item.Label, item.Count, ChartPalette[colorIndex % ChartPalette.Length]);
+            colorIndex++;
+        }
+
+        if (otherCount > 0)
+        {
+            chart.AddItem("Other", otherCount, Color.Grey);
+        }
+
+        AnsiConsole.Write(chart);
+    }
+
+    private static void RenderTopCategoryChart(string title, IReadOnlyList<string> values)
+    {
+        var groups = values
+            .Where(value => !string.IsNullOrWhiteSpace(value) && value != "-")
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Label = group.Key, Count = group.Count() })
+            .OrderByDescending(item => item.Count)
+            .Take(5)
+            .ToArray();
+
+        if (groups.Length == 0)
+        {
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(title)}: no data.[/]");
+            return;
+        }
+
+        var chart = new BarChart()
+            .Width(70)
+            .Label($"[bold]{Markup.Escape(title)}[/]")
+            .CenterLabel();
+
+        var colorIndex = 0;
+        foreach (var item in groups)
+        {
+            chart.AddItem(ShortenLabel(item.Label), item.Count, ChartPalette[colorIndex % ChartPalette.Length]);
+            colorIndex++;
+        }
+
+        AnsiConsole.Write(chart);
+    }
+
+    private static string ShortenLabel(string value)
+    {
+        const int maxLength = 28;
+        return value.Length > maxLength ? string.Concat(value.AsSpan(0, maxLength - 3), "...") : value;
+    }
+
+    private static readonly (string Label, string GroupBy)[] ConnectionCountTrendDimensions =
+    [
+        ("Cloud PC status", "CloudPCStatus"),
+        ("Provisioning policy", "PolicyName")
+    ];
+
+    /// <summary>
+    /// Mirrors the Windows 365 admin portal's "Cloud PC initiated connection count by X trend" /
+    /// "Total ... by X" graph pairs (e.g. by Cloud PC status, by provisioning policy). Backed by
+    /// GetConnectionCountTrendAsync, which is confirmed via captured browser network traffic only
+    /// for the two dimensions offered here -- other groupBy values are unverified and
+    /// intentionally not exposed. A static dashboard rather than a scrollable row list: R
+    /// refreshes with the same dimension/time range, Esc/B/Q backs out one level at a time.
+    /// </summary>
+    private async Task ShowConnectionCountTrendReportAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        while (true)
+        {
+            var dimensionLabel = PromptChoice(
+                () => { },
+                "[#58a6ff]Connection Count Trend Report -- dimension[/]",
+                [.. ConnectionCountTrendDimensions.Select(d => d.Label), "Back"],
+                "Back");
+
+            if (dimensionLabel == "Back")
+            {
+                return;
+            }
+
+            var groupBy = ConnectionCountTrendDimensions.First(d => d.Label == dimensionLabel).GroupBy;
+
+            var timeRange = PromptChoice(
+                () => AnsiConsole.MarkupLine("[grey]Both ranges are confirmed against captured portal traffic and real testing.[/]"),
+                "[#58a6ff]Connection Count Trend Report -- time range[/]",
+                [.. SessionActivityTimeRanges, "Back"],
+                "Back");
+
+            if (timeRange == "Back")
+            {
+                continue;
+            }
+
+            while (true)
+            {
+                IReadOnlyList<GraphTableRow> rows;
+                try
+                {
+                    rows = await AnsiConsole.Status()
+                        .Spinner(Spinner.Known.Dots)
+                        .StartAsync($"Loading connection count trend ({dimensionLabel}, {timeRange})...", async _ => await _session.Graph.GetConnectionCountTrendAsync(timeRange, groupBy));
+                }
+                catch (Exception ex)
+                {
+                    if (await HandlePermissionErrorAsync(ex, "Load connection count trend", "Connection Count Trend Report"))
+                    {
+                        break;
+                    }
+
+                    if (HandleUnsupportedReportRequestError(ex, "Connection Count Trend Report", timeRange))
+                    {
+                        break;
+                    }
+
+                    AnsiConsole.Clear();
+                    RenderBreadcrumb("Connection Count Trend Report");
+                    AnsiConsole.MarkupLine("[red]Failed to load connection count trend.[/]");
+                    AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
+                    WaitForBack();
+                    break;
+                }
+
+                AnsiConsole.Clear();
+                RenderBreadcrumb("Connection Count Trend Report");
+                RenderConnectionCountTrendDashboard(dimensionLabel, timeRange, rows);
+
+                var key = ReadNavigationKey(intercept: true);
+                if (key.Key == ConsoleKey.R)
+                {
+                    continue;
+                }
+
+                if (key.Key is ConsoleKey.Escape or ConsoleKey.LeftArrow || key.KeyChar is 'b' or 'B' or 'q' or 'Q')
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    private static void RenderConnectionCountTrendDashboard(string dimensionLabel, string timeRange, IReadOnlyList<GraphTableRow> rows)
+    {
+        AnsiConsole.MarkupLine($"[#58a6ff]Connection Count Trend Report[/] [grey]-- by {Markup.Escape(dimensionLabel)}, {Markup.Escape(timeRange)}[/]");
+        AnsiConsole.WriteLine();
+
+        if (rows.Count == 0)
+        {
+            // Explicit so a quiet window doesn't read as a broken report -- same ask as the
+            // Session Activity Report: make it obvious *why* there's nothing to draw.
+            AnsiConsole.Write(new Panel(
+                new Rows(
+                    new Markup("[yellow]No connection activity was found for this dimension and time range.[/]"),
+                    new Markup("[grey]This means zero Cloud PC connections were recorded tenant-wide for the selected window -- it is not a sign that this report is broken.[/]"),
+                    new Markup("[grey]Try a longer time range or a different dimension (Esc/B/Q, then reselect).[/]")))
+                .Header("No data")
+                .Border(BoxBorder.Rounded));
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]R refresh | Esc/B/Q back[/]");
+            return;
+        }
+
+        var points = rows
+            .Select(row => new
+            {
+                Date = ParseGraphDate(GetField(row, "EventDateTime"))?.Date,
+                Group = GetField(row, "GroupColumn"),
+                Count = int.TryParse(GetField(row, "TotalActivityCount"), out var count) ? count : 0
+            })
+            .Where(point => point.Date is not null)
+            .ToArray();
+
+        var groups = points
+            .GroupBy(point => point.Group, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Group = group.Key, Total = group.Sum(p => p.Count) })
+            .OrderByDescending(group => group.Total)
+            .ToArray();
+
+        // Total by group -- mirrors the portal's "Total ... by X" bar chart.
+        var totalChart = new BarChart()
+            .Width(70)
+            .Label($"[bold]Total connections by {Markup.Escape(dimensionLabel)}[/]")
+            .CenterLabel();
+        var colorIndex = 0;
+        foreach (var group in groups)
+        {
+            totalChart.AddItem(ShortenLabel(group.Group), group.Total, ChartPalette[colorIndex % ChartPalette.Length]);
+            colorIndex++;
+        }
+
+        AnsiConsole.Write(totalChart);
+        AnsiConsole.WriteLine();
+
+        // Daily trend -- mirrors the portal's "... trend" line chart. Spectre.Console has no
+        // multi-series line/area chart, so this renders as a compact date x group pivot table
+        // instead: one row per date that actually had activity (dates with zero across every
+        // group are omitted rather than padded across the whole time range, keeping a 60-day
+        // window readable), one column per group, cell = that day's count.
+        var groupOrder = groups.Select(group => group.Group).ToArray();
+        var dateRows = points
+            .GroupBy(point => point.Date!.Value)
+            .OrderBy(group => group.Key)
+            .Select(group => new
+            {
+                Date = group.Key,
+                Counts = groupOrder.ToDictionary(
+                    groupName => groupName,
+                    groupName => group.Where(point => string.Equals(point.Group, groupName, StringComparison.OrdinalIgnoreCase)).Sum(point => point.Count),
+                    StringComparer.OrdinalIgnoreCase)
+            })
+            .ToArray();
+
+        AnsiConsole.MarkupLine($"[bold]Daily trend by {Markup.Escape(dimensionLabel)}[/] [grey](dates with at least one connection)[/]");
+        var table = new Table().Border(TableBorder.Rounded).AddColumn("Date");
+        foreach (var groupName in groupOrder)
+        {
+            table.AddColumn(Markup.Escape(ShortenLabel(groupName)));
+        }
+
+        foreach (var dateRow in dateRows)
+        {
+            var cells = new List<string> { dateRow.Date.ToString("MM/dd/yyyy") };
+            cells.AddRange(groupOrder.Select(groupName => dateRow.Counts[groupName] > 0 ? dateRow.Counts[groupName].ToString() : "-"));
+            table.AddRow(cells.ToArray());
+        }
+
+        AnsiConsole.Write(NoWrapColumns(table));
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]R refresh | Esc/B/Q back[/]");
     }
 
     private async Task ShowFlexLicenseDailyUsageReportAsync()
@@ -766,6 +1280,115 @@ internal sealed partial class W365CliApp
         var upn = Math.Max(20, (int)(remaining * 0.6));
         var clientOs = Math.Max(10, remaining - upn);
         return (begin, end, upn, clientOs, transport);
+    }
+
+    private static string GetUserTroubleshootReportHeader()
+    {
+        var widths = GetUserTroubleshootReportWidths();
+        var cells = new List<object> { "UPN", widths.Upn, "Last active", widths.LastActive, "Sign-in", widths.ConnectionState, "Host health", widths.HostHealth };
+        if (widths.DeviceName > 0)
+        {
+            cells.Add("Device name");
+            cells.Add(widths.DeviceName);
+        }
+
+        if (widths.ServicePlan > 0)
+        {
+            cells.Add("Service plan");
+            cells.Add(widths.ServicePlan);
+        }
+
+        if (widths.Sku > 0)
+        {
+            cells.Add("SKU");
+            cells.Add(widths.Sku);
+        }
+
+        if (widths.Policy > 0)
+        {
+            cells.Add("Policy");
+            cells.Add(widths.Policy);
+        }
+
+        return Row(cells.ToArray());
+    }
+
+    private static string FormatUserTroubleshootReportRow(GraphTableRow row)
+    {
+        var widths = GetUserTroubleshootReportWidths();
+        var cells = new List<object>
+        {
+            GetField(row, "UPN"), widths.Upn,
+            GetField(row, "LastActiveTime"), widths.LastActive,
+            GetField(row, "ConnectionState"), widths.ConnectionState,
+            GetField(row, "CloudDeviceHealthState"), widths.HostHealth
+        };
+        if (widths.DeviceName > 0)
+        {
+            cells.Add(GetField(row, "ManagedDeviceName"));
+            cells.Add(widths.DeviceName);
+        }
+
+        if (widths.ServicePlan > 0)
+        {
+            cells.Add(GetField(row, "ServicePlanType"));
+            cells.Add(widths.ServicePlan);
+        }
+
+        if (widths.Sku > 0)
+        {
+            cells.Add(GetField(row, "SKUName"));
+            cells.Add(widths.Sku);
+        }
+
+        if (widths.Policy > 0)
+        {
+            cells.Add(GetField(row, "PolicyName"));
+            cells.Add(widths.Policy);
+        }
+
+        return Row(cells.ToArray());
+    }
+
+    /// <summary>
+    /// Unlike most report width helpers here, this one must not clamp `available` up to an
+    /// artificial floor above the real terminal width -- doing so (an earlier version floored at
+    /// 90) made the *sum* of column widths exceed the actual console width, so the console itself
+    /// soft-wrapped every row onto a second line instead of Fit() cleanly truncating individual
+    /// cells. With 8 possible columns, staying within the real width instead means progressively
+    /// dropping the least essential ones (Policy, then Service plan/SKU, then Device name) as the
+    /// terminal narrows, always keeping UPN/Last active/Sign-in/Host health.
+    /// </summary>
+    internal static (int Upn, int LastActive, int ConnectionState, int HostHealth, int DeviceName, int ServicePlan, int Sku, int Policy) GetUserTroubleshootReportWidths()
+    {
+        var available = Math.Max(50, Console.WindowWidth - 4);
+        const int lastActive = 19;
+        const int connectionState = 13;
+        const int hostHealth = 9;
+        const int deviceNameFull = 16;
+        const int servicePlanFull = 14;
+        const int skuFull = 8;
+        const int policyFull = 18;
+
+        var showPolicy = available >= 150;
+        var showServicePlanAndSku = available >= 120;
+        var showDeviceName = available >= 95;
+
+        var deviceName = showDeviceName ? deviceNameFull : 0;
+        var servicePlan = showServicePlanAndSku ? servicePlanFull : 0;
+        var sku = showServicePlanAndSku ? skuFull : 0;
+        var policy = showPolicy ? policyFull : 0;
+
+        var visibleCount = 4
+            + (showDeviceName ? 1 : 0)
+            + (showServicePlanAndSku ? 2 : 0)
+            + (showPolicy ? 1 : 0);
+        var gaps = visibleCount - 1;
+
+        var fixedWidth = lastActive + connectionState + hostHealth + deviceName + servicePlan + sku + policy + gaps;
+        var upn = Math.Max(18, available - fixedWidth);
+
+        return (upn, lastActive, connectionState, hostHealth, deviceName, servicePlan, sku, policy);
     }
 
     private static string GetLaunchDetailsHeader()

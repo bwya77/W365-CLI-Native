@@ -1033,6 +1033,168 @@ internal sealed class W365GraphClient
     }
 
     /// <summary>
+    /// The Windows 365 admin portal's "search by user" troubleshoot report -- lists every Cloud
+    /// PC assigned to a given UPN with sign-in state, host health, device name, service plan,
+    /// SKU, and provisioning policy. Same retrieveCloudPcTroubleshootReports endpoint and
+    /// columnar Schema/Values shape as GetConnectionHistoryReportAsync, confirmed via captured
+    /// browser network traffic; filtered on UPNParam instead of CloudPCIdParam.
+    /// </summary>
+    public async Task<IReadOnlyList<GraphTableRow>> GetUserTroubleshootReportAsync(string userPrincipalName, int top = 100, int skip = 0)
+    {
+        var escapedUpn = userPrincipalName.Replace("'", "''", StringComparison.Ordinal);
+        var body = new Dictionary<string, object>
+        {
+            ["reportName"] = "troubleshootCloudPCListReport",
+            ["select"] = new[]
+            {
+                "CloudPCId", "UPN", "LastActiveTime", "ConnectionState", "DeviceHealthTime",
+                "CloudDeviceHealthState", "ManagedDeviceName", "ServicePlanType", "SKUName", "PolicyName"
+            },
+            ["filter"] = $"UPNParam eq '{escapedUpn}'",
+            ["top"] = top,
+            ["skip"] = skip
+        };
+
+        var json = await PostJsonForStringAsync("deviceManagement/virtualEndpoint/reports/retrieveCloudPcTroubleshootReports", body);
+        using var document = JsonDocument.Parse(json);
+        return ParseReportRows(document.RootElement, "ConnectionState", "CloudDeviceHealthState", "ManagedDeviceName", "SKUName");
+    }
+
+    /// <summary>
+    /// The reverse of GetUserTroubleshootReportAsync -- the Windows 365 admin portal's
+    /// "search by Cloud PC" troubleshoot report, showing the assigned user and their most
+    /// recent client/session info for a single Cloud PC. Same endpoint, filtered on
+    /// CloudPCIdParam instead of UPNParam.
+    /// </summary>
+    public async Task<IReadOnlyList<GraphTableRow>> GetCloudPcUserTroubleshootReportAsync(string cloudPcId, int top = 100, int skip = 0)
+    {
+        var escapedCloudPcId = cloudPcId.Replace("'", "''", StringComparison.Ordinal);
+        var body = new Dictionary<string, object>
+        {
+            ["reportName"] = "troubleshootUserListReport",
+            ["select"] = new[]
+            {
+                "CloudPCId", "ManagedDeviceName", "ServicePlanType", "UPN", "UserId", "ConnectionState",
+                "LastActiveTime", "LastClientOS", "LastClientType", "LastGatewayRegion"
+            },
+            ["filter"] = $"CloudPCIdParam eq '{escapedCloudPcId}'",
+            ["top"] = top,
+            ["skip"] = skip
+        };
+
+        var json = await PostJsonForStringAsync("deviceManagement/virtualEndpoint/reports/retrieveCloudPcTroubleshootReports", body);
+        using var document = JsonDocument.Parse(json);
+        return ParseReportRows(document.RootElement, "UPN", "ConnectionState", "LastActiveTime", "LastClientOS");
+    }
+
+    /// <summary>
+    /// Tenant-wide session/connection data behind this app's "Session Activity Report" -- mirrors
+    /// the graphs on the Windows 365 admin portal's Reports blade (sessions over time, transport
+    /// mix, client OS mix, regions). Same retrieveCloudPcTroubleshootReports endpoint and
+    /// columnar Schema/Values shape as GetConnectionHistoryReportAsync, but CloudPCIdParam/
+    /// UPNParam are left blank so results cover every Cloud PC in the tenant for the requested
+    /// TimeRange window, confirmed via captured browser network traffic. Only "Last 7 days" and
+    /// "Last 60 days" have actually been observed on the wire; other TimeRange presets offered in
+    /// the UI are inferred from the portal's usual range picker and unverified.
+    ///
+    /// Pages through results up to maxRows -- a busy tenant can have far more sessions in a
+    /// 60-day window than a single response page returns, and the caller needs the full set (not
+    /// just the first page) to build accurate charts.
+    /// </summary>
+    public async Task<(IReadOnlyList<GraphTableRow> Rows, int TotalRowCount)> GetSessionActivityReportAsync(string timeRange, int maxRows = 2000)
+    {
+        const int pageSize = 200;
+        var escapedTimeRange = timeRange.Replace("'", "''", StringComparison.Ordinal);
+        var filter =
+            $"(TimeRange eq '{escapedTimeRange}') and (CloudPCStatusParam eq '') and (RegionParam eq '') and " +
+            "(PolicyNameParam eq '') and (UserSettingNameParam eq '') and (ImageNameParam eq '') and " +
+            "(ServicePlanNameParam eq '') and (ServicePlanTypeParam eq '') and (OSVersionParam eq '') and " +
+            "(OSBuildVersionParam eq '') and (ClientOSParam eq '') and (ClientTypeParam eq '') and " +
+            "(ClientFriendlyNameParam eq '') and (ClientVersionParam eq '') and (MMRVersionParam eq '') and " +
+            "(TeamsAppV2VersionParam eq '') and (CloudPCIdParam eq '') and (UPNParam eq '') and " +
+            "(AADJoinTypeParam eq '') and (GatewayRegionParam eq '') and (TransportTypeParam eq '') and " +
+            "(CloudPCEndpointCountryRegionParam eq '') and (CloudPCEndpointStateParam eq '') and (CloudPCEndpointCityParam eq '')";
+
+        var rows = new List<GraphTableRow>();
+        var totalRowCount = 0;
+        var skip = 0;
+        while (rows.Count < maxRows)
+        {
+            var body = new Dictionary<string, object>
+            {
+                ["reportName"] = "troubleshootConnectionConfigurationOfViewDataTableV1Report",
+                ["top"] = pageSize,
+                ["skip"] = skip,
+                ["search"] = "",
+                ["filter"] = filter,
+                ["select"] = new[]
+                {
+                    "ActivityId", "SessionBeginTime", "SessionEndTime", "UPN", "UserId", "ManagedDeviceName",
+                    "CloudPCId", "CloudPCHostGeography", "Region", "SessionHostAgentVersion", "SessionHostSxSStackVersion",
+                    "GatewayRegion", "PolicyName", "UserSettingName", "ServicePlanType", "ServicePlanName", "AADJoinType",
+                    "ImageName", "TransportType", "PlatformName", "ClientOS", "ClientType", "ClientVersion",
+                    "SessionHostIPAddress", "CallerIPAddress", "CloudPCEndpointCountry", "CloudPCEndpointState",
+                    "CloudPCEndpointCity", "TeamsAppV2Version", "MMRVersion"
+                },
+                ["orderBy"] = new[] { "SessionBeginTime desc" }
+            };
+
+            var json = await PostJsonForStringAsync("deviceManagement/virtualEndpoint/reports/retrieveCloudPcTroubleshootReports", body);
+            using var document = JsonDocument.Parse(json);
+            var pageRows = ParseReportRows(document.RootElement, "UPN", "SessionBeginTime", "TransportType", "ClientOS");
+            rows.AddRange(pageRows);
+
+            totalRowCount = document.RootElement.TryGetProperty("TotalRowCount", out var totalProp) && totalProp.ValueKind == JsonValueKind.Number
+                ? totalProp.GetInt32()
+                : rows.Count;
+
+            skip += pageSize;
+            if (pageRows.Count == 0 || rows.Count >= totalRowCount)
+            {
+                break;
+            }
+        }
+
+        return (rows, totalRowCount);
+    }
+
+    /// <summary>
+    /// Tenant-wide daily connection-count trend grouped by a single dimension (Cloud PC status,
+    /// provisioning policy, etc.) -- backs the Windows 365 admin portal's "Cloud PC initiated
+    /// connection count by X trend" / "Total ... by X" graph pairs. Same
+    /// retrieveCloudPcTroubleshootReports endpoint as GetSessionActivityReportAsync, but a
+    /// different reportName (troubleshootConfigurationConnectionCountTrendv1Report) that returns
+    /// pre-aggregated (EventDateTime, TotalActivityCount, GroupColumn) rows instead of raw
+    /// sessions. Confirmed via captured browser network traffic specifically for
+    /// groupBy=CloudPCStatus and groupBy=PolicyName; other groupBy values are unverified.
+    /// </summary>
+    public async Task<IReadOnlyList<GraphTableRow>> GetConnectionCountTrendAsync(string timeRange, string groupBy, int top = 1000)
+    {
+        var escapedTimeRange = timeRange.Replace("'", "''", StringComparison.Ordinal);
+        var filter =
+            $"(TimeRange eq '{escapedTimeRange}') and (CloudPCStatusParam eq '') and (RegionParam eq '') and " +
+            "(PolicyNameParam eq '') and (UserSettingNameParam eq '') and (ImageNameParam eq '') and " +
+            "(ServicePlanNameParam eq '') and (ServicePlanTypeParam eq '') and (OSVersionParam eq '') and " +
+            "(OSBuildVersionParam eq '') and (ClientOSParam eq '') and (ClientTypeParam eq '') and " +
+            "(ClientFriendlyNameParam eq '') and (ClientVersionParam eq '') and (MMRVersionParam eq '') and " +
+            "(TeamsAppV2VersionParam eq '')";
+
+        var body = new Dictionary<string, object>
+        {
+            ["reportName"] = "troubleshootConfigurationConnectionCountTrendv1Report",
+            ["select"] = new[] { "EventDateTime", "TotalActivityCount", "GroupColumn" },
+            ["filter"] = filter,
+            ["top"] = top,
+            ["skip"] = 0,
+            ["groupBy"] = new[] { groupBy }
+        };
+
+        var json = await PostJsonForStringAsync("deviceManagement/virtualEndpoint/reports/retrieveCloudPcTroubleshootReports", body);
+        using var document = JsonDocument.Parse(json);
+        return ParseReportRows(document.RootElement, "GroupColumn", "EventDateTime", "TotalActivityCount");
+    }
+
+    /// <summary>
     /// Counts of a provisioning policy's Cloud PC actions grouped by state -- the same five
     /// buckets the Windows 365 admin portal shows as a colored status bar on a policy's action
     /// report. Endpoint confirmed via captured browser network traffic; not (yet) in the official

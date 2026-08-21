@@ -324,6 +324,15 @@ internal sealed partial class W365CliApp
             case "Performance Trend Report":
                 await ShowPerformanceTrendReportAsync();
                 return false;
+            case "User Troubleshoot Report":
+                await ShowUserTroubleshootReportAsync();
+                return false;
+            case "Session Activity Report":
+                await ShowSessionActivityReportAsync();
+                return false;
+            case "Connection Count Trend Report":
+                await ShowConnectionCountTrendReportAsync();
+                return false;
             case "Organization settings":
                 await ShowGraphRowsAsync(
                     "Windows 365 organization settings",
@@ -431,6 +440,7 @@ internal sealed partial class W365CliApp
             [
                 new("Reports", "Cloud PC Usage Category Report", "Cloud PCs grouped by user and service plan"),
                 new("Reports", "Connectivity history", "Select a Cloud PC and inspect connection events"),
+                new("Reports", "Connection Count Trend Report", "Daily connection counts trended and totaled by Cloud PC status or policy"),
                 new("Reports", "Daily Connection Quality Report", "Daily usage hours and round-trip time per Cloud PC"),
                 new("Reports", "Disk space", "All Cloud PC disk space usage"),
                 new("Reports", "Flex License Daily Usage Report", "Daily Windows 365 Flex license usage and claims"),
@@ -443,7 +453,9 @@ internal sealed partial class W365CliApp
                 new("Reports", "Regional Connection Quality Report", "Weekly Cloud PC counts by gateway region"),
                 new("Reports", "Sign-In Activity Summary Report", "Aggregated sign-in activity and days since last sign-in"),
                 new("Reports", "Sign-in status", "Open current Cloud PC sign-in status"),
-                new("Reports", "User Experience Sync Report", "Storage usage across all shared policies with user experience sync")
+                new("Reports", "Session Activity Report", "Sessions over time, transport, client OS, and region breakdowns"),
+                new("Reports", "User Experience Sync Report", "Storage usage across all shared policies with user experience sync"),
+                new("Reports", "User Troubleshoot Report", "Look up a user's Cloud PCs by UPN")
             ]),
             new("Licensing", "Licensing", "Capacity, availability, Flex, and Reserve utilization"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
@@ -714,6 +726,9 @@ internal sealed partial class W365CliApp
             new("Reports", "Inaccessible Cloud PC Report", "Cloud PCs that are currently unreachable"),
             new("Reports", "Performance Trend Report", "Slow round-trip time and low UDP connection trends"),
             new("Reports", "User Experience Sync Report", "Storage usage across all shared policies with user experience sync"),
+            new("Reports", "User Troubleshoot Report", "Look up a user's Cloud PCs by UPN"),
+            new("Reports", "Session Activity Report", "Sessions over time, transport, client OS, and region breakdowns"),
+            new("Reports", "Connection Count Trend Report", "Daily connection counts trended and totaled by Cloud PC status or policy"),
             new("Catalog", "Service plans", "Open service plan catalog"),
             new("Catalog", "Gallery images", "Open gallery images"),
             new("Catalog", "Supported regions", "Open supported regions")
@@ -1962,9 +1977,23 @@ internal sealed partial class W365CliApp
 
     /// <summary>
     /// When a Graph call fails with a permission-shaped error (403/Forbidden/Authorization_RequestDenied),
-    /// shows an actionable recovery screen instead of a bare error, and offers to open the admin
-    /// consent page or retry sign-in with a fresh consent prompt. Returns true if it handled the
-    /// error (caller should stop further generic error rendering).
+    /// shows an actionable recovery screen instead of a bare error. Branches on whether the app's
+    /// required Graph scopes are actually missing from the current token
+    /// (<see cref="W365Session.MissingRequiredScopes"/>):
+    ///
+    /// - If a required scope really is missing, the original consent-focused remedies (open admin
+    ///   consent page / re-consent) make sense and are offered.
+    /// - If every required scope is already granted (proven by other Cloud PC/report screens in
+    ///   this same session working fine), a 403 on one specific call is NOT a consent problem --
+    ///   re-consenting grants the same already-present scope and will never change the outcome.
+    ///   That's exactly what happens with some report endpoints (e.g. Flex/Frontline license
+    ///   reports): Windows 365 report actions can additionally enforce Intune role-based access
+    ///   control (RBAC) permissions and/or tenant licensing (e.g. no Windows 365 Frontline plans
+    ///   provisioned) at the service layer, entirely separate from the OAuth scope consent screen.
+    ///   In that case this shows the real likely causes instead and skips the consent remedies,
+    ///   since retrying them just wastes the user's time on a fix that cannot work.
+    ///
+    /// Returns true if it handled the error (caller should stop further generic error rendering).
     /// </summary>
     private async Task<bool> HandlePermissionErrorAsync(Exception ex, string action, string target, string requiredPermission = "CloudPC.ReadWrite.All")
     {
@@ -1973,6 +2002,8 @@ internal sealed partial class W365CliApp
             return false;
         }
 
+        var scopeAlreadyGranted = _session.IsConnected && _session.MissingRequiredScopes.Count == 0;
+
         void RenderContext()
         {
             AnsiConsole.MarkupLine($"[red]{Markup.Escape(action)} was denied by Microsoft Graph (403 Forbidden).[/]");
@@ -1980,13 +2011,29 @@ internal sealed partial class W365CliApp
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Fit(ex.Message, Math.Max(40, Console.WindowWidth - 4)))}[/]");
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]This usually means one of two things:[/]");
-            AnsiConsole.MarkupLine($"[grey]  1. This app's {Markup.Escape(requiredPermission)} permission hasn't been granted admin consent in your tenant yet.[/]");
-            AnsiConsole.MarkupLine("[grey]  2. Your account doesn't have the administrator role required for this specific action.[/]");
+
+            if (scopeAlreadyGranted)
+            {
+                AnsiConsole.MarkupLine("[grey]This app's required Graph permissions (including this one) are already granted in your current session -- proven by other Cloud PC/report screens working. So this specific 403 is NOT a consent problem, and re-consenting will grant the exact same scope again and cannot change the outcome.[/]");
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine("[grey]More likely causes for this specific call:[/]");
+                AnsiConsole.MarkupLine("[grey]  1. Your account's Intune role-based access control (RBAC) role is missing the permission for this specific report -- a separate authorization layer from Graph API scope consent, granted per-role in the Intune admin center (Tenant administration > Roles), not via app consent.[/]");
+                AnsiConsole.MarkupLine("[grey]  2. This tenant doesn't have the relevant Windows 365 licenses/service plans provisioned for this report (e.g. no Frontline plans), and the report endpoint enforces that at the service layer.[/]");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[grey]This usually means one of two things:[/]");
+                AnsiConsole.MarkupLine($"[grey]  1. This app's {Markup.Escape(requiredPermission)} permission hasn't been granted admin consent in your tenant yet.[/]");
+                AnsiConsole.MarkupLine("[grey]  2. Your account doesn't have the administrator role required for this specific action.[/]");
+            }
+
             AnsiConsole.WriteLine();
         }
 
-        var choice = PromptChoice(RenderContext, "What would you like to do?", ["Open admin consent page", "Sign in again and re-consent", "Continue"], "Continue");
+        var choices = scopeAlreadyGranted
+            ? new[] { "Open Intune admin center", "Continue" }
+            : ["Open admin consent page", "Sign in again and re-consent", "Continue"];
+        var choice = PromptChoice(RenderContext, "What would you like to do?", choices, "Continue");
 
         switch (choice)
         {
@@ -2000,6 +2047,10 @@ internal sealed partial class W365CliApp
                     .StartAsync("Re-authenticating...", async _ => await _session.ReconsentAsync());
                 UpdateStatusBarSnapshot();
                 TimedMessage(reconnected ? "[green]Re-authenticated. Try the action again.[/]" : "[red]Re-authentication failed.[/]");
+                break;
+            case "Open Intune admin center":
+                OpenUrl("https://intune.microsoft.com/");
+                TimedMessage("[grey]Opened the Intune admin center. Check Tenant administration > Roles for your account's assigned role, and confirm this tenant has the relevant Windows 365 licenses.[/]");
                 break;
         }
 
