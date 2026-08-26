@@ -14,16 +14,17 @@ public class CloudPcTableWidthTests
     // a range of realistic narrow terminal widths.
 
     private static int ComputeTotalTableWidth(
-        (int Name, int Status, int Type, int User, int ServicePlan, int InUse) widths,
+        (int Name, int Status, int Type, int User, int ServicePlan, int InUse, int Device) widths,
         bool showInUse,
         bool showUser,
         bool showServicePlan,
-        bool sideBySide)
+        bool sideBySide,
+        bool showDevice = false)
     {
-        var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0);
+        var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0) + (showDevice ? 1 : 0);
         var overhead = (3 * columnCount) + 1;
         var sidePanelCost = sideBySide ? 40 : 0;
-        return overhead + sidePanelCost + 1 /* selector */ + widths.Status + widths.Type + widths.InUse + widths.Name + widths.User + widths.ServicePlan;
+        return overhead + sidePanelCost + 1 /* selector */ + widths.Status + widths.Type + widths.InUse + widths.Name + widths.User + widths.ServicePlan + widths.Device;
     }
 
     [Theory]
@@ -100,5 +101,48 @@ public class CloudPcTableWidthTests
         var standalone = W365CliApp.GetCloudPcWidths(showInUse: true, showUser: true, showServicePlan: false, sideBySide: false, minimum);
 
         Assert.True(standalone.Name >= sideBySide.Name);
+    }
+
+    // Regression coverage for a real reported bug: with User, Service plan, AND Device all active,
+    // an earlier version of GetCloudPcWidths gave Device its own independent percentage share on
+    // top of Name's and User's, so the four dynamic columns' requested widths together exceeded
+    // the real terminal width. Spectre then force-shrank columns below NoWrap's floor, wrapping
+    // cell text character-by-character (e.g. "provisionedWithWarnings" splitting across two
+    // lines) instead of cleanly truncating with "...".
+    [Theory]
+    [InlineData(true, true, true, true)]
+    [InlineData(true, true, false, true)]
+    [InlineData(false, false, true, true)]
+    [InlineData(true, true, true, false)]
+    public void GetCloudPcWidths_WithDeviceColumn_EveryColumnStaysAtOrAboveItsMinimumAndTableFits(bool showInUse, bool showUser, bool showServicePlan, bool sideBySide)
+    {
+        var minimum = W365CliApp.GetMinimumSideBySideCloudPcTableWidth(showInUse, showUser, showServicePlan, showDevice: true);
+
+        foreach (var windowWidth in new[] { minimum, minimum + 5, minimum + 20, minimum + 100 })
+        {
+            var widths = W365CliApp.GetCloudPcWidths(showInUse, showUser, showServicePlan, sideBySide, windowWidth, showDevice: true);
+
+            Assert.True(widths.Status >= 12, $"[{windowWidth}] Status width {widths.Status} fell below its minimum.");
+            Assert.True(widths.Type >= 9, $"[{windowWidth}] Type width {widths.Type} fell below its minimum.");
+            Assert.True(widths.Name >= 16, $"[{windowWidth}] Name width {widths.Name} fell below its minimum.");
+            Assert.True(widths.Device >= 14, $"[{windowWidth}] Device width {widths.Device} fell below its minimum.");
+            if (showInUse)
+            {
+                Assert.True(widths.InUse >= 14, $"[{windowWidth}] In use width {widths.InUse} fell below its minimum.");
+            }
+
+            if (showUser)
+            {
+                Assert.True(widths.User >= 16, $"[{windowWidth}] User width {widths.User} fell below its minimum.");
+            }
+
+            if (showServicePlan)
+            {
+                Assert.True(widths.ServicePlan >= 16, $"[{windowWidth}] Service plan width {widths.ServicePlan} fell below its minimum.");
+            }
+
+            var total = ComputeTotalTableWidth(widths, showInUse, showUser, showServicePlan, sideBySide, showDevice: true);
+            Assert.True(total <= windowWidth, $"Computed table width {total} exceeds window width {windowWidth}.");
+        }
     }
 }

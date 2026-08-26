@@ -855,7 +855,8 @@ internal sealed partial class W365CliApp
         var showInUse = allCloudPcs.Any(pc => GetNormalizedInUseStatus(pc) is not null);
         var showUser = Console.WindowWidth >= 105;
         var showServicePlan = Console.WindowWidth >= 135;
-        if (Console.WindowWidth >= GetMinimumSideBySideCloudPcTableWidth(showInUse, showUser, showServicePlan))
+        var showDevice = Console.WindowWidth >= 150;
+        if (Console.WindowWidth >= GetMinimumSideBySideCloudPcTableWidth(showInUse, showUser, showServicePlan, showDevice))
         {
             AnsiConsole.Write(grid);
         }
@@ -871,11 +872,11 @@ internal sealed partial class W365CliApp
     /// <summary>
     /// The narrowest terminal width the side-by-side "table + Selected Cloud PC panel" grid layout
     /// can render into without the table needing more width than every column's documented minimum
-    /// (see <see cref="GetCloudPcWidths(bool,bool,bool,bool,int)"/>) adds up to -- i.e. the point
+    /// (see <see cref="GetCloudPcWidths(bool,bool,bool,bool,int,bool)"/>) adds up to -- i.e. the point
     /// below which switching to the stacked (table, then panel, full width) layout instead is the
     /// only way to avoid Spectre silently shrinking a column below what it can cleanly truncate.
     /// </summary>
-    internal static int GetMinimumSideBySideCloudPcTableWidth(bool showInUse, bool showUser, bool showServicePlan)
+    internal static int GetMinimumSideBySideCloudPcTableWidth(bool showInUse, bool showUser, bool showServicePlan, bool showDevice = false)
     {
         const int statusMin = 12;
         const int typeMin = 9;
@@ -883,14 +884,15 @@ internal sealed partial class W365CliApp
         const int nameMin = 16;
         const int userMin = 16;
         const int servicePlanMin = 16;
+        const int deviceMin = 14;
         const int sidePanelReserve = 40;
 
-        var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0);
+        var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0) + (showDevice ? 1 : 0);
         var overhead = (3 * columnCount) + 1;
 
         return overhead + sidePanelReserve + 1 /* selector */
             + statusMin + typeMin + (showInUse ? inUseMin : 0)
-            + nameMin + (showUser ? userMin : 0) + (showServicePlan ? servicePlanMin : 0);
+            + nameMin + (showUser ? userMin : 0) + (showServicePlan ? servicePlanMin : 0) + (showDevice ? deviceMin : 0);
     }
 
     private static Panel CreateCloudPcSummaryPanel(IReadOnlyList<CloudPcSummary> allCloudPcs, IReadOnlyList<CloudPcSummary> visibleCloudPcs, string filter, int? poolMemberCount = null)
@@ -936,7 +938,8 @@ internal sealed partial class W365CliApp
         var showInUse = allCloudPcs.Any(pc => GetNormalizedInUseStatus(pc) is not null);
         var showUser = Console.WindowWidth >= 105;
         var showServicePlan = Console.WindowWidth >= 135;
-        var widths = GetCloudPcWidths(showInUse, showUser, showServicePlan, sideBySide);
+        var showDevice = Console.WindowWidth >= 150;
+        var widths = GetCloudPcWidths(showInUse, showUser, showServicePlan, sideBySide, showDevice);
 
         // NoWrap on every sized column keeps Spectre's render width matched exactly to what Fit()
         // already truncated/padded cell text to -- without it, any residual mismatch between our
@@ -949,6 +952,11 @@ internal sealed partial class W365CliApp
             .AddColumn(new TableColumn("Status") { Width = widths.Status, NoWrap = true })
             .AddColumn(new TableColumn("Type") { Width = widths.Type, NoWrap = true })
             .AddColumn(new TableColumn("Name") { Width = widths.Name, NoWrap = true });
+
+        if (showDevice)
+        {
+            table.AddColumn(new TableColumn("Device") { Width = widths.Device, NoWrap = true });
+        }
 
         if (showInUse)
         {
@@ -968,6 +976,10 @@ internal sealed partial class W365CliApp
         if (visibleCloudPcs.Count == 0)
         {
             var emptyCells = new List<string> { "-", "-", "-", "[grey]No Cloud PCs match the current filter.[/]" };
+            if (showDevice)
+            {
+                emptyCells.Add("-");
+            }
             if (showInUse)
             {
                 emptyCells.Add("-");
@@ -999,6 +1011,11 @@ internal sealed partial class W365CliApp
                 selected ? Selected(Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type)),
                 selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name))
             };
+
+            if (showDevice)
+            {
+                row.Add(selected ? Selected(Markup.Escape(Fit(pc.ManagedDeviceName ?? "-", widths.Device))) : Markup.Escape(Fit(pc.ManagedDeviceName ?? "-", widths.Device)));
+            }
 
             if (showInUse)
             {
@@ -1135,6 +1152,7 @@ internal sealed partial class W365CliApp
 
         var content = new Rows(
             new Markup(PropertyBlock("Name", cloudPc.Name, "grey")),
+            new Markup(PropertyBlock("Device", cloudPc.ManagedDeviceName ?? "-", "grey")),
             new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
             new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-", "grey")),
             new Markup(PropertyBlock("User", cloudPc.EffectiveUserPrincipalName ?? "-", "grey")),
@@ -1158,6 +1176,7 @@ internal sealed partial class W365CliApp
         return cloudPcs
             .Where(pc =>
                 Contains(pc.Name, filter) ||
+                Contains(pc.ManagedDeviceName, filter) ||
                 Contains(pc.Status, filter) ||
                 Contains(pc.ProvisioningType, filter) ||
                 Contains(pc.EffectiveUserPrincipalName, filter) ||
@@ -1275,10 +1294,10 @@ internal sealed partial class W365CliApp
     /// Width+NoWrap on every column so any residual mismatch truncates with "..." (already handled
     /// by Fit()) instead of wrapping.
     /// </summary>
-    internal static (int Name, int Status, int Type, int User, int ServicePlan, int InUse) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan, bool sideBySide = true) =>
-        GetCloudPcWidths(showInUse, showUser, showServicePlan, sideBySide, Console.WindowWidth);
+    internal static (int Name, int Status, int Type, int User, int ServicePlan, int InUse, int Device) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan, bool sideBySide = true, bool showDevice = false) =>
+        GetCloudPcWidths(showInUse, showUser, showServicePlan, sideBySide, Console.WindowWidth, showDevice);
 
-    internal static (int Name, int Status, int Type, int User, int ServicePlan, int InUse) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan, bool sideBySide, int windowWidth)
+    internal static (int Name, int Status, int Type, int User, int ServicePlan, int InUse, int Device) GetCloudPcWidths(bool showInUse, bool showUser, bool showServicePlan, bool sideBySide, int windowWidth, bool showDevice = false)
     {
         const int statusMax = 24; // Fits the longest real cloudPcStatus value ("provisionedWithWarnings").
         const int statusMin = 12;
@@ -1289,24 +1308,25 @@ internal sealed partial class W365CliApp
         const int nameMin = 16;
         const int userMin = 16;
         const int servicePlanMin = 16;
+        const int deviceMin = 14; // Fits "DESKTOP-XXXXXXX" (the default Windows-generated device name length) without truncation.
         const int sidePanelReserve = 40; // "Selected Cloud PC" panel width + Grid column gap -- only spent when rendered side-by-side with it.
 
-        var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0); // selector, status, type, name [+ in use] [+ user] [+ service plan]
+        var columnCount = 4 + (showInUse ? 1 : 0) + (showUser ? 1 : 0) + (showServicePlan ? 1 : 0) + (showDevice ? 1 : 0); // selector, status, type, name [+ in use] [+ user] [+ service plan] [+ device]
         var overhead = (3 * columnCount) + 1; // Rounded border: (n+1) border chars + 2 padding chars per column
         var sidePanelCost = sideBySide ? sidePanelReserve : 0;
 
         // Start every sized column at its preferred (max) width, then shrink Type, In use, and
-        // Status -- in that priority order -- before ever shrinking Name/User/Service plan below
-        // their minimums. Without this, a narrow terminal (or the side panel eating width) left
-        // Status/Type fixed at their preferred size while Name/User were floored at a minimum that
-        // still didn't fit -- Spectre then silently rendered every column narrower than requested
-        // to make the table fit the real terminal width, which broke NoWrap's truncate-with-"..."
-        // behavior and wrapped cell text character-by-character instead (e.g. "sharedByUser"
-        // rendering as "sh/ar/ed/B.." down a squashed Type column).
+        // Status -- in that priority order -- before ever shrinking Name/User/Service plan/Device
+        // below their minimums. Without this, a narrow terminal (or the side panel eating width)
+        // left Status/Type fixed at their preferred size while Name/User were floored at a minimum
+        // that still didn't fit -- Spectre then silently rendered every column narrower than
+        // requested to make the table fit the real terminal width, which broke NoWrap's
+        // truncate-with-"..." behavior and wrapped cell text character-by-character instead (e.g.
+        // "sharedByUser" rendering as "sh/ar/ed/B.." down a squashed Type column).
         var status = statusMax;
         var type = typeMax;
         var inUse = showInUse ? inUseMax : 0;
-        var minNameBudget = nameMin + (showUser ? userMin : 0) + (showServicePlan ? servicePlanMin : 0);
+        var minNameBudget = nameMin + (showUser ? userMin : 0) + (showServicePlan ? servicePlanMin : 0) + (showDevice ? deviceMin : 0);
 
         int RemainingBudget() => windowWidth - overhead - sidePanelCost - 1 /* selector */ - status - type - inUse;
 
@@ -1326,11 +1346,33 @@ internal sealed partial class W365CliApp
             }
         }
 
+        // Name gets a straight percentage of `available`, but is capped so it can never eat into
+        // the guaranteed minimum reserved for User/Device/Service plan -- without this cap, Name's
+        // 32% (rounded up past its own minimum whenever `available` is only just at the combined
+        // floor) silently stole width the other columns' minimums needed, so the four dynamic
+        // columns' requested widths together exceeded the real terminal width and Spectre
+        // force-shrank columns below NoWrap's floor, wrapping cell text character-by-character
+        // instead of truncating with "...".
         var available = Math.Max(minNameBudget, RemainingBudget());
-        var name = !showUser && !showServicePlan ? available : Math.Max(nameMin, (int)(available * 0.32));
-        var user = showUser ? Math.Max(userMin, (int)(available * 0.34)) : 0;
-        var servicePlan = showServicePlan ? Math.Max(servicePlanMin, available - name - user) : 0;
-        return (name, status, type, user, servicePlan, inUse);
+        var extraMinSum = (showUser ? userMin : 0) + (showDevice ? deviceMin : 0) + (showServicePlan ? servicePlanMin : 0);
+        var noExtras = !showUser && !showServicePlan && !showDevice;
+        var name = noExtras
+            ? available
+            : Math.Min(Math.Max(nameMin, (int)(available * 0.32)), Math.Max(nameMin, available - extraMinSum));
+
+        // Whatever's left after Name is split among the active extra columns: each gets at least
+        // its minimum, plus an even share of any surplus beyond the combined minimum. Service plan
+        // (computed last) always absorbs the exact remainder, so the four dynamic columns' widths
+        // can never sum to more than `available` regardless of which combination is active.
+        var extrasBudget = Math.Max(extraMinSum, available - name);
+        var extraCount = (showUser ? 1 : 0) + (showDevice ? 1 : 0) + (showServicePlan ? 1 : 0);
+        var surplus = Math.Max(0, extrasBudget - extraMinSum);
+        var perColumnSurplus = extraCount > 0 ? surplus / extraCount : 0;
+
+        var user = showUser ? userMin + perColumnSurplus : 0;
+        var device = showDevice ? deviceMin + perColumnSurplus : 0;
+        var servicePlan = showServicePlan ? Math.Max(servicePlanMin, extrasBudget - user - device) : 0;
+        return (name, status, type, user, servicePlan, inUse, device);
     }
 
     private async Task ShowCloudPcDetailsAsync(CloudPcSummary cloudPc, string initialSubPanel = "Actions")
@@ -1569,6 +1611,7 @@ internal sealed partial class W365CliApp
         var details = new Panel(
             new Rows(
                 new Markup(PropertyInline("Name", cloudPc.Name, "grey")),
+                new Markup(PropertyInline("Device", cloudPc.ManagedDeviceName ?? "-", "grey")),
                 new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
                 new Markup(PropertyInline("Power state", cloudPc.PowerState ?? "-", "grey")),
                 new Markup(PropertyInline("In use", GetInUseStatusMarkup(latestSession, signInStatus), valueIsMarkup: true)),
