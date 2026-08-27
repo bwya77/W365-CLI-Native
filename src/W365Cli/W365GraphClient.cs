@@ -25,7 +25,7 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsAsync()
     {
         var items = await GetPagedAsync<CloudPcSummary>(
-            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,sharedDeviceDetail,connectivityResult",
+            "deviceManagement/virtualEndpoint/cloudPCs?$select=id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,provisionedDateTime,sharedDeviceDetail,connectivityResult",
             includeUnknownEnumMembers: true);
 
         return items
@@ -36,7 +36,7 @@ internal sealed class W365GraphClient
     public async Task<IReadOnlyList<CloudPcSummary>> GetCloudPcsByProvisioningPolicyAsync(string provisioningPolicyId)
     {
         var filter = Uri.EscapeDataString($"provisioningPolicyId eq '{provisioningPolicyId}' and servicePlanType eq 'enterprise'");
-        var select = Uri.EscapeDataString("id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,sharedDeviceDetail,connectivityResult");
+        var select = Uri.EscapeDataString("id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,provisionedDateTime,sharedDeviceDetail,connectivityResult");
         var items = await GetPagedAsync<CloudPcSummary>(
             $"deviceManagement/virtualEndpoint/cloudPCs?$filter={filter}&$select={select}&$orderBy=lastModifiedDateTime desc&$count=true",
             includeConsistencyLevel: true,

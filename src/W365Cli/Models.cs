@@ -181,6 +181,9 @@ internal sealed record CloudPcSummary
     [JsonPropertyName("provisioningPolicyName")]
     public string? ProvisioningPolicyName { get; init; }
 
+    [JsonPropertyName("provisionedDateTime")]
+    public DateTimeOffset? ProvisionedDateTime { get; init; }
+
     [JsonPropertyName("sharedDeviceDetail")]
     public CloudPcSharedDeviceDetail? SharedDeviceDetail { get; init; }
 

@@ -1618,6 +1618,7 @@ internal sealed partial class W365CliApp
                 new Markup(PropertyInline("Sign-in status", GetSignInStatusValue(signInStatus, "SignInStatus"), "grey")),
                 new Markup(PropertyInline("Last sign-in", GetSignInStatusValue(signInStatus, "LastActiveTime"), "grey")),
                 new Markup(PropertyInline("Days since sign-in", GetSignInStatusValue(signInStatus, "DaysSinceLastSignIn"), "grey")),
+                new Markup(PropertyInline("Provisioned", cloudPc.ProvisionedDateTime?.ToLocalTime().ToString("g") ?? "-", "grey")),
                 new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-", "grey")),
                 new Markup(PropertyInline("User", cloudPc.EffectiveUserPrincipalName ?? "-", "grey")),
                 new Markup(PropertyInline("Service plan", cloudPc.ServicePlanName ?? "-", "grey")),
