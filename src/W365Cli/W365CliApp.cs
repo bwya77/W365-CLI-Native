@@ -1176,7 +1176,8 @@ internal sealed partial class W365CliApp
         Func<GraphTableRow, Task>? enterAction = null,
         Action<IReadOnlyList<GraphTableRow>>? summaryRenderer = null,
         Func<int, int, Task<IReadOnlyList<GraphTableRow>>>? loadMoreAsync = null,
-        int pageBatchSize = 0)
+        int pageBatchSize = 0,
+        IReadOnlyList<(string Header, string Field)>? csvColumns = null)
     {
         List<GraphTableRow> rows;
         try
@@ -1325,6 +1326,9 @@ internal sealed partial class W365CliApp
                         }
                     }
                     break;
+                case ConsoleKey.X:
+                    await ExportGraphRowsToCsvAsync(title, rows, csvColumns);
+                    break;
                 case ConsoleKey.Enter:
                 case ConsoleKey.RightArrow:
                     if (visibleRows.Count == 0)
@@ -1397,7 +1401,7 @@ internal sealed partial class W365CliApp
         {
             AnsiConsole.MarkupLine("[grey]No rows match the current filter.[/]");
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | S sort | R refresh | Esc/B/Q back[/]");
+            AnsiConsole.MarkupLine("[grey]/ or F filter | C clear | S sort | R refresh | X export CSV | Esc/B/Q back[/]");
             RenderStatusBar();
             return;
         }
@@ -1416,8 +1420,8 @@ internal sealed partial class W365CliApp
 
         AnsiConsole.WriteLine();
         var hint = hasMore
-            ? "Up/Down move (loads more at end) | PgUp/PgDn page | Enter/-> details | / or F filter | C clear | S sort | R refresh | Esc/B/Q back"
-            : "Up/Down move | PgUp/PgDn page | Enter/-> details | / or F filter | C clear | S sort | R refresh | Esc/B/Q back";
+            ? "Up/Down move (loads more at end) | PgUp/PgDn page | Enter/-> details | / or F filter | C clear | S sort | R refresh | X export CSV | Esc/B/Q back"
+            : "Up/Down move | PgUp/PgDn page | Enter/-> details | / or F filter | C clear | S sort | R refresh | X export CSV | Esc/B/Q back";
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(hint)}[/]");
         RenderStatusBar();
     }

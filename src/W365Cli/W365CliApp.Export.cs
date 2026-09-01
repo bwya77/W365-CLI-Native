@@ -90,6 +90,86 @@ internal sealed partial class W365CliApp
         ShowActionResult("Exported", "Export Markdown Snapshot", path, "[green]Exported.[/]");
     }
 
+    /// <summary>
+    /// Exports every currently loaded row of a Graph rows screen (Sign-in status, Launch details,
+    /// etc.) to a CSV file -- not just the visible/filtered page. When <paramref name="csvColumns"/>
+    /// is supplied, uses that explicit, ordered header/field list (so a report can pick a
+    /// user-friendly subset and order, e.g. the Last Sign-In Report); otherwise falls back to the
+    /// union of every row's Fields keys, sorted, so any Graph rows screen can be exported even
+    /// without a bespoke column list.
+    /// </summary>
+    private async Task ExportGraphRowsToCsvAsync(
+        string title,
+        IReadOnlyList<GraphTableRow> rows,
+        IReadOnlyList<(string Header, string Field)>? csvColumns)
+    {
+        if (rows.Count == 0)
+        {
+            TimedMessage("[yellow]No rows to export.[/]");
+            return;
+        }
+
+        AnsiConsole.Clear();
+        RenderBreadcrumb("Export CSV");
+        var safeTitle = string.Concat(title.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-'));
+        var defaultPath = Path.Combine(Environment.CurrentDirectory, $"W365-{safeTitle}-{DateTime.Now:yyyy-MM-dd-HHmm}.csv");
+        var path = PromptTextCancelable($"Export path [[{Markup.Escape(defaultPath)}]]:", allowEmpty: true);
+        if (path is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = defaultPath;
+        }
+
+        var columns = csvColumns ?? rows
+            .SelectMany(row => row.Fields.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .Select(key => (Header: key, Field: key))
+            .ToArray();
+
+        var csv = BuildCsv(columns, rows);
+
+        try
+        {
+            await File.WriteAllTextAsync(path, csv);
+        }
+        catch (Exception ex)
+        {
+            TimedMessage($"[red]Failed to write export file: {Markup.Escape(ex.Message)}[/]");
+            return;
+        }
+
+        ShowActionResult("Exported", "Export CSV", path, $"[green]Exported {rows.Count} row(s).[/]");
+    }
+
+    internal static string BuildCsv(IReadOnlyList<(string Header, string Field)> columns, IReadOnlyList<GraphTableRow> rows)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(string.Join(",", columns.Select(column => CsvEscape(column.Header))));
+        foreach (var row in rows)
+        {
+            sb.AppendLine(string.Join(",", columns.Select(column =>
+                CsvEscape(row.Fields.TryGetValue(column.Field, out var value) ? value : null))));
+        }
+
+        return sb.ToString();
+    }
+
+    internal static string CsvEscape(string? value)
+    {
+        value ??= string.Empty;
+        return value.Contains(',', StringComparison.Ordinal) ||
+               value.Contains('"', StringComparison.Ordinal) ||
+               value.Contains('\n', StringComparison.Ordinal) ||
+               value.Contains('\r', StringComparison.Ordinal)
+            ? $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\""
+            : value;
+    }
+
     private string BuildMarkdownSnapshot(
         IReadOnlyList<CloudPcSummary> cloudPcs,
         IReadOnlyList<ProvisioningPolicySummary> policies,

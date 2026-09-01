@@ -168,6 +168,7 @@ internal sealed partial class W365CliApp
                     "Flex License Real-Time Usage Report",
                     "Flex User Connections Report",
                     "Inaccessible Cloud PC Report",
+                    "Last Sign-In Report",
                     "Launch details",
                     "Performance Trend Report",
                     "Regional Connection Quality Report",
@@ -238,6 +239,9 @@ internal sealed partial class W365CliApp
                     break;
                 case "Inaccessible Cloud PC Report":
                     await ShowInaccessibleCloudPcReportAsync();
+                    break;
+                case "Last Sign-In Report":
+                    await ShowLastSignInReportAsync();
                     break;
                 case "Performance Trend Report":
                     await ShowPerformanceTrendReportAsync();
@@ -817,6 +821,35 @@ internal sealed partial class W365CliApp
         await ShowAdaptiveCloudPcReportAsync("Inaccessible Cloud PC Report", "inaccessibleCloudPcReports", top.Value);
     }
 
+    /// <summary>
+    /// Dedicated export/console view of the one thing "Sign-in status" doesn't surface on its own
+    /// row: which user last signed in to each Cloud PC, alongside when and how many days ago.
+    /// Reuses GetSignInStatusRowsAsync (same real-time getRealTimeRemoteConnectionStatus data as the
+    /// Sign-in status and Cloud PC details screens) across every Cloud PC in the tenant, so figures
+    /// here always match those. Press X on this screen to export all rows to CSV.
+    /// </summary>
+    private async Task ShowLastSignInReportAsync()
+    {
+        await ShowGraphRowsAsync(
+            "Windows 365 last sign-in report",
+            async () => await _session.Graph.GetSignInStatusRowsAsync(),
+            GetLastSignInReportHeader,
+            FormatLastSignInReportRow,
+            OpenCloudPcFromReportRowAsync,
+            csvColumns: LastSignInReportCsvColumns);
+    }
+
+    private static readonly (string Header, string Field)[] LastSignInReportCsvColumns =
+    [
+        ("Cloud PC", "Cloud PC"),
+        ("User", "User"),
+        ("Last sign-in", "LastActiveTime"),
+        ("Days since sign-in", "DaysSinceLastSignIn"),
+        ("Sign-in status", "SignInStatus"),
+        ("Service plan", "Service plan"),
+        ("Provisioning type", "Provisioning type")
+    ];
+
     private async Task ShowFlexLicenseHourlyUsageReportAsync()
     {
         var top = PromptTopRows();
@@ -1161,6 +1194,34 @@ internal sealed partial class W365CliApp
         var user = Math.Max(22, (int)((remaining - servicePlan) * 0.48));
         var cloudPc = Math.Max(24, remaining - servicePlan - user);
         return (cloudPc, status, power, user, servicePlan);
+    }
+
+    private static string GetLastSignInReportHeader()
+    {
+        var widths = GetLastSignInReportWidths();
+        return Row("Cloud PC", widths.CloudPc, "User", widths.User, "Last sign-in", widths.LastSignIn, "Days", widths.Days);
+    }
+
+    private static string FormatLastSignInReportRow(GraphTableRow row)
+    {
+        var widths = GetLastSignInReportWidths();
+        return Row(
+            GetField(row, "Cloud PC"), widths.CloudPc,
+            GetField(row, "User"), widths.User,
+            GetField(row, "LastActiveTime"), widths.LastSignIn,
+            GetField(row, "DaysSinceLastSignIn"), widths.Days);
+    }
+
+    internal static (int CloudPc, int User, int LastSignIn, int Days) GetLastSignInReportWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int days = 8;
+        const int lastSignIn = 22;
+        const int gaps = 3;
+        var remaining = Math.Max(48, available - days - lastSignIn - gaps);
+        var user = Math.Max(24, (int)(remaining * 0.44));
+        var cloudPc = Math.Max(24, remaining - user);
+        return (cloudPc, user, lastSignIn, days);
     }
 
     private static string GetConnectivityHistoryHeader()
