@@ -258,6 +258,9 @@ internal sealed partial class W365CliApp
             case "By shared pool":
                 await ShowCloudPcsBySharedPoolAsync();
                 return false;
+            case "Reserve Cloud PCs":
+                await ShowReserveCloudPcsAsync();
+                return false;
             case "Disk space":
                 await ShowDiskSpaceAsync();
                 return false;
@@ -427,6 +430,7 @@ internal sealed partial class W365CliApp
             [
                 new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
                 new("CloudPcs", "By shared pool", "Browse Cloud PCs scoped to a Flex shared pool policy"),
+                new("CloudPcs", "Reserve Cloud PCs", "Browse reserve Cloud PCs and days-left overview"),
                 new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
                 new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots")
             ]),
@@ -707,6 +711,7 @@ internal sealed partial class W365CliApp
             ..GetMainMenuChoices().Where(choice => choice.Key != "Exit"),
             new("CloudPcs", "Browse Cloud PCs", "Open Cloud PC browser"),
             new("CloudPcs", "By shared pool", "Browse Cloud PCs scoped to a Flex shared pool policy"),
+            new("CloudPcs", "Reserve Cloud PCs", "Browse reserve Cloud PCs and days-left overview"),
             new("CloudPcs", "Disk space", "Open all Cloud PC disk space"),
             new("CloudPcs", "Snapshots", "Open all Cloud PC snapshots"),
             new("Provisioning", "Policies", "Open provisioning policy browser"),

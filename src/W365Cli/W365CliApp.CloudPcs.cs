@@ -16,7 +16,7 @@ internal sealed partial class W365CliApp
             return;
         }
 
-        var choices = new[] { "Browse Cloud PCs", "By shared pool", "Disk space", "Snapshots", "Back" };
+        var choices = new[] { "Browse Cloud PCs", "By shared pool", "Reserve Cloud PCs", "Disk space", "Snapshots", "Back" };
         var selectedIndex = 0;
         while (true)
         {
@@ -58,6 +58,9 @@ internal sealed partial class W365CliApp
                             break;
                         case "By shared pool":
                             await ShowCloudPcsBySharedPoolAsync();
+                            break;
+                        case "Reserve Cloud PCs":
+                            await ShowReserveCloudPcsAsync();
                             break;
                         case "Disk space":
                             await ShowDiskSpaceAsync();
@@ -949,9 +952,9 @@ internal sealed partial class W365CliApp
             .Title("Cloud PCs")
             .Border(TableBorder.Rounded)
             .AddColumn(new TableColumn(" ") { Width = 1, NoWrap = true })
+            .AddColumn(new TableColumn("Name") { Width = widths.Name, NoWrap = true })
             .AddColumn(new TableColumn("Status") { Width = widths.Status, NoWrap = true })
-            .AddColumn(new TableColumn("Type") { Width = widths.Type, NoWrap = true })
-            .AddColumn(new TableColumn("Name") { Width = widths.Name, NoWrap = true });
+            .AddColumn(new TableColumn("Type") { Width = widths.Type, NoWrap = true });
 
         if (showDevice)
         {
@@ -1007,9 +1010,9 @@ internal sealed partial class W365CliApp
             var row = new List<string>
             {
                 selected ? "[black on #58a6ff]>[/]" : " ",
+                selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name)),
                 selected ? Selected(Markup.Escape(Fit(pc.Status ?? "unknown", widths.Status))) : StatusMarkup(pc.Status, widths.Status),
-                selected ? Selected(Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type)),
-                selected ? Selected(Markup.Escape(Fit(pc.Name, widths.Name))) : Markup.Escape(Fit(pc.Name, widths.Name))
+                selected ? Selected(Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))) : Markup.Escape(Fit(pc.ProvisioningType ?? "-", widths.Type))
             };
 
             if (showDevice)

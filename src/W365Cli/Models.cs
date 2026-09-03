@@ -98,6 +98,64 @@ internal sealed record CloudPcConnectivityResult
     public DateTimeOffset? LastModifiedDateTime { get; init; }
 }
 
+/// <summary>
+/// Only present on reserve (provisioningType "reserve") Cloud PCs -- tracks the fixed allocation
+/// of time (currently a 10-day/864000-second budget per reserve Cloud PC) the user has to consume
+/// their reservation before it's returned to the pool for someone else, plus when the underlying
+/// license itself expires.
+/// </summary>
+internal sealed record CloudPcReserveDeviceDetail
+{
+    [JsonPropertyName("totalAllocatedTimeInSeconds")]
+    public long? TotalAllocatedTimeInSeconds { get; init; }
+
+    [JsonPropertyName("remainingAllocatedTimeInSeconds")]
+    public long? RemainingAllocatedTimeInSeconds { get; init; }
+
+    [JsonPropertyName("licenseExpirationDateTime")]
+    public DateTimeOffset? LicenseExpirationDateTime { get; init; }
+
+    [JsonPropertyName("availableForProvisioningDateTime")]
+    public DateTimeOffset? AvailableForProvisioningDateTime { get; init; }
+
+    [JsonIgnore]
+    public double? RemainingDays => RemainingAllocatedTimeInSeconds.HasValue
+        ? RemainingAllocatedTimeInSeconds.Value / 86400.0
+        : null;
+
+    [JsonIgnore]
+    public double? TotalDays => TotalAllocatedTimeInSeconds.HasValue
+        ? TotalAllocatedTimeInSeconds.Value / 86400.0
+        : null;
+}
+
+/// <summary>
+/// Only present on reserve Cloud PCs -- the user this reserve device instance is currently
+/// assigned to (distinct from userPrincipalName/userDetail on other provisioning types, which
+/// isn't populated for reserve until it's actively provisioned for someone).
+/// </summary>
+internal sealed record CloudPcUserDetail
+{
+    [JsonPropertyName("userId")]
+    public string? UserId { get; init; }
+
+    [JsonPropertyName("userDisplayName")]
+    public string? UserDisplayName { get; init; }
+}
+
+/// <summary>
+/// Only present on reserve Cloud PCs -- the Entra group (reserve pool) this reserve device
+/// instance was allocated from.
+/// </summary>
+internal sealed record CloudPcGroupDetail
+{
+    [JsonPropertyName("groupId")]
+    public string? GroupId { get; init; }
+
+    [JsonPropertyName("groupDisplayName")]
+    public string? GroupDisplayName { get; init; }
+}
+
 internal sealed record CloudPcPolicyApplyActionResult
 {
     [JsonPropertyName("status")]
@@ -190,6 +248,18 @@ internal sealed record CloudPcSummary
     [JsonPropertyName("connectivityResult")]
     public CloudPcConnectivityResult? ConnectivityResult { get; init; }
 
+    [JsonPropertyName("reserveDeviceDetail")]
+    public CloudPcReserveDeviceDetail? ReserveDeviceDetail { get; init; }
+
+    [JsonPropertyName("userDetail")]
+    public CloudPcUserDetail? UserDetail { get; init; }
+
+    [JsonPropertyName("groupDetail")]
+    public CloudPcGroupDetail? GroupDetail { get; init; }
+
+    [JsonPropertyName("lastRemoteActionResult")]
+    public CloudPcRemoteActionResultRaw? LastRemoteActionResult { get; init; }
+
     /// <summary>
     /// Not part of the bulk cloudPCs list response at all -- connectivityResult (above) is
     /// confirmed unreliable there (comes back null for every Cloud PC on a live tenant test,
@@ -215,6 +285,16 @@ internal sealed record CloudPcSummary
     public string? EffectiveUserPrincipalName => !string.IsNullOrWhiteSpace(UserPrincipalName)
         ? UserPrincipalName
         : SharedDeviceDetail?.AssignedToUserPrincipalName;
+
+    /// <summary>
+    /// Reserve Cloud PCs surface their assigned user only via UserDetail.UserDisplayName (a display
+    /// name, not a UPN) until the reserve is actively provisioned -- falls back to
+    /// EffectiveUserPrincipalName for every other provisioning type.
+    /// </summary>
+    [JsonIgnore]
+    public string EffectiveUserDisplayName => !string.IsNullOrWhiteSpace(UserDetail?.UserDisplayName)
+        ? UserDetail!.UserDisplayName!
+        : EffectiveUserPrincipalName ?? "-";
 
     [JsonIgnore]
     public string Name => !string.IsNullOrWhiteSpace(DisplayName)

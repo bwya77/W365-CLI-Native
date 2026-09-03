@@ -47,6 +47,26 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    /// <summary>
+    /// Tenant-wide (not scoped to a single provisioning policy, unlike GetCloudPcsByProvisioningPolicyAsync)
+    /// -- reserve is a distinct cloudPcProvisioningType, and reserve Cloud PCs carry
+    /// reserveDeviceDetail/userDetail/groupDetail fields that the other provisioning types don't
+    /// populate, so this pulls those extra fields instead of the generic set GetCloudPcsAsync uses.
+    /// </summary>
+    public async Task<IReadOnlyList<CloudPcSummary>> GetReserveCloudPcsAsync()
+    {
+        var filter = Uri.EscapeDataString("provisioningType eq 'reserve' and servicePlanType eq 'enterprise'");
+        var select = Uri.EscapeDataString("id,displayName,managedDeviceName,status,powerState,provisioningType,userPrincipalName,servicePlanName,managedDeviceId,provisioningPolicyId,provisioningPolicyName,provisionedDateTime,reserveDeviceDetail,userDetail,groupDetail,lastRemoteActionResult");
+        var items = await GetPagedAsync<CloudPcSummary>(
+            $"deviceManagement/virtualEndpoint/cloudPCs?$filter={filter}&$select={select}&$orderBy=lastModifiedDateTime desc&$count=true",
+            includeConsistencyLevel: true,
+            includeUnknownEnumMembers: true);
+
+        return items
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     public async Task<IReadOnlyList<CloudAppSummary>> GetCloudAppsAsync()
     {
         var items = await GetPagedAsync<CloudAppSummary>(
