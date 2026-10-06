@@ -169,6 +169,59 @@ public class CloudPcTests
         Assert.Null(W365CliApp.GetNormalizedInUseStatus(pc));
     }
 
+    // --- Flex Shared (Frontline, sharedByEntraGroup): confirmed on a live tenant that
+    // RealTimeSignInStatus does NOT reflect the Frontline shared session at all (can read
+    // "NotSignedIn" while a user is actively using the Cloud PC right now), so this provisioning
+    // type must be driven entirely off SharedDeviceDetail.SessionStartDateTime instead, regardless
+    // of whatever RealTimeSignInStatus says.
+
+    [Fact]
+    public void IsFlexSharedPc_SharedByEntraGroupProvisioningType_ReturnsTrue()
+    {
+        var pc = MakePc("Alpha", provisioningType: "sharedByEntraGroup");
+        Assert.True(W365CliApp.IsFlexSharedPc(pc));
+    }
+
+    [Fact]
+    public void IsFlexSharedPc_FrontlineServicePlan_ReturnsTrue()
+    {
+        var pc = MakePc("Alpha", provisioningType: "dedicated", servicePlan: "Cloud PC Frontline 4vCPU/16GB/128GB");
+        Assert.True(W365CliApp.IsFlexSharedPc(pc));
+    }
+
+    [Fact]
+    public void IsFlexSharedPc_EnterpriseDedicated_ReturnsFalse()
+    {
+        var pc = MakePc("Alpha", provisioningType: "dedicated", servicePlan: "Cloud PC Enterprise 2vCPU/8GB/128GB");
+        Assert.False(W365CliApp.IsFlexSharedPc(pc));
+    }
+
+    [Fact]
+    public void GetNormalizedInUseStatus_FlexSharedWithActiveSession_ReturnsInUse_EvenWhenSignInStatusSaysNotSignedIn()
+    {
+        var pc = MakePc(
+            "Alpha",
+            provisioningType: "sharedByEntraGroup",
+            realTimeSignInStatus: "NotSignedIn",
+            sharedDeviceDetail: new CloudPcSharedDeviceDetail { SessionStartDateTime = DateTimeOffset.UtcNow });
+
+        Assert.Equal("inUse", W365CliApp.GetNormalizedInUseStatus(pc));
+    }
+
+    [Fact]
+    public void GetNormalizedInUseStatus_FlexSharedWithNoSession_ReturnsAvailable()
+    {
+        var pc = MakePc("Alpha", provisioningType: "sharedByEntraGroup", realTimeSignInStatus: "SignedIn");
+        Assert.Equal("available", W365CliApp.GetNormalizedInUseStatus(pc));
+    }
+
+    [Fact]
+    public void GetNormalizedInUseStatus_FlexSharedNotProvisioned_ReturnsUnavailable()
+    {
+        var pc = MakePc("Alpha", provisioningType: "sharedByEntraGroup", status: "notProvisioned");
+        Assert.Equal("unavailable", W365CliApp.GetNormalizedInUseStatus(pc));
+    }
+
     [Fact]
     public void FormatInUsePlain_InUseWithSessionStart_ShowsSinceTime()
     {

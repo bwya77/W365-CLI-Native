@@ -1042,24 +1042,48 @@ internal sealed partial class W365CliApp
     }
 
     /// <summary>
-    /// Normalizes "in use" into "inUse"/"available"/"unavailable"/null across both data sources this
-    /// app has for it. Prefers RealTimeSignInStatus (getRealTimeRemoteConnectionStatus, bulk-fetched
-    /// once per Cloud PC when Browse Cloud PCs loads/refreshes) over ConnectivityResult (the bulk
-    /// cloudPCs list's own field, confirmed unreliable/always-null on a live tenant test).
-    /// "Unavailable" is ambiguous and must NOT be assumed to mean Available: Graph can report it
-    /// genuinely, but GetSignInStatusRowAsync also stamps the exact same value on its own when the
-    /// bulk real-time call errors or still comes back empty after retrying -- confirmed on a live
-    /// tenant to happen specifically for Flex Cloud PCs under this screen's concurrent bulk fetch,
-    /// even while the device is genuinely signed in and in use (a single sequential call, like the
-    /// one the Cloud PC details screen makes, succeeds and correctly reports signedIn for the same
-    /// device at the same moment). A prior version of this guessed "Available" for any provisioned
-    /// Cloud PC, which was actively wrong in that case; only notProvisioned (no VM exists yet) gets
-    /// a confident "unavailable" here now. Everything else ambiguous falls through to
-    /// ConnectivityResult (and from there to "-"/unknown) rather than asserting a sign-in state we
-    /// don't actually have.
+    /// A Windows 365 Flex Shared (Frontline, provisioningType "sharedByEntraGroup") Cloud PC, or one
+    /// whose service plan name says "Frontline" even if provisioningType is missing/stale on a given
+    /// row -- matches how the user identifies them in the portal/CLI (Provisioning &gt; Policies
+    /// &gt; a shared policy &gt; Cloud PCs, or any Cloud PC whose service plan contains "Frontline").
+    /// These need their own "in use" source: see GetNormalizedInUseStatus.
+    /// </summary>
+    internal static bool IsFlexSharedPc(CloudPcSummary pc) =>
+        string.Equals(pc.ProvisioningType, "sharedByEntraGroup", StringComparison.OrdinalIgnoreCase) ||
+        (pc.ServicePlanName?.Contains("Frontline", StringComparison.OrdinalIgnoreCase) ?? false);
+
+    /// <summary>
+    /// Normalizes "in use" into "inUse"/"available"/"unavailable"/null. Flex Shared (Frontline,
+    /// sharedByEntraGroup) Cloud PCs are handled entirely separately from everything else here --
+    /// confirmed on a live tenant that their RealTimeSignInStatus (getRealTimeRemoteConnectionStatus)
+    /// does NOT reflect the Frontline multi-user shared session at all: a Cloud PC can read
+    /// "NotSignedIn" there while a user is actively using it through the Frontline broker right now.
+    /// The real ground truth for this provisioning type is Graph's own
+    /// cloudPcFrontlineSharedDeviceDetail.sessionStartDateTime (documented: non-null exactly when a
+    /// current user session exists), already bulk-fetched as part of every Cloud PC's
+    /// sharedDeviceDetail -- no extra network call needed, and no concurrency-related flakiness like
+    /// the real-time sign-in endpoint has. Everything else (Enterprise, Flex Dedicated) keeps using
+    /// RealTimeSignInStatus (bulk-fetched once per Cloud PC when Browse Cloud PCs loads/refreshes)
+    /// over ConnectivityResult (the bulk cloudPCs list's own field, confirmed unreliable/always-null
+    /// on a live tenant test). "Unavailable" there is ambiguous and must NOT be assumed to mean
+    /// Available: Graph can report it genuinely, but GetSignInStatusRowAsync also stamps the exact
+    /// same value on its own when the bulk real-time call errors or still comes back empty after
+    /// retrying. Only notProvisioned (no VM exists yet) gets a confident "unavailable" there; anything
+    /// else ambiguous falls through to ConnectivityResult (and from there to "-"/unknown) rather than
+    /// asserting a sign-in state we don't actually have.
     /// </summary>
     internal static string? GetNormalizedInUseStatus(CloudPcSummary pc)
     {
+        if (IsFlexSharedPc(pc))
+        {
+            if (string.Equals(pc.Status, "notProvisioned", StringComparison.OrdinalIgnoreCase))
+            {
+                return "unavailable";
+            }
+
+            return pc.SharedDeviceDetail?.SessionStartDateTime is not null ? "inUse" : "available";
+        }
+
         var signIn = pc.RealTimeSignInStatus;
         if (!string.IsNullOrWhiteSpace(signIn))
         {
@@ -1620,7 +1644,7 @@ internal sealed partial class W365CliApp
                 new Markup(PropertyInline("Device", cloudPc.ManagedDeviceName ?? "-", "grey")),
                 new Markup(PropertyInline("Status", StatusMarkup(cloudPc.Status), valueIsMarkup: true)),
                 new Markup(PropertyInline("Power state", cloudPc.PowerState ?? "-", "grey")),
-                new Markup(PropertyInline("In use", GetInUseStatusMarkup(latestSession, signInStatus), valueIsMarkup: true)),
+                new Markup(PropertyInline("In use", FormatInUseMarkup(cloudPc), valueIsMarkup: true)),
                 new Markup(PropertyInline("Sign-in status", GetSignInStatusValue(signInStatus, "SignInStatus"), "grey")),
                 new Markup(PropertyInline("Last sign-in", GetSignInStatusValue(signInStatus, "LastActiveTime"), "grey")),
                 new Markup(PropertyInline("Days since sign-in", GetSignInStatusValue(signInStatus, "DaysSinceLastSignIn"), "grey")),
@@ -1721,44 +1745,14 @@ internal sealed partial class W365CliApp
     }
 
     /// <summary>
-    /// Prefers the real-time sign-in status (getRealTimeRemoteConnectionStatus) over the Connection
-    /// History report, matching GetNormalizedInUseStatus (used by the Browse Cloud PCs list) so the
-    /// two views never disagree. The Connection History report is hardcoded to a "Last 7 days"
-    /// window and only reflects sessions that have already been recorded there -- for a shared
-    /// (Frontline) Cloud PC this can show the previous session as ended (SessionEndTime populated)
-    /// even though a brand-new session is actively signed in right now and simply hasn't appeared in
-    /// that report yet, which showed up as the detail view reporting "Available" while the list
-    /// (and the real-time sign-in status) correctly reported "In use". Falls back to the Connection
-    /// History report only when the real-time sign-in status is missing or itself unavailable/
-    /// inconclusive, and to "Unknown" only when neither source has anything usable.
+    /// Deliberately removed: this screen's "In use" line now calls the same
+    /// GetNormalizedInUseStatus/FormatInUseMarkup used by the Browse Cloud PCs list (see those for
+    /// the authoritative logic, including the Flex Shared/Frontline special case), so the two
+    /// screens can never disagree again. The prior separate implementation here had its own
+    /// "signedin"-before-"notsignedin" substring-order bug (every status containing "SignedIn" as a
+    /// substring -- including the literal value "NotSignedIn" -- matched the "signedin" branch
+    /// first) and, independently, trusted a stale Connection History row over live sign-in data.
     /// </summary>
-    private static string GetInUseStatusMarkup(GraphTableRow? latestSession, GraphTableRow? signInStatus)
-    {
-        var signIn = signInStatus is null ? null : GetOptionalField(signInStatus, "SignInStatus");
-        if (!string.IsNullOrWhiteSpace(signIn))
-        {
-            if (signIn.Contains("signedin", StringComparison.OrdinalIgnoreCase))
-            {
-                return "[yellow]In use[/]";
-            }
-
-            if (signIn.Contains("notsignedin", StringComparison.OrdinalIgnoreCase))
-            {
-                return "[green]Available[/]";
-            }
-        }
-
-        if (latestSession is not null)
-        {
-            var sessionEnd = GetField(latestSession, "SessionEndTime");
-            return sessionEnd == "-"
-                ? "[yellow]In use[/]"
-                : "[green]Available[/]";
-        }
-
-        return "[grey]Unknown[/]";
-    }
-
     private static Panel CreateSnapshotsSubPanel(IReadOnlyList<CloudPcSnapshot>? snapshots, int selectedSnapshotIndex)
     {
         if (snapshots is null)
