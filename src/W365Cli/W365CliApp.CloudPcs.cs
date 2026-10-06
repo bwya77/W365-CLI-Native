@@ -1718,34 +1718,39 @@ internal sealed partial class W365CliApp
     }
 
     /// <summary>
-    /// "In use" is normally derived from the Connection History report, but that report is
-    /// hardcoded to a "Last 7 days" window (troubleshootConnectionConfigurationOfViewDataTableV1Report
-    /// filter) -- if the Cloud PC's last logged session started more than 7 days ago, the query
-    /// returns zero rows even if the user is actively signed in right now, which showed as a
-    /// misleading "Unknown" (confirmed directly: user was signed in per the real-time sign-in
-    /// status report at the same moment this showed Unknown). Falls back to the real-time sign-in
-    /// status (getRealTimeRemoteConnectionStatus, already loaded alongside this for the "Sign-in
-    /// status" field) when the 7-day history has nothing, since a signed-in session IS in use
-    /// regardless of when it started.
+    /// Prefers the real-time sign-in status (getRealTimeRemoteConnectionStatus) over the Connection
+    /// History report, matching GetNormalizedInUseStatus (used by the Browse Cloud PCs list) so the
+    /// two views never disagree. The Connection History report is hardcoded to a "Last 7 days"
+    /// window and only reflects sessions that have already been recorded there -- for a shared
+    /// (Frontline) Cloud PC this can show the previous session as ended (SessionEndTime populated)
+    /// even though a brand-new session is actively signed in right now and simply hasn't appeared in
+    /// that report yet, which showed up as the detail view reporting "Available" while the list
+    /// (and the real-time sign-in status) correctly reported "In use". Falls back to the Connection
+    /// History report only when the real-time sign-in status is missing or itself unavailable/
+    /// inconclusive, and to "Unknown" only when neither source has anything usable.
     /// </summary>
     private static string GetInUseStatusMarkup(GraphTableRow? latestSession, GraphTableRow? signInStatus)
     {
+        var signIn = signInStatus is null ? null : GetOptionalField(signInStatus, "SignInStatus");
+        if (!string.IsNullOrWhiteSpace(signIn))
+        {
+            if (signIn.Contains("signedin", StringComparison.OrdinalIgnoreCase))
+            {
+                return "[yellow]In use[/]";
+            }
+
+            if (signIn.Contains("notsignedin", StringComparison.OrdinalIgnoreCase))
+            {
+                return "[green]Available[/]";
+            }
+        }
+
         if (latestSession is not null)
         {
             var sessionEnd = GetField(latestSession, "SessionEndTime");
             return sessionEnd == "-"
                 ? "[yellow]In use[/]"
                 : "[green]Available[/]";
-        }
-
-        var signIn = signInStatus is null ? null : GetOptionalField(signInStatus, "SignInStatus");
-        if (!string.IsNullOrWhiteSpace(signIn))
-        {
-            return signIn.Contains("notsignedin", StringComparison.OrdinalIgnoreCase)
-                ? "[green]Available[/]"
-                : signIn.Contains("signedin", StringComparison.OrdinalIgnoreCase)
-                    ? "[yellow]In use[/]"
-                    : "[grey]Unknown[/]";
         }
 
         return "[grey]Unknown[/]";
