@@ -1042,17 +1042,21 @@ internal sealed partial class W365CliApp
     }
 
     /// <summary>
-    /// <summary>
     /// Normalizes "in use" into "inUse"/"available"/"unavailable"/null across both data sources this
     /// app has for it. Prefers RealTimeSignInStatus (getRealTimeRemoteConnectionStatus, bulk-fetched
-    /// once per Cloud PC when Browse Cloud PCs loads/refreshes -- confirmed accurate for Enterprise,
-    /// Flex Dedicated, and Flex Shared alike) over ConnectivityResult (the bulk cloudPCs list's own
-    /// field, confirmed unreliable/always-null on a live tenant test). "Unavailable" is Graph's own
-    /// real value here -- confirmed directly against a live tenant report dump -- but it means two
-    /// different things depending on whether the Cloud PC actually exists: for a genuinely
-    /// provisioned Cloud PC, a failed/incomplete real-time check still means it CAN be connected to
-    /// (just not signed in right now), i.e. Available; only for notProvisioned Cloud PCs (no VM
-    /// exists at all yet) does "Unavailable" mean truly unusable.
+    /// once per Cloud PC when Browse Cloud PCs loads/refreshes) over ConnectivityResult (the bulk
+    /// cloudPCs list's own field, confirmed unreliable/always-null on a live tenant test).
+    /// "Unavailable" is ambiguous and must NOT be assumed to mean Available: Graph can report it
+    /// genuinely, but GetSignInStatusRowAsync also stamps the exact same value on its own when the
+    /// bulk real-time call errors or still comes back empty after retrying -- confirmed on a live
+    /// tenant to happen specifically for Flex Cloud PCs under this screen's concurrent bulk fetch,
+    /// even while the device is genuinely signed in and in use (a single sequential call, like the
+    /// one the Cloud PC details screen makes, succeeds and correctly reports signedIn for the same
+    /// device at the same moment). A prior version of this guessed "Available" for any provisioned
+    /// Cloud PC, which was actively wrong in that case; only notProvisioned (no VM exists yet) gets
+    /// a confident "unavailable" here now. Everything else ambiguous falls through to
+    /// ConnectivityResult (and from there to "-"/unknown) rather than asserting a sign-in state we
+    /// don't actually have.
     /// </summary>
     internal static string? GetNormalizedInUseStatus(CloudPcSummary pc)
     {
@@ -1069,11 +1073,10 @@ internal sealed partial class W365CliApp
                 return "inUse";
             }
 
-            if (signIn.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+            if (signIn.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(pc.Status, "notProvisioned", StringComparison.OrdinalIgnoreCase))
             {
-                return string.Equals(pc.Status, "notProvisioned", StringComparison.OrdinalIgnoreCase)
-                    ? "unavailable"
-                    : "available";
+                return "unavailable";
             }
         }
 

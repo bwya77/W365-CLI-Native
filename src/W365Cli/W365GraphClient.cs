@@ -952,34 +952,56 @@ internal sealed class W365GraphClient
         return rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
+    /// <summary>
+    /// Retries a couple of times on an empty report (not just on outright HTTP failure) before
+    /// giving up -- confirmed on a live tenant that Flex Cloud PCs can transiently return zero rows
+    /// from this endpoint when queried as part of a 5-way concurrent bulk fetch (Browse Cloud PCs'
+    /// list refresh) even though the device is genuinely signed in and in use at that moment; a
+    /// single sequential retry a few hundred ms later (same shape as the one-off call the Cloud PC
+    /// details screen already makes successfully) reliably gets a real row back. Enterprise/Flex
+    /// Dedicated Cloud PCs haven't shown this, but the retry is harmless for them either way.
+    /// </summary>
     public async Task<GraphTableRow> GetSignInStatusRowAsync(CloudPcSummary cloudPc)
     {
-        try
+        const int maxAttempts = 3;
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var cloudPcId = cloudPc.Id.Replace("'", "''", StringComparison.Ordinal);
-            var report = await GetAsync<JsonElement>(
-                $"deviceManagement/virtualEndpoint/reports/getRealTimeRemoteConnectionStatus(cloudPcId='{cloudPcId}')");
-            var reportRows = ParseReportRows(report, "ManagedDeviceName", "CloudPcId", "SignInStatus", "LastActiveTime");
-            var row = reportRows.FirstOrDefault();
-            if (row is not null)
+            try
             {
-                var fields = new Dictionary<string, string>(row.Fields, StringComparer.OrdinalIgnoreCase)
+                var cloudPcId = cloudPc.Id.Replace("'", "''", StringComparison.Ordinal);
+                var report = await GetAsync<JsonElement>(
+                    $"deviceManagement/virtualEndpoint/reports/getRealTimeRemoteConnectionStatus(cloudPcId='{cloudPcId}')");
+                var reportRows = ParseReportRows(report, "ManagedDeviceName", "CloudPcId", "SignInStatus", "LastActiveTime");
+                var row = reportRows.FirstOrDefault();
+                if (row is not null)
                 {
-                    ["Cloud PC"] = cloudPc.Name,
-                    ["Cloud PC ID"] = cloudPc.Id,
-                    ["User"] = cloudPc.UserPrincipalName ?? "-",
-                    ["Service plan"] = cloudPc.ServicePlanName ?? "-",
-                    ["Provisioning type"] = cloudPc.ProvisioningType ?? "-"
-                };
-                return ToTableRow(fields, "SignInStatus", "DaysSinceLastSignIn", "LastActiveTime");
+                    var fields = new Dictionary<string, string>(row.Fields, StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["Cloud PC"] = cloudPc.Name,
+                        ["Cloud PC ID"] = cloudPc.Id,
+                        ["User"] = cloudPc.UserPrincipalName ?? "-",
+                        ["Service plan"] = cloudPc.ServicePlanName ?? "-",
+                        ["Provisioning type"] = cloudPc.ProvisioningType ?? "-"
+                    };
+                    return ToTableRow(fields, "SignInStatus", "DaysSinceLastSignIn", "LastActiveTime");
+                }
+
+                lastError = null;
+            }
+            catch (HttpRequestException ex)
+            {
+                lastError = ex;
             }
 
-            return CreateUnavailableSignInRow(cloudPc, "Real-time status returned no rows");
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(300 * attempt);
+            }
         }
-        catch (HttpRequestException ex)
-        {
-            return CreateUnavailableSignInRow(cloudPc, ex.Message);
-        }
+
+        return CreateUnavailableSignInRow(cloudPc, lastError?.Message ?? "Real-time status returned no rows");
     }
 
     public async Task<IReadOnlyList<GraphTableRow>> GetConnectivityHistoryAsync(CloudPcSummary cloudPc)

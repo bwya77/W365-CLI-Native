@@ -143,10 +143,16 @@ public class CloudPcTests
     }
 
     [Fact]
-    public void GetNormalizedInUseStatus_UnavailableButProvisioned_ReturnsAvailable()
+    public void GetNormalizedInUseStatus_UnavailableButProvisioned_FallsBackToConnectivityResult()
     {
+        // "Unavailable" is ambiguous for a provisioned Cloud PC -- it's also what this app stamps on
+        // its own real-time-status fetch when that call errors or comes back empty (confirmed live
+        // for Flex Cloud PCs under Browse Cloud PCs' concurrent bulk fetch, even while genuinely
+        // signed in) -- so it must NOT be asserted as "available" here; it should fall through to
+        // ConnectivityResult (and ultimately null/"-") instead of lying about a sign-in state we
+        // don't actually have.
         var pc = MakePc("Alpha", status: "provisioned", realTimeSignInStatus: "Unavailable");
-        Assert.Equal("available", W365CliApp.GetNormalizedInUseStatus(pc));
+        Assert.Null(W365CliApp.GetNormalizedInUseStatus(pc));
     }
 
     [Fact]
