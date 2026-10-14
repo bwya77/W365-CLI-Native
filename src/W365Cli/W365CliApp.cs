@@ -324,6 +324,9 @@ internal sealed partial class W365CliApp
             case "Inaccessible Cloud PC Report":
                 await ShowInaccessibleCloudPcReportAsync();
                 return false;
+            case "Detected Apps Inventory":
+                await ShowDetectedAppsInventoryAsync();
+                return false;
             case "Performance Trend Report":
                 await ShowPerformanceTrendReportAsync();
                 return false;
@@ -446,6 +449,7 @@ internal sealed partial class W365CliApp
                 new("Reports", "Connectivity history", "Select a Cloud PC and inspect connection events"),
                 new("Reports", "Connection Count Trend Report", "Daily connection counts trended and totaled by Cloud PC status or policy"),
                 new("Reports", "Daily Connection Quality Report", "Daily usage hours and round-trip time per Cloud PC"),
+                new("Reports", "Detected Apps Inventory", "Intune-detected apps tenant-wide, and which devices have each one installed"),
                 new("Reports", "Disk space", "All Cloud PC disk space usage"),
                 new("Reports", "Flex License Daily Usage Report", "Daily Windows 365 Flex license usage and claims"),
                 new("Reports", "Flex License Hourly Usage Report", "View Windows 365 Flex license usage by hour"),

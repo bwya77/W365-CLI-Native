@@ -1261,6 +1261,7 @@ internal sealed partial class W365CliApp
             "Connection history",
             "Disk space",
             "Snapshots",
+            "Applications",
             "Resize"
         ]);
 
@@ -1936,6 +1937,9 @@ internal sealed partial class W365CliApp
             case "Connection history":
                 await ShowConnectionHistoryReportAsync(cloudPc);
                 break;
+            case "Applications":
+                await ShowCloudPcApplicationsAsync(cloudPc);
+                break;
             case "View status details":
                 await ShowCloudPcStatusDetailAsync(cloudPc);
                 break;
@@ -2185,6 +2189,28 @@ internal sealed partial class W365CliApp
             FormatConnectionHistoryReportRow,
             loadMoreAsync: async (skip, top) => await _session.Graph.GetConnectionHistoryReportAsync(cloudPc, top, skip),
             pageBatchSize: pageSize);
+    }
+
+    /// <summary>
+    /// Intune-detected apps installed on this Cloud PC's managed device -- reuses the same
+    /// table renderer and Enter-to-drill-down behavior as the Reports > Detected Apps Inventory
+    /// screen (ShowDetectedAppDevicesAsync), so pressing Enter on an app here shows every device
+    /// it's on, Cloud PCs included, with the same "jump to Cloud PC details" resolution.
+    /// </summary>
+    private async Task ShowCloudPcApplicationsAsync(CloudPcSummary cloudPc)
+    {
+        if (string.IsNullOrWhiteSpace(cloudPc.ManagedDeviceId))
+        {
+            TimedMessage("[yellow]This Cloud PC does not include a managed device ID.[/]");
+            return;
+        }
+
+        await ShowGraphRowsAsync(
+            $"Applications on {cloudPc.Name}",
+            async () => await _session.Graph.GetManagedDeviceDetectedAppsAsync(cloudPc.ManagedDeviceId),
+            GetCloudPcApplicationsHeader,
+            FormatCloudPcApplicationRow,
+            ShowDetectedAppDevicesAsync);
     }
 
     private async Task ShowResizeAsync(CloudPcSummary cloudPc)

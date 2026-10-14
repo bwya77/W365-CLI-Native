@@ -78,6 +78,63 @@ internal sealed class W365GraphClient
             .ToArray();
     }
 
+    /// <summary>
+    /// Tenant-wide Intune-detected apps inventory (deviceManagement/detectedApps), independent from
+    /// GetCloudAppsAsync's Windows 365 "Cloud Apps" publishing feature -- this is the raw app
+    /// discovery/installed-software report used to answer "what apps exist and on how many
+    /// devices", not RemoteApp publishing state.
+    /// </summary>
+    public async Task<IReadOnlyList<GraphTableRow>> GetDetectedAppsAsync()
+    {
+        var rows = await GetJsonRowsAsync(
+            "deviceManagement/detectedApps?$orderBy=displayName",
+            "publisher", "platform", "version", "deviceCount");
+        return rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    /// <summary>
+    /// Devices a given detected app (by id, from GetDetectedAppsAsync) is installed on. The
+    /// managedDevices sub-collection returns deviceName rather than displayName, so copy it into a
+    /// synthetic displayName field after flattening -- otherwise ToTableRow's title lookup falls
+    /// through to the device's raw GUID id, since "deviceName" isn't one of its recognized title
+    /// candidates.
+    /// </summary>
+    public async Task<IReadOnlyList<GraphTableRow>> GetDetectedAppDevicesAsync(string appId)
+    {
+        var items = await GetPagedAsync<JsonElement>(
+            $"deviceManagement/detectedApps('{Uri.EscapeDataString(appId)}')/managedDevices?$top=100&$orderby=deviceName asc");
+
+        return items
+            .Where(item => item.ValueKind == JsonValueKind.Object)
+            .Select(item =>
+            {
+                var fields = FlattenJsonObject(item);
+                if (fields.TryGetValue("deviceName", out var deviceName) && !string.IsNullOrWhiteSpace(deviceName))
+                {
+                    fields["displayName"] = deviceName;
+                }
+                return ToTableRow(fields, "operatingSystem", "osVersion", "userPrincipalName", "emailAddress", "complianceState");
+            })
+            .OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Detected apps installed on a single managed device -- the reverse direction of
+    /// GetDetectedAppDevicesAsync, used by the Cloud PC details screen's "Applications" action so
+    /// a Cloud PC's software inventory can be inspected without leaving its details view. Same
+    /// GraphTableRow shape as GetDetectedAppsAsync (id, displayName, publisher, platform, version,
+    /// deviceCount), so the existing Detected Apps table renderer (GetDetectedAppsHeader /
+    /// FormatDetectedAppRow) can be reused as-is.
+    /// </summary>
+    public async Task<IReadOnlyList<GraphTableRow>> GetManagedDeviceDetectedAppsAsync(string managedDeviceId)
+    {
+        var rows = await GetJsonRowsAsync(
+            $"deviceManagement/managedDevices('{Uri.EscapeDataString(managedDeviceId)}')/detectedApps?$orderBy=displayName",
+            "publisher", "platform", "version", "deviceCount");
+        return rows.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     public async Task<OrganizationSummary?> GetOrganizationAsync()
     {
         var items = await GetPagedAsync<OrganizationSummary>(

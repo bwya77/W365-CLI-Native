@@ -161,6 +161,7 @@ internal sealed partial class W365CliApp
                     "Connectivity history",
                     "Connection Count Trend Report",
                     "Daily Connection Quality Report",
+                    "Detected Apps Inventory",
                     "Disk space",
                     "Export Markdown Snapshot",
                     "Flex License Daily Usage Report",
@@ -239,6 +240,9 @@ internal sealed partial class W365CliApp
                     break;
                 case "Inaccessible Cloud PC Report":
                     await ShowInaccessibleCloudPcReportAsync();
+                    break;
+                case "Detected Apps Inventory":
+                    await ShowDetectedAppsInventoryAsync();
                     break;
                 case "Last Sign-In Report":
                     await ShowLastSignInReportAsync();
