@@ -144,6 +144,44 @@ internal sealed partial class W365CliApp
         await ShowCloudPcDetailsAsync(cloudPc, "Remote action history");
     }
 
+    /// <summary>
+    /// Single source of truth for every report reachable from the Reports menu -- both
+    /// ShowReportsAsync's flat PromptChoice list (below) and GetMainMenuChoices()'s "Reports" tree
+    /// node (used by the sidebar/dashboard navigation and the Ctrl+K command palette) build from
+    /// this same array, so a report can never be added to one and silently missed from the other
+    /// again. This is exactly the bug class that let Export Markdown Snapshot, Last Sign-In Report,
+    /// and Client Connection Type Report go missing from the sidebar tree (though still reachable
+    /// via the plain Reports menu) across several releases before being caught -- ExecuteMainMenuChoiceAsync's
+    /// switch on Title still needs its own case per report (adding a report here alone is not
+    /// sufficient to wire up execution), but at minimum the report will always be *visible* and
+    /// *searchable* everywhere a report should be.
+    /// </summary>
+    internal static readonly (string Title, string Description)[] ReportMenuItems =
+    [
+        ("Client Connection Type Report", "Windows App vs. web browser connections, and protocol, tenant-wide"),
+        ("Cloud PC Usage Category Report", "Cloud PCs grouped by user and service plan"),
+        ("Connectivity history", "Select a Cloud PC and inspect connection events"),
+        ("Connection Count Trend Report", "Daily connection counts trended and totaled by Cloud PC status or policy"),
+        ("Daily Connection Quality Report", "Daily usage hours and round-trip time per Cloud PC"),
+        ("Detected Apps Inventory", "Intune-detected apps tenant-wide, and which devices have each one installed"),
+        ("Disk space", "All Cloud PC disk space usage"),
+        ("Export Markdown Snapshot", "Export Cloud PCs, policies, and licensing to a Markdown file"),
+        ("Flex License Daily Usage Report", "Daily Windows 365 Flex license usage and claims"),
+        ("Flex License Hourly Usage Report", "View Windows 365 Flex license usage by hour"),
+        ("Flex License Real-Time Usage Report", "Real-time Flex license claims by allotment"),
+        ("Flex User Connections Report", "Real-time Flex user connection state and license usage"),
+        ("Inaccessible Cloud PC Report", "Cloud PCs that are currently unreachable"),
+        ("Last Sign-In Report", "Every Cloud PC's last sign-in time and days since last sign-in"),
+        ("Launch details", "Open Cloud PC launch details"),
+        ("Performance Trend Report", "Slow round-trip time and low UDP connection trends"),
+        ("Regional Connection Quality Report", "Weekly Cloud PC counts by gateway region"),
+        ("Sign-In Activity Summary Report", "Aggregated sign-in activity and days since last sign-in"),
+        ("Sign-in status", "Open current Cloud PC sign-in status"),
+        ("Session Activity Report", "Sessions over time, transport, client OS, and region breakdowns"),
+        ("User Experience Sync Report", "Storage usage across all shared policies with user experience sync"),
+        ("User Troubleshoot Report", "Look up a user's Cloud PCs by UPN")
+    ];
+
     private async Task ShowReportsAsync()
     {
         if (!await EnsureConnectedAsync())
@@ -156,31 +194,7 @@ internal sealed partial class W365CliApp
             var choice = PromptChoice(
                 () => { },
                 "[#58a6ff]Reports[/]",
-                [
-                    "Client Connection Type Report",
-                    "Cloud PC Usage Category Report",
-                    "Connectivity history",
-                    "Connection Count Trend Report",
-                    "Daily Connection Quality Report",
-                    "Detected Apps Inventory",
-                    "Disk space",
-                    "Export Markdown Snapshot",
-                    "Flex License Daily Usage Report",
-                    "Flex License Hourly Usage Report",
-                    "Flex License Real-Time Usage Report",
-                    "Flex User Connections Report",
-                    "Inaccessible Cloud PC Report",
-                    "Last Sign-In Report",
-                    "Launch details",
-                    "Performance Trend Report",
-                    "Regional Connection Quality Report",
-                    "Sign-In Activity Summary Report",
-                    "Sign-in status",
-                    "Session Activity Report",
-                    "User Experience Sync Report",
-                    "User Troubleshoot Report",
-                    "Back"
-                ],
+                [.. ReportMenuItems.Select(item => item.Title), "Back"],
                 "Back");
 
             switch (choice)

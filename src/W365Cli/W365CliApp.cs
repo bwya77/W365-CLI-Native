@@ -321,8 +321,17 @@ internal sealed partial class W365CliApp
             case "Cloud PC Usage Category Report":
                 await ShowCloudPcUsageCategoryReportAsync();
                 return false;
+            case "Client Connection Type Report":
+                await ShowClientConnectionTypeReportAsync();
+                return false;
             case "Inaccessible Cloud PC Report":
                 await ShowInaccessibleCloudPcReportAsync();
+                return false;
+            case "Last Sign-In Report":
+                await ShowLastSignInReportAsync();
+                return false;
+            case "Export Markdown Snapshot":
+                await ExportMarkdownSnapshotAsync();
                 return false;
             case "Detected Apps Inventory":
                 await ShowDetectedAppsInventoryAsync();
@@ -421,7 +430,7 @@ internal sealed partial class W365CliApp
         return false;
     }
 
-    private IReadOnlyList<MenuChoice> GetMainMenuChoices()
+    internal IReadOnlyList<MenuChoice> GetMainMenuChoices()
     {
         var connectionDescription = _session.IsConnected
             ? "Switch tenants, add, or remove connections"
@@ -444,27 +453,7 @@ internal sealed partial class W365CliApp
                 new("Provisioning", "User experience sync overview", "Storage usage across all shared policies with user experience sync")
             ]),
             new("Reports", "Reports", "Usage, connectivity, launch details, report streams",
-            [
-                new("Reports", "Cloud PC Usage Category Report", "Cloud PCs grouped by user and service plan"),
-                new("Reports", "Connectivity history", "Select a Cloud PC and inspect connection events"),
-                new("Reports", "Connection Count Trend Report", "Daily connection counts trended and totaled by Cloud PC status or policy"),
-                new("Reports", "Daily Connection Quality Report", "Daily usage hours and round-trip time per Cloud PC"),
-                new("Reports", "Detected Apps Inventory", "Intune-detected apps tenant-wide, and which devices have each one installed"),
-                new("Reports", "Disk space", "All Cloud PC disk space usage"),
-                new("Reports", "Flex License Daily Usage Report", "Daily Windows 365 Flex license usage and claims"),
-                new("Reports", "Flex License Hourly Usage Report", "View Windows 365 Flex license usage by hour"),
-                new("Reports", "Flex License Real-Time Usage Report", "Real-time Flex license claims by allotment"),
-                new("Reports", "Flex User Connections Report", "Real-time Flex user connection state and license usage"),
-                new("Reports", "Inaccessible Cloud PC Report", "Cloud PCs that are currently unreachable"),
-                new("Reports", "Launch details", "Open Cloud PC launch details"),
-                new("Reports", "Performance Trend Report", "Slow round-trip time and low UDP connection trends"),
-                new("Reports", "Regional Connection Quality Report", "Weekly Cloud PC counts by gateway region"),
-                new("Reports", "Sign-In Activity Summary Report", "Aggregated sign-in activity and days since last sign-in"),
-                new("Reports", "Sign-in status", "Open current Cloud PC sign-in status"),
-                new("Reports", "Session Activity Report", "Sessions over time, transport, client OS, and region breakdowns"),
-                new("Reports", "User Experience Sync Report", "Storage usage across all shared policies with user experience sync"),
-                new("Reports", "User Troubleshoot Report", "Look up a user's Cloud PCs by UPN")
-            ]),
+                [.. ReportMenuItems.Select(item => new MenuChoice("Reports", item.Title, item.Description))]),
             new("Licensing", "Licensing", "Capacity, availability, Flex, and Reserve utilization"),
             new("CloudApps", "Cloud Apps", "Browse, publish, and unpublish Cloud Apps"),
             new("Export", "Export", "Export Cloud PCs, policies, and licensing to a Markdown file"),
@@ -2180,7 +2169,7 @@ internal sealed partial class W365CliApp
 
     private sealed record TableChoice<T>(string Label, T? Item, bool IsBack);
 
-    private sealed record MenuChoice(string Key, string Title, string Description, IReadOnlyList<MenuChoice>? Children = null);
+    internal sealed record MenuChoice(string Key, string Title, string Description, IReadOnlyList<MenuChoice>? Children = null);
 
     private sealed record Tip(string Command, string Text);
 
