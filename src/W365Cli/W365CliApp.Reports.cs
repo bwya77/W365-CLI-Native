@@ -157,6 +157,7 @@ internal sealed partial class W365CliApp
                 () => { },
                 "[#58a6ff]Reports[/]",
                 [
+                    "Client Connection Type Report",
                     "Cloud PC Usage Category Report",
                     "Connectivity history",
                     "Connection Count Trend Report",
@@ -184,6 +185,9 @@ internal sealed partial class W365CliApp
 
             switch (choice)
             {
+                case "Client Connection Type Report":
+                    await ShowClientConnectionTypeReportAsync();
+                    break;
                 case "Sign-in status":
                     await ShowGraphRowsAsync(
                         "Windows 365 Cloud PC sign-in status",
@@ -375,6 +379,206 @@ internal sealed partial class W365CliApp
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Fit(ex.Message, Math.Max(40, Console.WindowWidth - 4)))}[/]");
         WaitForBack();
         return true;
+    }
+
+    /// <summary>
+    /// Classifies a Windows 365 session's ClientFriendlyName (e.g. "Windows App (MSRDC, Store)",
+    /// "Windows App (Web AME)") into whether the user connected through the native Windows App or
+    /// through a browser -- confirmed via captured browser network traffic against a live tenant
+    /// that ClientFriendlyName containing "Web" is the reliable signal for a browser-based
+    /// connection (TransportType, e.g. "Multipath" vs. "TCP Websocket", correlates but is a side
+    /// effect of the connection type, not authoritative on its own, so it's shown as a separate
+    /// "Protocol" column/field rather than used for this classification).
+    /// </summary>
+    internal static string ClassifyClientConnectionKind(string? clientFriendlyName)
+    {
+        if (string.IsNullOrWhiteSpace(clientFriendlyName) || clientFriendlyName == "-")
+        {
+            return "Unknown";
+        }
+
+        return clientFriendlyName.Contains("Web", StringComparison.OrdinalIgnoreCase)
+            ? "Web browser"
+            : "Windows App";
+    }
+
+    /// <summary>
+    /// "PlatformName" is only meaningful for web-browser sessions (e.g. "Edge") -- for native
+    /// Windows App sessions it's confirmed to come back as the literal placeholder "<>", which
+    /// isn't useful to show, so it's dropped for anything ClassifyClientConnectionKind doesn't
+    /// call "Web browser".
+    /// </summary>
+    internal static string FormatClientConnectionPlain(string? clientFriendlyName, string? platformName)
+    {
+        if (string.IsNullOrWhiteSpace(clientFriendlyName) || clientFriendlyName == "-")
+        {
+            return "-";
+        }
+
+        if (ClassifyClientConnectionKind(clientFriendlyName) != "Web browser")
+        {
+            return clientFriendlyName;
+        }
+
+        var browser = string.IsNullOrWhiteSpace(platformName) || platformName is "-" or "<>"
+            ? null
+            : platformName;
+        return browser is null ? clientFriendlyName : $"{clientFriendlyName} ({browser})";
+    }
+
+    /// <summary>
+    /// Green for the native Windows App (what the org wants), yellow for a web-browser session
+    /// (what the org wants to reduce/flag), grey for unknown -- deliberately not red, since a web
+    /// session is a thing to notice and nudge away from, not an error state.
+    /// </summary>
+    internal static string FormatClientConnectionMarkup(string? clientFriendlyName, string? platformName)
+    {
+        var text = Markup.Escape(FormatClientConnectionPlain(clientFriendlyName, platformName));
+        return ClassifyClientConnectionKind(clientFriendlyName) switch
+        {
+            "Windows App" => $"[green]{text}[/]",
+            "Web browser" => $"[yellow]{text}[/]",
+            _ => $"[grey]{text}[/]"
+        };
+    }
+
+    /// <summary>
+    /// Tenant-wide: how users are connecting to their Cloud PCs (native Windows App vs. web
+    /// browser portal) and which protocol each session used. Built on the exact same tenant-wide
+    /// troubleshootConnectionConfigurationOfViewDataTableV1Report data as Session Activity Report
+    /// (GetSessionActivityReportAsync, which already includes ClientFriendlyName in its select) --
+    /// no separate endpoint or per-Cloud-PC/per-user filtering required; this just surfaces a
+    /// different cut of the same sessions as a scrollable, filterable, exportable row list instead
+    /// of a static dashboard, since the ask here is "which specific users are using the web portal
+    /// instead of the Windows App", not just an aggregate chart.
+    /// </summary>
+    private async Task ShowClientConnectionTypeReportAsync()
+    {
+        if (!await EnsureConnectedAsync())
+        {
+            return;
+        }
+
+        while (true)
+        {
+            var timeRange = PromptChoice(
+                () => AnsiConsole.MarkupLine("[grey]Tenant-wide: every session in the window, with how each user connected (Windows App vs. web browser) and which protocol was used.[/]"),
+                "[#58a6ff]Client Connection Type Report -- time range[/]",
+                [.. SessionActivityTimeRanges, "Back"],
+                "Back");
+
+            if (timeRange == "Back")
+            {
+                return;
+            }
+
+            await ShowGraphRowsAsync(
+                $"Client Connection Type Report ({timeRange})",
+                async () => (await _session.Graph.GetSessionActivityReportAsync(timeRange)).Rows,
+                GetClientConnectionTypeReportHeader,
+                FormatClientConnectionTypeReportRow,
+                OpenCloudPcFromReportRowAsync,
+                RenderClientConnectionTypeSummary,
+                csvColumns: ClientConnectionTypeReportCsvColumns);
+        }
+    }
+
+    private static string GetClientConnectionTypeReportHeader()
+    {
+        var widths = GetClientConnectionTypeReportWidths();
+        return Row("Time", widths.Time, "User", widths.User, "Cloud PC", widths.CloudPc, "Connected via", widths.Connection, "Protocol", widths.Protocol);
+    }
+
+    private static string FormatClientConnectionTypeReportRow(GraphTableRow row)
+    {
+        var widths = GetClientConnectionTypeReportWidths();
+        var clientFriendlyName = GetOptionalField(row, "ClientFriendlyName");
+        var platformName = GetOptionalField(row, "PlatformName");
+        return Row(
+            GetField(row, "SessionBeginTime"), widths.Time,
+            GetField(row, "UPN"), widths.User,
+            GetField(row, "ManagedDeviceName"), widths.CloudPc,
+            FormatClientConnectionPlain(clientFriendlyName, platformName), widths.Connection,
+            GetField(row, "TransportType"), widths.Protocol);
+    }
+
+    internal static (int Time, int User, int CloudPc, int Connection, int Protocol) GetClientConnectionTypeReportWidths()
+    {
+        var available = Math.Max(76, Console.WindowWidth - 4);
+        const int time = 20;
+        const int protocol = 16;
+        const int gaps = 4;
+        var remaining = Math.Max(48, available - time - protocol - gaps);
+        var connection = Math.Max(26, (int)(remaining * 0.38));
+        var user = Math.Max(20, (int)((remaining - connection) * 0.55));
+        var cloudPc = Math.Max(16, remaining - connection - user);
+        return (time, user, cloudPc, connection, protocol);
+    }
+
+    private static readonly (string Header, string Field)[] ClientConnectionTypeReportCsvColumns =
+    [
+        ("Time", "SessionBeginTime"),
+        ("User", "UPN"),
+        ("Cloud PC", "ManagedDeviceName"),
+        ("Connected via", "ClientFriendlyName"),
+        ("Browser", "PlatformName"),
+        ("Protocol", "TransportType"),
+        ("Client OS", "ClientOS"),
+        ("Client version", "ClientVersion")
+    ];
+
+    /// <summary>
+    /// Leads with the exact thing this report exists to answer -- what fraction of sessions in the
+    /// window used the web browser portal instead of the Windows App, and (when any did) exactly
+    /// which users, so they can be followed up with directly instead of having to scroll the whole
+    /// row list looking for them.
+    /// </summary>
+    private static void RenderClientConnectionTypeSummary(IReadOnlyList<GraphTableRow> rows)
+    {
+        var sessions = rows
+            .Select(row => new
+            {
+                Kind = ClassifyClientConnectionKind(GetOptionalField(row, "ClientFriendlyName")),
+                PlatformName = GetOptionalField(row, "PlatformName"),
+                Upn = GetField(row, "UPN")
+            })
+            .ToArray();
+
+        var total = sessions.Length;
+        var windowsAppCount = sessions.Count(s => s.Kind == "Windows App");
+        var webCount = sessions.Count(s => s.Kind == "Web browser");
+        var unknownCount = total - windowsAppCount - webCount;
+        var webPercent = total == 0 ? 0 : Math.Round(webCount * 100.0 / total, 1);
+        var webColor = webCount > 0 ? "yellow" : "green";
+
+        AnsiConsole.MarkupLine($"[bold]Sessions analyzed[/] {total} | [green]Windows App: {windowsAppCount}[/] | [{webColor}]Web browser: {webCount} ({webPercent:0.#}%)[/] | [grey]Unknown: {unknownCount}[/]");
+
+        if (webCount > 0)
+        {
+            var webUsers = sessions
+                .Where(s => s.Kind == "Web browser")
+                .Select(s => s.Upn)
+                .Where(upn => !string.IsNullOrWhiteSpace(upn) && upn != "-")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(upn => upn, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var shown = string.Join(", ", webUsers.Take(10));
+            var more = webUsers.Length > 10 ? $" (+{webUsers.Length - 10} more)" : string.Empty;
+            AnsiConsole.MarkupLine($"[yellow]Users who connected via web browser:[/] {Markup.Escape(shown + more)}");
+        }
+
+        AnsiConsole.WriteLine();
+        RenderBreakdown("Connection type mix", sessions.Select(s => s.Kind).ToArray());
+
+        var browsers = sessions
+            .Where(s => s.Kind == "Web browser")
+            .Select(s => string.IsNullOrWhiteSpace(s.PlatformName) || s.PlatformName is "-" or "<>" ? "Unknown browser" : s.PlatformName!)
+            .ToArray();
+        if (browsers.Length > 0)
+        {
+            AnsiConsole.WriteLine();
+            RenderBreakdown("Browser mix (web sessions only)", browsers);
+        }
     }
 
     /// <summary>

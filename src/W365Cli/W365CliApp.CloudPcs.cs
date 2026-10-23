@@ -1649,6 +1649,8 @@ internal sealed partial class W365CliApp
                 new Markup(PropertyInline("Sign-in status", GetSignInStatusValue(signInStatus, "SignInStatus"), "grey")),
                 new Markup(PropertyInline("Last sign-in", GetSignInStatusValue(signInStatus, "LastActiveTime"), "grey")),
                 new Markup(PropertyInline("Days since sign-in", GetSignInStatusValue(signInStatus, "DaysSinceLastSignIn"), "grey")),
+                new Markup(PropertyInline("Connected via", GetConnectedViaMarkup(latestSession), valueIsMarkup: true)),
+                new Markup(PropertyInline("Protocol", GetLatestSessionField(latestSession, "TransportType"), "grey")),
                 new Markup(PropertyInline("Provisioned", cloudPc.ProvisionedDateTime?.ToLocalTime().ToString("g") ?? "-", "grey")),
                 new Markup(PropertyInline("Type", cloudPc.ProvisioningType ?? "-", "grey")),
                 new Markup(PropertyInline("User", cloudPc.EffectiveUserPrincipalName ?? "-", "grey")),
@@ -1746,7 +1748,38 @@ internal sealed partial class W365CliApp
     }
 
     /// <summary>
-    /// Deliberately removed: this screen's "In use" line now calls the same
+    /// "Connected via" on the Cloud PC details screen -- reuses the exact same
+    /// ClassifyClientConnectionKind/FormatClientConnectionMarkup logic as the tenant-wide Client
+    /// Connection Type Report (Reports menu) so a single Cloud PC's screen and the aggregate report
+    /// can never disagree about what "Windows App" vs. "Web browser" means. Sourced from
+    /// latestSession (GetConnectionHistoryReportAsync(cloudPc, 1)) -- the same most-recent-session
+    /// data already loaded for this screen's "Sign-in status"/"Last sign-in" lines -- so this is the
+    /// client used for the most recent session, not necessarily an active one right now. Shows "-"
+    /// if that 7-day-windowed report has no rows for this Cloud PC (see LoadLatestSessionForCloudPcAsync).
+    /// </summary>
+    private static string GetConnectedViaMarkup(GraphTableRow? latestSession)
+    {
+        if (latestSession is null)
+        {
+            return "[grey]-[/]";
+        }
+
+        var clientFriendlyName = GetOptionalField(latestSession, "ClientFriendlyName");
+        var platformName = GetOptionalField(latestSession, "PlatformName");
+        return FormatClientConnectionMarkup(clientFriendlyName, platformName);
+    }
+
+    private static string GetLatestSessionField(GraphTableRow? row, string field)
+    {
+        if (row is null)
+        {
+            return "-";
+        }
+
+        return GetOptionalField(row, field) ?? "-";
+    }
+
+    /// <summary>    /// Deliberately removed: this screen's "In use" line now calls the same
     /// GetNormalizedInUseStatus/FormatInUseMarkup used by the Browse Cloud PCs list (see those for
     /// the authoritative logic, including the Flex Shared/Frontline special case), so the two
     /// screens can never disagree again. The prior separate implementation here had its own

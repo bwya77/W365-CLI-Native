@@ -1108,7 +1108,7 @@ internal sealed class W365GraphClient
                 "ActivityId", "SessionBeginTime", "SessionEndTime", "UPN", "UserId", "ManagedDeviceName",
                 "CloudPCId", "CloudPCHostGeography", "Region", "SessionHostAgentVersion", "SessionHostSxSStackVersion",
                 "GatewayRegion", "PolicyName", "UserSettingName", "ServicePlanType", "ServicePlanName", "AADJoinType",
-                "ImageName", "TransportType", "PlatformName", "ClientOS", "ClientType", "ClientVersion",
+                "ImageName", "TransportType", "PlatformName", "ClientOS", "ClientType", "ClientFriendlyName", "ClientVersion",
                 "SessionHostIPAddress", "CallerIPAddress", "CloudPCEndpointCountry", "CloudPCEndpointState",
                 "CloudPCEndpointCity", "TeamsAppV2Version", "MMRVersion"
             },
@@ -1231,7 +1231,7 @@ internal sealed class W365GraphClient
                     "ActivityId", "SessionBeginTime", "SessionEndTime", "UPN", "UserId", "ManagedDeviceName",
                     "CloudPCId", "CloudPCHostGeography", "Region", "SessionHostAgentVersion", "SessionHostSxSStackVersion",
                     "GatewayRegion", "PolicyName", "UserSettingName", "ServicePlanType", "ServicePlanName", "AADJoinType",
-                    "ImageName", "TransportType", "PlatformName", "ClientOS", "ClientType", "ClientVersion",
+                    "ImageName", "TransportType", "PlatformName", "ClientOS", "ClientType", "ClientFriendlyName", "ClientVersion",
                     "SessionHostIPAddress", "CallerIPAddress", "CloudPCEndpointCountry", "CloudPCEndpointState",
                     "CloudPCEndpointCity", "TeamsAppV2Version", "MMRVersion"
                 },
