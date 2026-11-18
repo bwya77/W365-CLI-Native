@@ -282,6 +282,16 @@ internal sealed class W365GraphClient
         await PostJsonAsync($"deviceManagement/managedDevices('{Uri.EscapeDataString(managedDeviceId)}')/rotateLocalAdminPassword", new { });
     }
 
+    /// <summary>
+    /// Kicks off a Cloud PC health check (the same action as the Intune portal's "Troubleshoot"
+    /// button) to verify the Cloud PC and its session host are healthy. Returns no data -- Graph
+    /// replies 204 No Content, so callers only learn whether the request succeeded.
+    /// </summary>
+    public async Task TroubleshootCloudPcAsync(string cloudPcId)
+    {
+        await PostJsonAsync($"deviceManagement/virtualEndpoint/cloudPCs/{Uri.EscapeDataString(cloudPcId)}/troubleshoot", new { });
+    }
+
     public async Task ReprovisionCloudPcAsync(string cloudPcId, string? osVersion = null, string? userAccountType = null)
     {
         var body = new Dictionary<string, object?>();

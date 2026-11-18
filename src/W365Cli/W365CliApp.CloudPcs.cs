@@ -1274,6 +1274,7 @@ internal sealed partial class W365CliApp
             "Rename",
             "Sync",
             "Restart",
+            "Troubleshoot",
             "Reset local admin password"
         ]);
 
@@ -1939,6 +1940,9 @@ internal sealed partial class W365CliApp
                 break;
             case "Restart":
                 await ConfirmAndRunAsync("Restart", cloudPc.Name, async () => await _session.Graph.RestartCloudPcAsync(cloudPc.Id));
+                break;
+            case "Troubleshoot":
+                await ConfirmAndRunAsync("Troubleshoot", cloudPc.Name, async () => await _session.Graph.TroubleshootCloudPcAsync(cloudPc.Id));
                 break;
             case "Sync":
                 if (string.IsNullOrWhiteSpace(cloudPc.ManagedDeviceId))
