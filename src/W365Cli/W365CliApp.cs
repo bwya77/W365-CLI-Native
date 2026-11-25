@@ -53,6 +53,7 @@ internal sealed partial class W365CliApp
             Console.Title = "W365 CLI";
         }
 
+        FrameWriter.Install();
         Console.CursorVisible = false;
         Console.CancelKeyPress += (_, _) => Console.CursorVisible = true;
         await AnsiConsole.Status()
@@ -2412,6 +2413,7 @@ internal sealed partial class W365CliApp
             var buffer = new StringBuilder();
             while (true)
             {
+                FrameWriter.PresentPending();
                 var key = Console.ReadKey(intercept: true);
                 // LeftArrow doubles as "back" everywhere else in this app (Esc/Left arrow/B/Q),
                 // but this is a real text-entry field where LeftArrow would normally mean "move
@@ -2454,9 +2456,48 @@ internal sealed partial class W365CliApp
         }
     }
 
+    /// <summary>
+    /// Waits for a key but also notices terminal resizes: on a size change it returns a no-op
+    /// key so every screen's loop simply redraws itself at the new size.
+    /// </summary>
+    private static ConsoleKeyInfo ReadKeyOrResize(bool intercept)
+    {
+        var size = default((int Width, int Height));
+        FrameWriter.SyncSize(ref size);
+        try
+        {
+            while (true)
+            {
+                var polled = ConsoleMouse.Poll();
+                if (polled is -1 or 1)
+                {
+                    return new ConsoleKeyInfo('\0', polled == -1 ? ConsoleKey.UpArrow : ConsoleKey.DownArrow, false, false, false);
+                }
+
+                if (polled == 0 || (polled is null && !ConsoleMouse.IsEnabled && Console.KeyAvailable))
+                {
+                    break;
+                }
+
+                Thread.Sleep(25);
+                if (FrameWriter.SyncSize(ref size))
+                {
+                    return new ConsoleKeyInfo('\0', ConsoleKey.NoName, false, false, false);
+                }
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Input is redirected — KeyAvailable isn't supported; fall through to a blocking read.
+        }
+
+        return Console.ReadKey(intercept);
+    }
+
     private static ConsoleKeyInfo ReadNavigationKey(bool intercept, bool handleTopNavTab = true)
     {
-        var key = Console.ReadKey(intercept);
+        FrameWriter.PresentPending();
+        var key = ReadKeyOrResize(intercept);
         if (handleTopNavTab && key.Key == ConsoleKey.Tab)
         {
             throw new NavigateAboutException();
